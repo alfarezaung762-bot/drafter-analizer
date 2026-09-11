@@ -1,0 +1,9 @@
+# Dependencies
+node_modules/
+.next/
+.venv/
+__pycache__/
+
+# Environment
+.env
+.env.local
