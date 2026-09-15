@@ -7,3 +7,10 @@ __pycache__/
 # Environment
 .env
 .env.local
+
+# MS Office temporary lock files
+~$*
+
+# OS files
+Thumbs.db
+.DS_Store
