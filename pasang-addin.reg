@@ -1,0 +1,17 @@
+Windows Registry Editor Version 5.00
+
+; Mendaftarkan Drafter Analiser sebagai add-in sideload untuk Word desktop.
+;
+; Lokasi kunci ini sesuai dokumentasi resmi Microsoft:
+;   HKEY_CURRENT_USER\Software\Microsoft\Office\16.0\WEF\Developer
+; Nama value = ID add-in (diambil dari <Id> di manifest.xml)
+; Isi value  = path lengkap ke manifest.xml
+;
+; CATATAN: berkas ini memuat path absolut khusus komputer ini.
+; Jangan di-commit ke git — hapus saja sesudah add-in terpasang.
+;
+; Untuk MEMBATALKAN pendaftaran: buka regedit, masuk ke kunci di atas,
+; hapus value bernama b4578b7e-97c2-48df-b4a8-6f6a7d1885f4
+
+[HKEY_CURRENT_USER\Software\Microsoft\Office\16.0\WEF\Developer]
+"b4578b7e-97c2-48df-b4a8-6f6a7d1885f4"="C:\\Users\\ajat.DESKTOP-978IFU6\\Desktop\\project kemenkeun\\drafter-analiser\\manifest.xml"

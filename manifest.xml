@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:type="TaskPaneApp">
+
+  <Id>b4578b7e-97c2-48df-b4a8-6f6a7d1885f4</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>Kementerian Keuangan RI</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Drafter Analiser" />
+  <Description DefaultValue="Analisis format baku rancangan PMK/KMK terhadap KMK 527/KMK.01/2022" />
+
+  <Hosts>
+    <Host Name="Document" />
+  </Hosts>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3000/taskpane" />
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+</OfficeApp>
