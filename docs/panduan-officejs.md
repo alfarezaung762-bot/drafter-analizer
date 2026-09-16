@@ -38,3 +38,25 @@ Urut prioritas:
   Fitur di atas versi minimum dicek runtime dengan
   `Office.context.requirements.isSetSupported("WordApi", "1.8")`.
 - Task pane adalah halaman web biasa yang dimuat Word lewat URL di manifest.
+- `isSetSupported("WordApi", "1.7"/"1.8")` bisa melaporkan `true` padahal
+  `insertAnnotations`/Critique tetap melempar `RichApi.Error: NotImplemented`
+  saat dipanggil — dikonfirmasi empiris di Word 2024 LTSC (lisensi beli-putus,
+  tanpa langganan Microsoft 365 aktif). Requirement set yang didukung ≠ fitur
+  yang diizinkan; Annotation mensyaratkan langganan, bukan cuma versi Word.
+
+## Pewarnaan sorotan per tingkat keparahan (keputusan 16 Sep 2026)
+
+`font.highlightColor` dipakai sebagai mekanisme UTAMA untuk mewarnai temuan
+sesuai tingkat keparahan (tinggi/sedang/rendah) di `tandaiSemuaTemuan()`
+(`frontend/src/lib/office.ts`) — bukan cuma cadangan darurat seperti rancangan
+awal. Alasannya: Critique (mekanisme yang semula direncanakan untuk ini)
+butuh langganan Microsoft 365 yang tidak tersedia di lingkungan penelaah, dan
+`Range.highlight()` — pengganti amannya yang tidak mengubah dokumen — sama
+sekali tidak punya parameter warna, jadi tidak pernah bisa membedakan tingkat
+keparahan dalam kondisi apa pun.
+
+Ini **satu-satunya bagian alat yang mengubah format dokumen** (bukan isi
+teksnya). Warna asli tiap paragraf dicatat sebelum ditimpa dan dipulihkan
+otomatis saat temuan diterima atau ditolak — lihat `hapusSorotan()` di berkas
+yang sama. Rasional produknya dan hubungannya dengan prinsip "tidak mengubah
+naskah" ada di `fase1 drafter.md` bagian 6.

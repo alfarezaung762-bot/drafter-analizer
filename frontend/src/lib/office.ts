@@ -133,18 +133,27 @@ function penandaKomentar(temuan: Temuan): string {
 }
 
 /**
- * Menandai SELURUH temuan sekaligus: sorotan sementara + komentar, dalam satu
- * kali Word.run.
+ * Menandai SELURUH temuan sekaligus: komentar + sorotan warna per tingkat
+ * keparahan, dalam satu kali Word.run.
  *
  * Dipanggil tepat sesudah analisis, sehingga penelaah langsung melihat bagian
- * bermasalah terblok warna dan bisa mengklik teksnya untuk membaca komentar
- * lewat panel komentar bawaan Word — tanpa menekan Terima lebih dulu.
+ * bermasalah berwarna merah/kuning/toska sesuai tingkat keparahan dan bisa
+ * mengklik teksnya untuk membaca komentar lewat panel komentar bawaan Word —
+ * tanpa menekan Terima lebih dulu.
+ *
+ * Pewarnaannya memakai font.highlightColor (WordApi 1.1) — SATU-SATUNYA
+ * bagian alat yang sungguh mengubah format dokumen, dipakai di sini atas
+ * persetujuan eksplisit penelaah (16 Sep 2026) supaya tingkat keparahan
+ * langsung kelihatan di naskah, bukan cuma di panel. Warna aslinya dicatat
+ * sebelum ditimpa dan DIPULIHKAN saat temuan diterima atau ditolak (lihat
+ * hapusSorotan) — begitu itu terjadi, yang tersisa di dokumen murni komentar
+ * biasa, tanpa sisa pewarnaan. Teks naskahnya sendiri tidak pernah disentuh.
  *
  * Komentar yang ditolak dihapus kembali lewat hapusKomentarTemuan().
  *
- * Sengaja dibuat satu Word.run dengan tiga sinkronisasi, bukan satu panggilan
- * per temuan: pada dokumen dengan puluhan temuan, cara lama berarti puluhan
- * perjalanan bolak-balik ke Word.
+ * Sengaja dibuat satu Word.run dengan beberapa sinkronisasi terjadwal, bukan
+ * satu panggilan per temuan: pada dokumen dengan puluhan temuan, cara lama
+ * berarti puluhan perjalanan bolak-balik ke Word.
  */
 export async function tandaiSemuaTemuan(
   daftar: Temuan[]
@@ -153,7 +162,7 @@ export async function tandaiSemuaTemuan(
     return { disorot: 0, dikomentari: 0, memakaiWarnaFont: false };
   }
 
-  const bisaSorot = checkApiSupport("1.8");
+  const bisaSorot = checkApiSupport("1.1"); // font.highlightColor, dasar
   const bisaKomentar = checkApiSupport("1.4");
   if (!bisaSorot && !bisaKomentar) {
     return { disorot: 0, dikomentari: 0, memakaiWarnaFont: false };
@@ -195,39 +204,31 @@ export async function tandaiSemuaTemuan(
         await context.sync();
       }
 
-      // Tahap 2: sorotan — SESUDAH komentar tersinkronisasi, bukan bersamaan.
-      // Menyisipkan komentar menyentuh rentang yang sama, dan bila keduanya
-      // diantre dalam satu sinkronisasi, sorotannya bisa tertimpa. Dipisah juga
-      // supaya kegagalan sorotan tidak ikut membatalkan komentar yang sudah
-      // berhasil — keduanya sekarang berdiri sendiri.
-      let disorot = 0;
-      if (bisaSorot) {
-        try {
-          sasaran.forEach((range) => {
-            if (!range) return;
-            range.highlight();
-            disorot++;
-          });
-          await context.sync();
-        } catch (err) {
-          console.warn(
-            "Range.highlight() ditolak Word; komentarnya tetap ada. Penyebab:",
-            err
-          );
-          disorot = 0;
-        }
-      }
-
-      // Tahap 3 — cadangan: kalau sorotan sementara tidak menghasilkan apa pun,
-      // pakai font.highlightColor (WordApi 1.1, jalan di semua lisensi).
+      // Tahap 2: sorotan berwarna per tingkat keparahan — SESUDAH komentar
+      // tersinkronisasi, bukan bersamaan, supaya keduanya tidak berebut
+      // rentang yang sama dalam satu sinkronisasi.
       //
-      // Ini SATU-SATUNYA bagian alat yang mengubah format dokumen. Dipakai
-      // hanya bila tidak ada jalan lain, warnanya dikembalikan saat temuan
-      // diterima atau ditolak, dan warna asli paragraf dicatat dulu supaya
-      // sorotan milik penyusun tidak ikut terhapus. Teks naskahnya sendiri
-      // tetap tidak tersentuh.
+      // KEPUTUSAN SADAR, bukan cadangan darurat: font.highlightColor dipakai
+      // langsung sebagai mekanisme utama. Sebelumnya bagian ini hanya jalan
+      // kalau Range.highlight() (WordApi 1.8) gagal total — tapi
+      // Range.highlight() TIDAK punya parameter warna sama sekali, jadi tidak
+      // pernah bisa membedakan tinggi/sedang/rendah, di lingkungan mana pun.
+      // Mengandalkannya sebagai jalan utama berarti sorotan selalu satu warna
+      // pucat bawaan Word, itu sebabnya diganti.
+      //
+      // Ini SATU-SATUNYA bagian alat yang mengubah format dokumen. Warna
+      // asli tiap paragraf dicatat dulu (warnaAsliTemuan) dan DIPULIHKAN saat
+      // temuan diterima atau ditolak (lihat hapusSorotan) — begitu itu
+      // terjadi, yang tersisa di dokumen murni komentar Word biasa, tanpa
+      // sisa pewarnaan apa pun. Teks naskahnya sendiri tidak pernah disentuh.
+      //
+      // Risiko yang tersisa, dan penelaah sudah diberi tahu: kalau dokumen
+      // disimpan lalu ditutup SEBELUM sebuah temuan diputuskan (Terima/
+      // Tolak), warnanya ikut tersimpan — warnaAsliTemuan cuma hidup di
+      // memori tab ini selama panel terbuka, bukan di dokumen atau server.
+      let disorot = 0;
       let memakaiWarnaFont = false;
-      if (disorot === 0 && sasaran.some((r) => r !== null)) {
+      if (bisaSorot && sasaran.some((r) => r !== null)) {
         try {
           const fonts = sasaran.map((r) => (r ? r.font : null));
           fonts.forEach((f) => f?.load("highlightColor"));
@@ -243,8 +244,9 @@ export async function tandaiSemuaTemuan(
           await context.sync();
           memakaiWarnaFont = true;
         } catch (err) {
-          console.warn("Pewarnaan cadangan juga gagal:", err);
+          console.warn("Gagal memasang warna sorotan:", err);
           disorot = 0;
+          memakaiWarnaFont = false;
         }
       }
 
@@ -345,7 +347,10 @@ export async function selectFindingLocation(temuan: Temuan): Promise<boolean> {
 }
 
 /**
- * Lapis 2: Menyisipkan komentar permanen Word (WordApi 1.4).
+ * Lapis 2: Menyisipkan komentar permanen Word (WordApi 1.4). TIDAK DIPANGGIL
+ * dari alur aktif saat ini — tandaiSemuaTemuan() menyisipkan komentar untuk
+ * seluruh temuan sendiri, lewat susunIsiKomentar(). Dipertahankan untuk jalur
+ * satu-temuan (mis. dipakai ulang manual dari luar alur analisis).
  *
  * Catatan penting: usulan_rumusan sengaja TIDAK disertakan dalam komentar
  * agar penelaah menyunting sendiri (sesuai dokumen kontrak & rancangan).
@@ -445,15 +450,18 @@ async function cariRangeTemuan(
 }
 
 /**
- * Lapis 1 pengganti: sorotan sementara (WordApi 1.8).
+ * Lapis 1 pengganti: sorotan sementara (WordApi 1.8). TIDAK DIPANGGIL dari
+ * alur aktif saat ini — task pane memakai tandaiSemuaTemuan(), yang sejak
+ * 16 Sep 2026 langsung memakai font.highlightColor per tingkat keparahan
+ * (lihat komentar di sana). Dipertahankan untuk kemungkinan dipakai lagi
+ * kalau suatu saat WordApi 1.8 + langganan Microsoft 365 tersedia dan
+ * sorotan tanpa sentuh format sama sekali jadi pilihan lagi.
  *
- * Range.highlight() menyoroti teks TANPA mengubah isi dokumen — berbeda dari
- * font.highlightColor yang permanen dan karenanya dilarang di proyek ini.
- * Dipakai saat Critique tidak tersedia.
- *
- * Batas yang perlu diketahui: highlight() tidak menerima parameter warna, jadi
- * seluruh temuan tersorot dengan satu gaya yang sama. Pewarnaan menurut tingkat
- * keparahan hanya mungkin lewat Critique.colorScheme, yang butuh langganan.
+ * Range.highlight() menyoroti teks TANPA mengubah isi dokumen, tapi tidak
+ * menerima parameter warna sama sekali — seluruh temuan tersorot dengan satu
+ * gaya yang sama, tidak bisa dibedakan menurut tingkat keparahan. Pewarnaan
+ * per tingkat hanya mungkin lewat Critique.colorScheme (butuh langganan) atau
+ * font.highlightColor (mengubah format, lihat tandaiSemuaTemuan).
  */
 export async function sorotSementara(temuan: Temuan): Promise<boolean> {
   if (!isOfficeAvailable() || !checkApiSupport("1.8")) {
@@ -511,8 +519,10 @@ export async function hapusSorotan(temuan: Temuan): Promise<boolean> {
 }
 
 /**
- * Menandai temuan di dokumen: coba Critique dulu, jatuh ke sorotan sementara.
- * Inilah yang dipanggil task pane, bukan salah satunya langsung.
+ * Menandai SATU temuan: coba Critique dulu, jatuh ke sorotan sementara.
+ * TIDAK DIPANGGIL dari alur aktif saat ini — task pane memakai
+ * tandaiSemuaTemuan() untuk seluruh temuan sekaligus. Dipertahankan untuk
+ * kemungkinan pemakaian ulang, sama seperti sorotSementara().
  */
 export async function tandaiTemuan(temuan: Temuan): Promise<"critique" | "sorotan" | "gagal"> {
   if (critiqueTersedia()) {

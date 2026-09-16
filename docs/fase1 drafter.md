@@ -10,6 +10,10 @@
 >
 > Disusun dari `project-brief.md`, `pemahaman-jdih-law-analyzer.md`, berkas env
 > Law Analyzer/JDIH, dan kerangka repo `drafter-analiser` yang sudah ada.
+>
+> **Revisi 16 Sep 2026:** bagian 3, 4, 6, 7, 8, 11, 13, 14, dan 15 diubah
+> menyusul keterangan mentor tentang cara penelaah bekerja sebenarnya. Ringkasan
+> perubahannya ada di bagian 6.
 
 ---
 
@@ -25,9 +29,9 @@ terhadap kaidah penyusunan peraturan.
 ## 2. Apa yang dibangun & tujuan
 
 Penelaah membuka rancangan PMK/KMK di Word, menekan satu tombol, dan bagian yang
-perlu ditinjau langsung tersorot di dokumen itu juga — lengkap dengan catatan,
-rujukan butir KMK 527 yang mengaturnya, dan usulan rumusan — **tanpa satu
-karakter pun berubah**.
+perlu ditinjau langsung tertandai di dokumen itu juga — lengkap dengan catatan,
+rujukan butir KMK 527 yang mengaturnya, dan usulan rumusan. Tidak ada perubahan
+yang jadi permanen sebelum penelaah menyetujuinya satu per satu.
 
 Fase 1 menangani kesalahan format baku: hal-hal yang jawabannya pasti (kapital
 atau tidak, ada atau tidak ada, sama atau berbeda). Justru jenis kesalahan
@@ -53,10 +57,11 @@ Bukan masyarakat umum.
 | Cek kelengkapan Menimbang / Mengingat / Menetapkan | Struktur wajib yang kadang terlewat | Cari pola baku tiap bagian |
 | Cek frasa baku butir Menimbang terakhir ("perlu menetapkan … tentang …") | Sering hilang atau salah bentuk (brief bagian 8.6) | Pencocokan pola pada butir terakhir |
 | Cek ejaan | Salah tulis lolos saat buru-buru | Kamus/regex bahasa Indonesia, bukan AI — cakupannya lihat bagian 13 langkah 4 |
-| Tandai bagian bermasalah dengan warna sesuai keparahan | Hasil analisis Law Analyzer terputus dari dokumen kerja — harus disalin manual (brief bagian 2) | Office.js, lihat tiga lapis di bagian 6 |
+| **Usulan rumusan dipasang sebagai perubahan terlacak** | Penelaah tidak perlu mengetik ulang, tapi tetap memutuskan | Track Changes bawaan Word — lihat bagian 6 |
+| **Temuan tanpa pengganti ditandai komentar + warna keparahan** | Sebagian kesalahan tidak punya "jawaban benar" tunggal | `insertComment` + `font.highlightColor` — bagian 6 |
 | Tiap temuan menyertakan rujukan butir KMK 527 + kutipannya | Penelaah perlu tahu dasar hukumnya, bukan cuma "ini salah" | Tabel rujukan tetap di kode — bagian 10 |
-| Terima / tolak tiap temuan | Prinsip: alat memberi rekomendasi, tidak pernah memutuskan | Tombol di popup / task pane |
-| Ubah temuan yang diterima jadi komentar permanen | Supaya bisa dibawa ke rapat pembahasan | `Range.insertComment` |
+| Setujui / tolak tiap usulan | Prinsip: alat memberi rekomendasi, tidak pernah memutuskan | Tombol Accept/Reject bawaan Word di ribbon Review |
+| Versi bersih tanpa coretan | Penelaah sekarang memelihara dua berkas manual | Accept All + Save As — satu berkas, dua wujud |
 | Pilih cakupan: seluruh dokumen atau bagian terpilih | Fleksibilitas penelaah | `document.getSelection()` vs seluruh body |
 
 ---
@@ -66,7 +71,11 @@ Bukan masyarakat umum.
 Jangan dikerjakan agen coding. Diambil dari brief bagian "Di Luar Lingkup" dan
 pembagian fase:
 
-- Mengubah teks dokumen secara otomatis
+- **Menerapkan usulan tanpa persetujuan penelaah.** Usulan boleh dipasang
+  sebagai *perubahan terlacak* (tracked change) yang masih mentah dan bisa
+  dibatalkan satu klik — tapi tidak boleh ada kode yang memanggil `accept()`
+  sendiri, tidak boleh "terapkan semua", dan tidak boleh menimpa teks saat
+  pelacakan perubahan sedang mati. Lihat bagian 6 dan bagian 14 butir 5.
 - Validasi gambar logo Garuda
 - Deteksi "kelaziman" bahasa
 - Versi untuk masyarakat umum
@@ -74,6 +83,10 @@ pembagian fase:
 - Pencarian pembanding ke OpenSearch — itu Fase 3
 - Pemeriksaan yang butuh penalaran AI (definisi konsisten, potensi multitafsir)
   — itu Fase 2
+- **Usulan penggantian untuk temuan Fase 2/3.** Fase 1 dulu yang membuktikan
+  skema penandaan ini enak dibaca penelaah. Usulan hasil penalaran jauh lebih
+  berisiko disisipkan otomatis ke naskah, dan keputusannya ditunda sampai Fase 1
+  terbukti.
 - Urutan "Mengingat" sesuai hierarki, dan istilah Pasal 1 dipakai konsisten —
   dua item lain di brief bagian 8.6, tapi keduanya juga masuk daftar
   "kemungkinan pemeriksaan" di brief bagian 8.11 yang eksplisit ditandai belum
@@ -95,7 +108,7 @@ Word (dokumen terbuka)
                                                                  ▼
                                                          daftar Temuan (JSON)
                                                                  ▼
-                                         Task pane menyisipkan sorotan via Office.js
+                              Task pane memasang perubahan terlacak / komentar
 ```
 
 | Lapisan | Teknologi | Catatan |
@@ -118,10 +131,13 @@ Dua hal yang harus dibangun, tidak ada hubungannya dengan env:
    URL di manifest. Wajib HTTPS (saat pengembangan boleh sertifikat self-signed
    yang dipercaya lokal).
 
-Untuk pengembangan, sideload dari folder lokal sudah cukup (Word > Options >
-Trust Center > Trusted Add-in Catalogs), tidak perlu izin admin apa pun. Jalur
-pemasangan untuk banyak penelaah sekaligus adalah keputusan organisasi di luar
-cakupan agen coding.
+Untuk pengembangan, sideload dari folder lokal sudah cukup. Di Word 2024 LTSC
+tombol "Upload My Add-in" tidak selalu ada; jalur yang terbukti jalan adalah
+mendaftarkan manifest lewat registry
+`HKEY_CURRENT_USER\Software\Microsoft\Office\16.0\WEF\Developer` — nama value =
+`<Id>` add-in, isinya path lengkap ke `manifest.xml`. Jalur pemasangan untuk
+banyak penelaah sekaligus adalah keputusan organisasi di luar cakupan agen
+coding.
 
 ### Agar tidak tersandera urusan manifest
 
@@ -137,33 +153,119 @@ dokumen, bukan panel terpisah".
 
 ---
 
-## 6. Tiga lapis tampilan temuan
+## 6. Cara temuan ditampilkan di dokumen
 
-Komentar Word **tidak bisa punya tombol kustom**. Yang muat di dalam komentar
-hanya teks, format dasar, dan satu hyperlink. Jadi tampilannya dibagi tiga,
-masing-masing sesuai kemampuan nyatanya:
+### 6.1 Kenapa rancangan lama diganti
 
-| Lapis | Isi | Mekanisme | Sifat |
+Rancangan sebelumnya membagi tampilan jadi tiga lapis: sorotan + popup
+(`Critique` + `popupOptions`), komentar permanen, dan task pane. Dua hal
+membatalkannya, keduanya berdasar bukti, bukan dugaan:
+
+**Critique mati di Word penelaah.** Diuji langsung di Word 2024 LTSC
+(16 Sep 2026): `isSetSupported("WordApi", "1.7")` melaporkan `true`, tapi
+`insertAnnotations` melempar `RichApi.Error: NotImplemented`. Sebabnya
+Annotation mensyaratkan langganan Microsoft 365 aktif — lisensi beli-putus
+(LTSC) tidak punya itu, berapa pun tinggi requirement set yang dilaporkan
+didukung. Ikut mati bersamanya: popup berisi tombol terima/tolak, dan pewarnaan
+per tingkat keparahan lewat `Critique.colorScheme`.
+
+**Cara penelaah bekerja ternyata berbeda dari asumsi awal.** Keterangan mentor
+beserta contoh RPMK/RKMK sungguhan (lihat `project-brief.md` bagian 8.13):
+penelaah menghasilkan **dua dokumen** — versi bercoretan (teks salah dicoret,
+usulan ditulis dengan warna berbeda) dan versi bersih yang sudah dimodifikasi.
+Keputusan akhirnya diambil di rapat bersama unit pemrakarsa. Artinya penelaah
+memang rutin menyunting salinan rancangan; yang tidak boleh adalah **memutuskan
+sepihak**, bukan **menyentuh berkas**.
+
+Konsekuensinya: aturan lama "alat tidak boleh mengubah satu karakter pun" itu
+terlalu lebar. Yang dijaga bukan keutuhan karakter, melainkan bahwa **tidak ada
+perubahan yang jadi permanen tanpa satu klik persetujuan penelaah.**
+
+### 6.2 Dua kelas temuan
+
+Tiap temuan ditandai menurut apakah ia punya rumusan pengganti yang pasti.
+Pembagian ini bukan buatan — ia jatuh sendiri dari aturan yang sudah ada:
+
+| Kelas (`jenis_tanda`) | Dipakai bila | Cara ditandai | Cara diputuskan |
 |---|---|---|---|
-| Sorotan + popup | Penjelasan singkat, rujukan butir, usulan rumusan, tombol terima/tolak | `Critique` + `popupOptions` (WordApi 1.8) | Sementara, dokumen tidak berubah |
-| Komentar permanen | Penjelasan + "KMK 527 Lamp. II butir 3.a" + hyperlink ke PDF JDIH | `Range.insertComment` (1.4) + `contentRange.hyperlink` (1.4) | Tersimpan di berkas |
-| Task pane | Kutipan utuh butirnya, sepanjang apa pun | Halaman web biasa | Interaksi bebas |
+| `penggantian` | Ada satu rumusan pengganti yang deterministik untuk rentang teks yang ditandai | Perubahan terlacak (Track Changes): teks lama tampil tercoret, usulan tampil di sebelahnya | Accept / Reject bawaan Word (ribbon **Review**) |
+| `catatan` | Tidak ada pengganti tunggal — entah yang salah justru ketiadaan sesuatu, atau alat tidak tahu mana dari dua kemungkinan yang benar | `insertComment` + `font.highlightColor` sesuai tingkat keparahan | Tombol Terima/Tolak di task pane |
 
-Kutipan panjang taruh di task pane, jangan dijejalkan ke komentar — komentar
-berisi tiga paragraf menyusahkan saat dokumen dibawa ke harmonisasi.
-`usulan_rumusan` sengaja tidak ikut ke komentar permanen — biar penelaah
-menyunting sendiri, bukan menyalin dari tool.
+Pemetaan aturan Fase 1 — diverifikasi terhadap `rules/format_baku.py` yang
+sekarang, bukan diperkirakan:
 
-**Dua risiko yang wajib dicek runtime**, bukan diasumsikan:
+| Aturan | Kelas | Alasan |
+|---|---|---|
+| F1-001 judul kapital | `penggantian` | Penggantinya `teks.upper()`, mekanis dan pasti |
+| F1-002 judul pembuka ≠ judul Menetapkan | `catatan` | Alat tidak tahu mana dari dua judul itu yang benar |
+| F1-003 kelengkapan struktur | `catatan` | Yang salah adalah ketiadaan bagian; tidak ada teks untuk diganti |
+| F1-004 frasa baku butir Menimbang terakhir | `catatan` | Bunyi bakunya perlu menyebut huruf mana saja yang dirujuk; untuk sekarang cukup jadi catatan. Naik ke `penggantian` hanya setelah aturannya terbukti menyusun butir penuh dengan benar |
+| F1-005 ejaan | `penggantian` | Substitusi kata, mis. `Undang-undang` → `Undang-Undang`, `Tentang` → `tentang` |
 
-- `insertAnnotations` (dasar dari Critique) **mensyaratkan langganan Microsoft
-  365** — tercatat di `docs/panduan-officejs.md`.
-- `popupOptions` butuh WordApi 1.8 yang tergolong baru.
+Pada `backend/tools/contoh/contoh-rancangan-uji.docx` pembagian ini menghasilkan
+3 temuan `penggantian` dan 2 temuan `catatan`.
 
-Cek dengan `Office.context.requirements.isSetSupported("WordApi", "1.8")`.
-Kalau tidak didukung, jatuh ke lapis komentar permanen + task pane. Karena itu
-lapis kedua dan ketiga tidak boleh cuma jadi pelengkap — keduanya harus bisa
-berdiri sendiri.
+### 6.3 Aturan penanganan Track Changes
+
+1. **Baca mode pelacakan lebih dahulu**, simpan nilainya, baru set
+   `context.document.changeTrackingMode = "TrackAll"`. Sesudah seluruh usulan
+   terpasang, **kembalikan ke nilai semula**. Menyalakan pelacakan diam-diam dan
+   membiarkannya menyala mengubah perilaku Word untuk semua ketikan penelaah
+   sesudahnya — itu kejutan yang tidak boleh dibuat alat.
+2. **Jangan pernah memanggil `accept()` atau `reject()` atas inisiatif kode.**
+   Keduanya hanya boleh jalan sebagai akibat langsung penelaah menekan tombol.
+3. **Jangan menyisipkan penggantian kalau mode pelacakan gagal dinyalakan.**
+   Tanpa pelacakan, penggantian = menimpa naskah diam-diam. Kalau
+   `changeTrackingMode` tidak bisa diset, temuan `penggantian` **turun jadi
+   `catatan`** — komentar dan sorotan warna, tanpa menyentuh teks.
+4. **Temuan `penggantian` tidak diberi sorotan warna.** Coretan revisinya sudah
+   jadi penanda visual; menambah warna di atasnya cuma bikin ramai.
+5. **Komentar tetap dipasang untuk kedua kelas** — komentar memuat *kenapa* +
+   rujukan butir KMK 527, perubahan terlacak memuat *apa* usulannya.
+
+### 6.4 Pembagian tugas antarmuka
+
+| Tempat | Isinya |
+|---|---|
+| Perubahan terlacak di naskah | Usulan rumusannya — apa yang diusulkan berubah |
+| Komentar Word | Alasan + rujukan butir KMK 527 + tautan PDF JDIH |
+| Ribbon **Review** bawaan Word | Accept / Reject / Next / Previous untuk temuan `penggantian` |
+| Task pane | Daftar ringkas: nomor temuan, tingkat keparahan, tombol Lompat ke Teks; tombol Terima/Tolak **hanya** untuk temuan `catatan` |
+
+Penjelasan panjang **tidak diulang** di task pane. Alasan temuan cukup ditulis
+sekali, di komentar. Duplikasi catatan yang sama di komentar dan di panel adalah
+keluhan utama terhadap versi sebelumnya — penelaah jadi membaca hal yang sama
+dua kali sambil menggeser dua jendela.
+
+Accept/Reject untuk temuan `penggantian` sengaja diserahkan ke ribbon Word,
+bukan dibuatkan tombol di panel. Alasannya bukan malas: mencocokkan kembali
+objek `TrackedChange` mana milik temuan mana butuh penanda identitas yang harus
+bertahan lintas sesi, sementara Word sudah melakukannya dengan benar sejak
+awal, lengkap dengan navigasi antar-perubahan. Kalau setelah dicoba penelaah
+ternyata tetap ingin tombolnya ada di panel, itu penambahan belakangan, bukan
+prasyarat.
+
+### 6.5 Batas yang sudah diketahui
+
+- **`TrackedChange.author` bersifat `readonly`** — sudah dicek di `index.d.ts`.
+  Usulan alat akan tercatat atas nama pengguna Word yang sedang membuka
+  dokumen, **bukan** "Drafter Analiser", dan warnanya tidak bisa dibedakan dari
+  suntingan penelaah sendiri. Jejak asal-usul tetap ada lewat komentar
+  pendampingnya yang berpenanda `[Drafter Analiser — …]`.
+- **Warna tidak bisa diatur per makna.** Word mewarnai revisi per penulis.
+  Kebiasaan penelaah memakai merah untuk salah dan hijau untuk usulan tidak
+  berlaku pada perubahan terlacak. Warna per tingkat keparahan tetap ada, tapi
+  hanya pada temuan `catatan`.
+- **"Accept All" menerima semua, termasuk revisi penelaah sendiri** yang
+  kebetulan ada di dokumen yang sama. Ini perlu disampaikan di panel, dan
+  penelaah sebaiknya menjalankan alat pada salinan kerja.
+- **Belum diuji runtime.** `changeTrackingMode` (WordApi 1.4) dan
+  `TrackedChange` beserta `accept()`/`reject()` (WordApi 1.6) sudah diverifikasi
+  ada di `index.d.ts`, dan Word penelaah mendukung sampai 1.9. Tapi pelajaran
+  dari Critique berlaku: **requirement set didukung ≠ fitur diizinkan.** Track
+  Changes adalah fitur inti Word yang tidak terkunci langganan, jadi peluangnya
+  jauh lebih besar — tetapi wajib dibuktikan lewat satu percobaan kecil sebelum
+  sisa pekerjaan dibangun di atasnya. Lihat bagian 13 langkah 5.
 
 ---
 
@@ -173,68 +275,81 @@ berdiri sendiri.
 drafter-analiser/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              ← sudah ada: FastAPI + CORS + /health
-│   │   ├── core/config.py       ← sudah ada: Settings
-│   │   ├── api/                 ← KOSONG, isi di sini
-│   │   ├── rules/               ← KOSONG, aturan Fase 1 di sini
-│   │   ├── models/              ← KOSONG, skema Temuan di sini
+│   │   ├── main.py              ← FastAPI + CORS + /health
+│   │   ├── core/config.py       ← Settings
+│   │   ├── api/analisis.py      ← endpoint POST /analisis/jalankan
+│   │   ├── rules/               ← aturan Fase 1 + tabel rujukan
+│   │   ├── models/temuan.py     ← skema Temuan (bagian 11)
 │   │   ├── services/            ← KOSONG (belum dipakai di Fase 1)
 │   │   ├── parser/              ← KOSONG (belum dipakai di Fase 1)
 │   │   ├── llm/                 ← KOSONG (tidak dipakai di Fase 1)
 │   │   └── retrieval/           ← KOSONG (tidak dipakai di Fase 1)
 │   ├── requirements.txt
-│   └── tests/
+│   ├── tests/
+│   └── tools/
+│       ├── cek_docx.py          ← alat diagnosa, BUKAN bagian produk
+│       └── contoh/
+│           └── contoh-rancangan-uji.docx
 ├── docs/
-│   └── kontrak-data.md          ← ISI dengan bagian 11 dokumen ini — lihat bagian 13
+│   ├── kontrak-data.md
+│   ├── panduan-officejs.md
+│   └── fase1 drafter.md         ← dokumen ini
 └── frontend/
-    └── src/app/
-        ├── page.tsx
-        ├── layout.tsx
-        └── taskpane/page.tsx    ← sudah ada, kerangka kosong
+    └── src/
+        ├── app/
+        │   ├── layout.tsx
+        │   └── taskpane/page.tsx
+        └── lib/
+            ├── office.ts        ← SEMUA panggilan Office.js
+            └── types.ts
 ```
+
+**Tidak ada folder baru** yang perlu dibuat untuk perubahan ini. Yang bertambah
+hanya isi `office.ts` dan satu field di `models/temuan.py`.
 
 ---
 
 ## 8. Penjelasan backend ↔ frontend
 
 ```
-backend/app/main.py
-  ===> daftarkan router: app.include_router(analisis.router)
-       FastAPI tidak memindai folder seperti Next.js — router yang tidak
-       didaftarkan di sini tidak akan pernah bisa diakses
-
-backend/app/api/analisis.py                      [BARU]
-  ===> endpoint POST /analisis/jalankan
-       terima daftar paragraf, panggil fungsi di rules/, kembalikan daftar
-       Temuan. Handler setipis mungkin: parse → panggil → kembalikan
-
-backend/app/rules/format_baku.py                 [BARU]
+backend/app/rules/format_baku.py
   ===> satu fungsi murni per pemeriksaan di bagian 3:
        cek_judul_konsisten(), cek_judul_kapital(),
        cek_kelengkapan_struktur(), cek_frasa_baku_menimbang(), cek_ejaan()
-       Tanpa objek Request/Response. Harus bisa dites tanpa server nyala
+
+       BARU: tiap fungsi wajib menetapkan jenis_tanda secara EKSPLISIT,
+       bukan disimpulkan dari ada-tidaknya usulan_rumusan. Alasannya:
+       suatu saat sebuah aturan bisa punya usulan_rumusan yang sifatnya
+       contoh bunyi, bukan pengganti harfiah — dan menebaknya dari
+       null-tidaknya field lain akan salah menandai naskah orang
 
        Catatan cek_frasa_baku_menimbang(): berlaku HANYA kalau Menimbang
        punya lebih dari satu butir (ada huruf a/b/c). Kalau cuma satu butir
-       tanpa huruf, lewati — itu bentuk yang sah menurut KMK 527 butir 19,
-       bukan kesalahan. Menandainya berarti salah tandai
+       tanpa huruf, lewati — itu bentuk yang sah menurut KMK 527 butir 19
 
-backend/app/rules/rujukan_kmk527.py              [BARU]
-  ===> tabel tetap: id aturan → butir KMK 527 + kutipannya (bagian 10)
-       Ini KODE, bukan isi database — supaya bisa diperiksa lewat review
+backend/app/models/temuan.py
+  ===> BARU: field jenis_tanda (enum "penggantian" | "catatan"), bagian 11
 
-backend/app/models/temuan.py                     [BARU]
-  ===> skema Pydantic bentuk Temuan (bagian 11) — kontrak final
+frontend/src/lib/office.ts
+  ===> kumpulkan SEMUA panggilan Office.js di satu berkas.
+       BARU, untuk perubahan terlacak:
+         siapkanPelacakanPerubahan()  -> baca mode lama, set "TrackAll",
+                                         kembalikan mode lama sebagai nilai
+         kembalikanModePelacakan(m)   -> pulihkan mode semula
+         usulkanPenggantian(temuan)   -> cari rentang, insertText("Replace")
+                                         DALAM keadaan pelacakan menyala
+       Fungsi lama yang tetap dipakai: readParagraphs, selectFindingLocation,
+       tandaiSemuaTemuan (kini bercabang menurut jenis_tanda),
+       hapusSorotan, hapusKomentarTemuan
+
+       Fungsi warisan yang TIDAK dipanggil alur aktif dan boleh dihapus
+       kalau sudah pasti tidak dipakai: sorotSementara, tandaiTemuan,
+       insertCritiqueAnnotation, insertPermanentComment, critiqueTersedia
 
 frontend/src/app/taskpane/page.tsx
-  ===> UI task pane: tombol Analisis, daftar temuan ringkas, detail kutipan
-       fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL}/analisis/jalankan`)
-       — pakai env yang sudah ada di frontend/.env.example, JANGAN hardcode
-       URL langsung di kode
-
-frontend/src/lib/office.ts                       [BARU]
-  ===> kumpulkan SEMUA panggilan Office.js di satu berkas:
-       baca paragraf, sisipkan critique, sisipkan comment, cek requirement set
+  ===> panel diringkas: nomor temuan, tingkat keparahan, Lompat ke Teks.
+       Terima/Tolak hanya untuk temuan berjenis "catatan".
+       Penjelasan panjang TIDAK ditampilkan lagi di panel — sudah di komentar
 ```
 
 ---
@@ -248,8 +363,9 @@ Ini keputusan sadar, bukan kelalaian:
 - Pemeriksaan Fase 1 selesai dalam hitungan detik — tidak ada proses latar
   belakang yang perlu dilanjutkan bila terputus.
 - Temuan hidup di memori task pane selama dokumen terbuka.
-- Temuan yang **diterima** disimpan sebagai komentar **di dalam berkas .docx itu
-  sendiri** — ikut ke mana pun dokumen dibawa, tanpa perlu server.
+- Keputusan penelaah tersimpan **di dalam berkas .docx itu sendiri** — sebagai
+  perubahan terlacak yang diterima/ditolak, dan sebagai komentar. Ikut ke mana
+  pun dokumen dibawa, tanpa perlu server.
 - Tabel rujukan KMK 527 ada di kode (bagian 10), bukan di database.
 
 Menambahkan database di Fase 1 berarti menambah satu komponen yang bisa gagal,
@@ -279,7 +395,6 @@ CREATE TABLE analisis (
 );
 
 -- satuan pemeriksaan = ayat/butir, BUKAN pasal (brief bagian 8.9)
--- inilah yang membuat proses terputus tidak kehilangan hasil
 CREATE TABLE satuan_periksa (
     id              UUID PRIMARY KEY,
     analisis_id     UUID NOT NULL REFERENCES analisis(id) ON DELETE CASCADE,
@@ -296,6 +411,7 @@ CREATE TABLE temuan (
     satuan_id         UUID REFERENCES satuan_periksa(id) ON DELETE CASCADE,
     aturan_id         TEXT NOT NULL,   -- mis. 'F1-001', kunci ke tabel rujukan di kode
     tingkat_keparahan TEXT NOT NULL,   -- 'tinggi' | 'sedang' | 'rendah'
+    jenis_tanda       TEXT NOT NULL,   -- 'penggantian' | 'catatan'
     catatan           TEXT NOT NULL,
     usulan_rumusan    TEXT,
     status            TEXT NOT NULL DEFAULT 'belum_ditinjau',
@@ -334,9 +450,7 @@ kode yang ditulis ulang.
 **ORM: SQLModel, bukan Prisma.** Prisma Client Python sudah tidak dipelihara
 (diarsipkan April 2025), bukan produk resmi Prisma, dan tetap butuh Node.js di
 baliknya meski namanya "untuk Python". SQLModel dibuat oleh pembuat FastAPI
-sendiri dan merupakan cara standar resmi menghubungkan FastAPI ke database —
-skema Temuan yang sudah jadi Pydantic model (bagian 11) bisa langsung dipakai
-sebagai definisi tabel, tidak perlu ditulis dua kali.
+sendiri dan merupakan cara standar resmi menghubungkan FastAPI ke database.
 
 ---
 
@@ -378,9 +492,12 @@ Pekerjaan manusia sekali di depan: baca KMK 527 Lampiran II **secara visual**,
 catat butir mana mengatur apa, ketik ulang kutipannya. Untuk 5–10 aturan Fase 1
 itu pekerjaan setengah hari, hasilnya aset permanen.
 
+**Status sekarang: seluruh entri masih placeholder `"..."`.** Selama itu,
+temuan wajib ditandai "rujukan belum diverifikasi" di antarmuka.
+
 ---
 
-## 11. Bentuk data Temuan — KONTRAK FINAL
+## 11. Bentuk data Temuan — KONTRAK
 
 ```json
 {
@@ -388,14 +505,15 @@ itu pekerjaan setengah hari, hasilnya aset permanen.
   "aturan_id": "F1-001",
   "fase": 1,
   "tingkat_keparahan": "tinggi",
+  "jenis_tanda": "penggantian",
   "lokasi": {
     "paragraf_index": 3,
     "offset_mulai": 0,
-    "panjang": 58,
-    "teks_asli": "Peraturan Menteri Keuangan tentang ..."
+    "panjang": 48,
+    "teks_asli": "Tata Cara Uji Coba Penelaahan Rancangan Peraturan"
   },
   "catatan": "Judul peraturan seharusnya ditulis kapital seluruhnya.",
-  "usulan_rumusan": "PERATURAN MENTERI KEUANGAN TENTANG ...",
+  "usulan_rumusan": "TATA CARA UJI COBA PENELAAHAN RANCANGAN PERATURAN",
   "rujukan": {
     "sumber": "KMK 527/KMK.01/2022 Lampiran II",
     "butir": "...",
@@ -406,19 +524,30 @@ itu pekerjaan setengah hari, hasilnya aset permanen.
 }
 ```
 
-`offset_mulai` dan `panjang` diperlukan untuk `Critique.start` / `.length` supaya
-sorotan presisi di dalam paragraf, bukan menyorot satu paragraf penuh.
+**`jenis_tanda`** — `"penggantian"` | `"catatan"`. Menentukan cara temuan
+dipasang di dokumen (bagian 6.2). Aturan yang menghasilkan temuan wajib
+menetapkannya eksplisit.
 
-**Langkah pertama sebelum kode lain ditulis:** salin skema ini jadi isi asli
-`docs/kontrak-data.md` di repo (sekarang masih kosong) — lihat bagian 13.
+Bila `jenis_tanda` = `"penggantian"`, maka `usulan_rumusan` **wajib terisi** dan
+harus berupa teks pengganti harfiah untuk `lokasi.teks_asli` — bukan contoh
+bunyi, bukan penjelasan. Ini kontrak yang mengikat: isi field inilah yang
+disisipkan ke naskah orang.
+
+Bila `jenis_tanda` = `"catatan"`, `usulan_rumusan` boleh `null` atau berisi
+contoh bunyi yang hanya ditampilkan, tidak pernah disisipkan.
+
+`offset_mulai` dan `panjang` tetap ada untuk menandai rentang presisi di dalam
+paragraf.
+
+Salin bentuk ini ke `docs/kontrak-data.md` setiap kali berubah — dua berkas itu
+harus selalu sama.
 
 ---
 
 ## 12. Environment variables
 
 **Nilai asli tidak boleh disalin ke repo, ke chat, atau ke agen coding.** Yang
-boleh diketahui agen coding hanya nama variabelnya. Isi sebenarnya diminta ke
-admin/mentor lewat jalur aman saat pemasangan.
+boleh diketahui agen coding hanya nama variabelnya.
 
 Fase 1 memakai satu env yang sudah ada di kerangka:
 
@@ -426,10 +555,10 @@ Fase 1 memakai satu env yang sudah ada di kerangka:
 |---|---|
 | `NEXT_PUBLIC_API_BASE_URL` | Alamat backend yang dipanggil task pane lewat `fetch`. Sudah ada di `frontend/.env.example` — pakai langsung, jangan hardcode URL di kode |
 
-Prefiks `NEXT_PUBLIC_` wajib untuk env yang dibaca kode yang jalan di browser —
-Next.js sengaja menyembunyikan env tanpa prefiks itu dari browser. Karena itu
-juga: **jangan pernah** beri prefiks ini ke variabel berisi kredensial, karena
-otomatis ikut ter-build ke kode yang bisa dibaca siapa pun lewat DevTools.
+Prefiks `NEXT_PUBLIC_` wajib untuk env yang dibaca kode yang jalan di browser.
+Karena itu juga: **jangan pernah** beri prefiks ini ke variabel berisi
+kredensial, karena otomatis ikut ter-build ke kode yang bisa dibaca siapa pun
+lewat DevTools.
 
 Tabel di bawah ini untuk Fase 2/3, disiapkan sejak awal supaya `core/config.py`
 tidak dirombak ulang:
@@ -451,43 +580,39 @@ Dua catatan:
   penamaan di env Law Analyzer (`AZURE_OPENAI_TASK_DEPLOYMENT_NAME`). Perlu
   diselaraskan saat Fase 2 dimulai, belum masalah sekarang.
 - `MINIO_*` tidak diperlukan. Tautan PDF sudah ikut terkirim dari OpenSearch
-  sebagai field `pdf_url`, jadi tidak perlu mengambil berkas langsung.
+  sebagai field `pdf_url`.
 
 ---
 
 ## 13. Urutan implementasi
 
-Jangan bangun semuanya sekaligus. Brief bagian 7 proyek ini sendiri menyarankan
-urutan bertahap — dan ini yang membuat build pertama kemungkinan besar berhasil
-tanpa berantakan di tengah jalan:
+Langkah 1–4 **sudah selesai** dan terbukti jalan di Word sungguhan. Langkah 5
+ke bawah adalah pekerjaan yang tersisa.
 
-1. **Salin skema Temuan (bagian 11) ke `docs/kontrak-data.md`.** Berkas itu di
-   repo masih kosong padahal dokumennya sendiri menyebut ini prasyarat sebelum
-   modul lain ditulis.
-2. **Satu alur utuh dengan SATU aturan paling sederhana dulu** — disarankan
-   `cek_judul_kapital()`. Dari baca paragraf di Word → kirim ke backend →
-   balik sebagai Temuan → tersorot di dokumen. Buktikan pipa-nya nyambung
-   ujung ke ujung sebelum menambah apa pun lagi.
-3. **Baru setelah langkah 2 terbukti jalan**, tambahkan 3 aturan struktur
-   sisanya satu per satu di `rules/format_baku.py`: `cek_judul_konsisten()`,
-   `cek_kelengkapan_struktur()`, `cek_frasa_baku_menimbang()`.
-4. **`cek_ejaan()` paling akhir, sesudah empat aturan di atas jalan.** Word
-   sendiri sudah punya pemeriksa ejaan bahasa Indonesia bawaan, jadi mengejar
-   typo biasa berarti menduplikasi yang sudah ada. Yang berguna di sini
-   kemungkinan besar ejaan baku penyusunan peraturan — misalnya
-   "Undang-Undang" wajib dua huruf u kapital (KMK 527 butir 33), atau kata
-   "tentang" tetap huruf kecil di dalam judul dasar hukum (butir 32).
-   Kerjakan bentuk paling sederhana dulu; jangan memasang kamus besar sebelum
-   cakupannya dipastikan ke penelaah.
-5. **Baru setelah semua aturan jalan**, bangun penuh tiga lapis tampilan di
-   bagian 6 (popup, komentar permanen, task pane) — jangan dikerjakan paralel
-   dengan langkah 2–4.
-6. **Terakhir**, lengkapi tabel rujukan KMK 527 (bagian 10) dengan kutipan
-   yang sudah dibaca visual, menyusul tiap aturan yang ditambahkan.
-
-Kalau agen coding mencoba membangun lima aturan sekaligus plus tiga lapis
-tampilan di awal, hentikan — itu yang biasanya membuat build pertama gagal
-setengah jalan, bukan berhasil lebih cepat.
+1. ~~Salin skema Temuan ke `docs/kontrak-data.md`.~~ **Selesai** — perlu
+   diperbarui dengan `jenis_tanda`.
+2. ~~Satu alur utuh dengan satu aturan paling sederhana.~~ **Selesai.**
+3. ~~Tiga aturan struktur sisanya.~~ **Selesai** — kelimanya jalan, diverifikasi
+   lewat `backend/tools/cek_docx.py` terhadap dokumen contoh dan satu RPMK nyata.
+4. ~~`cek_ejaan()`.~~ **Selesai** — cakupannya masih sempit dan sengaja begitu:
+   "Undang-Undang" dua huruf U kapital (KMK 527 butir 33) dan kata "tentang"
+   huruf kecil di judul dasar hukum (butir 32). Jangan memasang kamus besar
+   sebelum cakupannya dipastikan ke penelaah.
+5. **Buktikan Track Changes jalan, sebelum apa pun dibangun di atasnya.**
+   Percobaan sekecil mungkin: set `changeTrackingMode = "TrackAll"`, ganti satu
+   kata lewat `insertText(..., "Replace")`, sync, lalu `getTrackedChanges()` dan
+   pastikan jumlahnya bertambah. Kalau melempar `NotImplemented` seperti
+   Critique, **berhenti** dan laporkan — seluruh bagian 6 harus dirancang ulang,
+   jangan diakali sendiri.
+6. **Tambahkan `jenis_tanda`** di `models/temuan.py`, isi eksplisit di tiap
+   fungsi `rules/format_baku.py` sesuai tabel bagian 6.2, perbarui
+   `docs/kontrak-data.md`, tambah tes untuk tiap aturan.
+7. **Pasang jalur `penggantian`** di `office.ts` sesuai aturan bagian 6.3 —
+   termasuk penurunan otomatis ke `catatan` bila pelacakan gagal dinyalakan.
+8. **Ringkas task pane** sesuai bagian 6.4: buang penjelasan panjang, sisakan
+   nomor, tingkat, Lompat ke Teks, dan Terima/Tolak untuk temuan `catatan`.
+9. **Terakhir**, lengkapi tabel rujukan KMK 527 (bagian 10) dengan kutipan
+   yang sudah dibaca visual.
 
 ---
 
@@ -499,10 +624,16 @@ setengah jalan, bukan berhasil lebih cepat.
 3. **Kredensial hanya hidup di backend**, tidak pernah sampai ke browser.
 4. **Jangan pakai LLM untuk hal yang bisa diselesaikan regex atau logika biasa.**
    Ini prinsip proyek, bukan saran.
-5. **Alat memberi rekomendasi, tidak pernah mengubah naskah sendiri.** Tidak ada
-   auto-apply, tidak ada penggantian teks otomatis.
+5. **Alat mengusulkan, penelaah yang memutuskan.** Usulan boleh disisipkan ke
+   naskah **hanya** sebagai perubahan terlacak yang bisa dibatalkan satu klik,
+   dan **hanya** setelah `changeTrackingMode` terbukti menyala. Dilarang:
+   memanggil `accept()`/`reject()` dari kode atas inisiatif sendiri, membuat
+   tombol "terapkan semua", menimpa teks saat pelacakan mati, dan menyentuh
+   rentang di luar `lokasi` temuan. Pelanggaran aturan ini pernah terjadi sekali
+   (fungsi `applyUsulanRumusan` yang menimpa satu paragraf penuh ketika
+   pencarian meleset) dan berakhir dihapus — jangan diulang.
 6. **Setiap temuan wajib membawa rujukan yang bisa diperiksa** — diambil dari
-   tabel tetap atau hasil pencarian, **tidak boleh dikarang**.
+   tabel tetap, **tidak boleh dikarang**.
 7. **Jangan menulis apa pun ke basis data produksi JDIH/Law Analyzer.**
 8. **Jangan menurunkan aturan dari hasil ekstraksi teks PDF KMK 527 atau PMK
    164** — salinannya OCR rusak. Aturan harus diverifikasi manual dari naskah
@@ -511,20 +642,19 @@ setengah jalan, bukan berhasil lebih cepat.
    method yang tidak ada. Verifikasi tiap method ke
    `frontend/node_modules/@types/office-js/index.d.ts` sebelum menulis kode.
    Cara cek: `grep -n "namaMethod" -B 8 index.d.ts`.
-10. **Sebelum menambah dependency, periksa apakah kebutuhannya bisa dipenuhi
+10. **Requirement set didukung ≠ fitur diizinkan.** `isSetSupported` bisa
+    melaporkan `true` sementara pemanggilannya melempar `NotImplemented` karena
+    terkunci lisensi — sudah terbukti pada Critique. Tiap fitur Office.js yang
+    baru dipakai wajib punya jalur cadangan bila pemanggilannya gagal saat
+    runtime, bukan cuma pengecekan requirement set.
+11. **Sebelum menambah dependency, periksa apakah kebutuhannya bisa dipenuhi
     yang sudah terpasang.** Tailwind sudah ada — jangan tambah Bootstrap.
-    SQLModel sudah ditetapkan sebagai ORM — jangan tambah Prisma.
-11. **Route handler FastAPI setipis mungkin**: parse input → panggil fungsi →
+12. **Route handler FastAPI setipis mungkin**: parse input → panggil fungsi →
     kembalikan JSON. Logika pemeriksaan harus fungsi murni yang bisa dites tanpa
     menjalankan server.
-12. **Jangan simpan state global di backend.** Tiap permintaan berdiri sendiri,
-    supaya banyak penelaah bisa memakai bersamaan.
-13. **Jangan over-engineer untuk skala besar di build pertama.** Tulis kode yang
-    wajar efisien — jangan memproses paragraf berulang secara O(n²), jangan
-    memblokir event loop saat analisis berjalan — tapi belum perlu antrean,
-    worker pool, atau caching berlapis.
-14. **Ikuti urutan di bagian 13.** Jangan membangun semua aturan dan semua
-    lapis tampilan secara bersamaan di build pertama.
+13. **Jangan simpan state global di backend.** Tiap permintaan berdiri sendiri.
+14. **Jangan over-engineer untuk skala besar di build pertama.**
+15. **Ikuti urutan di bagian 13**, dan jangan lewati langkah 5.
 
 ---
 
@@ -532,15 +662,21 @@ setengah jalan, bukan berhasil lebih cepat.
 
 Build ini berhasil kalau:
 
-- [ ] `docs/kontrak-data.md` sudah berisi skema Temuan final (bagian 11)
-- [ ] Task pane terbuka di Word dan membaca paragraf dokumen aktif
-- [ ] Tombol "Analisis" memanggil backend; backend menjalankan seluruh
+- [x] `docs/kontrak-data.md` berisi skema Temuan — perlu diperbarui dengan
+      `jenis_tanda`
+- [x] Task pane terbuka di Word dan membaca paragraf dokumen aktif
+- [x] Tombol "Analisis" memanggil backend; backend menjalankan seluruh
       pemeriksaan di bagian 3
-- [ ] Bagian bermasalah tersorot dengan warna sesuai keparahan
-- [ ] Klik sorotan menampilkan catatan, rujukan butir KMK 527, dan usulan
-      rumusan
-- [ ] Temuan bisa diterima (jadi komentar permanen) atau ditolak
-- [ ] Tetap berfungsi saat `popupOptions` tidak didukung (jatuh ke komentar +
-      task pane)
-- [ ] Diuji pada dokumen panjang, bukan cuma dokumen pendek
-- [ ] Tiap fungsi di `rules/` punya tes yang jalan tanpa server
+- [x] Tiap fungsi di `rules/` punya tes yang jalan tanpa server
+- [ ] Track Changes terbukti jalan di Word penelaah (bagian 13 langkah 5)
+- [ ] Temuan `penggantian` muncul sebagai perubahan terlacak: teks lama tercoret,
+      usulan di sebelahnya
+- [ ] Accept di ribbon Review menghasilkan teks bersih; Reject mengembalikan
+      naskah asli tanpa bekas
+- [ ] Temuan `catatan` muncul sebagai komentar + warna sesuai keparahan, dan
+      bisa diterima/ditolak dari task pane
+- [ ] Komentar memuat alasan + rujukan butir KMK 527; task pane tidak mengulang
+      penjelasan yang sama
+- [ ] Accept All menghasilkan versi bersih yang layak dikirim ke unit pemrakarsa
+- [ ] Diuji pada dokumen panjang, bukan cuma dokumen contoh
+- [ ] Tabel rujukan KMK 527 tidak lagi placeholder
