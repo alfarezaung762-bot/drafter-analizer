@@ -6,20 +6,25 @@ import {
   ParagrafInput,
   AnalisisRequest,
   AnalisisResponse,
-  TingkatKeparahan,
+  JenisDokumen,
   StatusTemuan,
 } from "@/lib/types";
 import {
   readParagraphs,
   selectFindingLocation,
   tandaiSemuaTemuan,
-  hapusSorotan,
-  hapusKomentarTemuan,
+  tolakTemuan,
+  bersihkanSemuaTanda,
 } from "@/lib/office";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
+// Sesudah Track Changes ditinggalkan (17 Sep 2026), seluruh penandaan berjalan
+// di atas WordApi 1.1 — Font.color, Font.strikeThrough, Range.insertText,
+// Range.insertContentControl, ContentControlCollection.getByTag. Hanya komentar
+// yang butuh 1.4. Tidak ada lagi ketergantungan pada WordApiDesktop, jadi
+// versinya tidak lagi ditampilkan di diagnostik.
 const API_VERSIONS = ["1.1", "1.4", "1.7", "1.8", "1.9"];
 
 // Teks contoh untuk pengujian di luar Word (web mode)
@@ -51,10 +56,17 @@ export default function TaskpanePage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [temuanList, setTemuanList] = useState<Temuan[]>([]);
   const [paragrafCount, setParagrafCount] = useState<number>(0);
-  const [filterSeverity, setFilterSeverity] = useState<TingkatKeparahan | "semua">("semua");
+  // Jenis dokumen dipilih penelaah, tidak ditebak alat — lihat
+  // docs/fase1 drafter.md bagian 6.7.
+  //
+  // Sengaja dimulai TANPA pilihan. Kalau salah satunya jadi bawaan, penelaah
+  // yang lupa memilih tetap dapat hasil analisis — hasil yang diperiksa
+  // memakai kaidah jenis dokumen yang keliru, tanpa ada apa pun yang memberi
+  // tahu. Lebih baik menolak berjalan daripada diam-diam salah.
+  const [jenisDokumen, setJenisDokumen] = useState<JenisDokumen | null>(null);
+  const [goyangJenis, setGoyangJenis] = useState(false);
   const [selectedTemuanId, setSelectedTemuanId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [infoPenandaan, setInfoPenandaan] = useState<string | null>(null);
 
@@ -87,7 +99,8 @@ export default function TaskpanePage() {
             API_VERSIONS.map((v) => ({
               version: v,
               supported:
-                Office.context?.requirements?.isSetSupported("WordApi", v) ?? false,
+                Office.context?.requirements?.isSetSupported("WordApi", v) ??
+                false,
             }))
           );
         } else {
@@ -103,23 +116,50 @@ export default function TaskpanePage() {
     };
   }, []);
 
-  // Filter temuan
-  const filteredTemuan = useMemo(() => {
-    if (filterSeverity === "semua") return temuanList;
-    return temuanList.filter((t) => t.tingkat_keparahan === filterSeverity);
-  }, [temuanList, filterSeverity]);
-
-  // Statistik temuan
+  // Tidak ada penyaringan menurut tingkat keparahan lagi — tingkat itu dihapus
+  // dari rancangan. Temuan tampil urut posisi dokumen, dibaca dari atas ke
+  // bawah, sama dengan urutan nomornya.
   const stats = useMemo(() => {
     return {
       total: temuanList.length,
-      tinggi: temuanList.filter((t) => t.tingkat_keparahan === "tinggi").length,
-      sedang: temuanList.filter((t) => t.tingkat_keparahan === "sedang").length,
-      rendah: temuanList.filter((t) => t.tingkat_keparahan === "rendah").length,
       diterima: temuanList.filter((t) => t.status === "diterima").length,
       ditolak: temuanList.filter((t) => t.status === "ditolak").length,
+      belum: temuanList.filter((t) => t.status === "belum_ditinjau").length,
     };
   }, [temuanList]);
+
+  // Pengaman analisis berulang: komentar menumpuk kalau analisis dijalankan
+  // lagi sementara temuan lama belum diputuskan (bagian 6.5).
+  //
+  // Sejak semua keputusan pindah ke panel, SELURUH temuan dihitung — tidak ada
+  // lagi temuan yang statusnya tidak terpantau. Tombol Bersihkan Daftar tetap
+  // ada untuk keluar dari keadaan yang terlanjur kacau.
+  const adaYangBelumDiputuskan = useMemo(
+    () => temuanList.some((t) => t.status === "belum_ditinjau"),
+    [temuanList]
+  );
+
+  // Mengosongkan daftar panel SEKALIGUS mencabut seluruh tanda alat dari
+  // naskah. Sejak tandanya digambar sendiri (bukan revisi Word), meninggalkan
+  // tanda tanpa daftar berarti naskah berisi teks merah-hijau yang tidak ada
+  // lagi yang bisa mencabutnya. Yang dicabut hanya yang bertag DA-* — warna
+  // dan sorotan milik penyusun sendiri tidak disentuh.
+  const handleBersihkanDaftar = async () => {
+    let dicabut = 0;
+    if (inWord) {
+      dicabut = await bersihkanSemuaTanda();
+    }
+    setTemuanList([]);
+    setSelectedTemuanId(null);
+    setInfoPenandaan(null);
+    setStatusMessage(
+      inWord
+        ? `Daftar dikosongkan dan ${dicabut} tanda dicabut dari naskah.` +
+          " Komentar yang sudah terpasang tidak ikut terhapus — hapus lewat" +
+          " panel komentar Word bila perlu."
+        : "Daftar dikosongkan."
+    );
+  };
 
   // Gate legal: periksa apakah ada temuan dengan rujukan placeholder
   const adaRujukanBelumVerifikasi = useMemo(() => {
@@ -130,6 +170,16 @@ export default function TaskpanePage() {
 
   // Jalankan Analisis
   const handleJalankanAnalisis = async () => {
+    // Jenis dokumen wajib dipilih dulu. Tanpa itu backend tidak tahu bunyi
+    // baku mana yang dituntut pada butir Menimbang terakhir — "Peraturan
+    // Menteri Keuangan" atau "Keputusan Menteri Keuangan".
+    if (!jenisDokumen) {
+      setGoyangJenis(true);
+      setStatusMessage("Pilih dulu PMK atau KMK sebelum menganalisis.");
+      window.setTimeout(() => setGoyangJenis(false), 600);
+      return;
+    }
+
     setAnalyzing(true);
     setStatusMessage(null);
 
@@ -152,7 +202,10 @@ export default function TaskpanePage() {
         return;
       }
 
-      const reqBody: AnalisisRequest = { paragraf: paragraphs };
+      const reqBody: AnalisisRequest = {
+        jenis_dokumen: jenisDokumen,
+        paragraf: paragraphs,
+      };
       const res = await fetch(`${API_BASE}/analisis/jalankan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -176,26 +229,37 @@ export default function TaskpanePage() {
       // sementara, komentar adalah lampiran, bukan isi.
       if (inWord && data.temuan.length > 0) {
         const hasil = await tandaiSemuaTemuan(data.temuan);
-        if (hasil.dikomentari > 0) {
-          const bagianSorotan =
-            hasil.disorot > 0
-              ? hasil.memakaiWarnaFont
-                ? `${hasil.disorot} bagian diwarnai menurut tingkat keparahan (merah/kuning/toska) dan `
-                : `${hasil.disorot} bagian disorot dan `
-              : "Sorotan warna tidak dapat dipasang di Word ini, tetapi ";
-          setInfoPenandaan(
-            `${bagianSorotan}${hasil.dikomentari} komentar dipasang di dokumen. ` +
-              `Belum permanen — warna dan komentar temuan yang kamu Tolak akan ` +
-              `dihapus kembali. Simpan dokumen hanya setelah semua temuan ditinjau.`
-          );
-        } else if (hasil.disorot > 0) {
-          setInfoPenandaan(
-            "Bagian bermasalah disorot, tetapi komentar tidak dapat dipasang " +
-              "(WordApi 1.4 tidak tersedia di Word ini)."
-          );
-        } else {
-          setInfoPenandaan(null);
+        const bagian: string[] = [];
+        if (hasil.dicoretMerah > 0) {
+          bagian.push(`${hasil.dicoretMerah} dicoret merah`);
         }
+        if (hasil.diusulkan > 0) {
+          bagian.push(`${hasil.diusulkan} usulan hijau disisipkan`);
+        }
+        if (hasil.diblokKuning > 0) {
+          bagian.push(`${hasil.diblokKuning} diberi blok kuning`);
+        }
+        if (hasil.dikomentari > 0) {
+          bagian.push(`${hasil.dikomentari} komentar`);
+        }
+
+        let pesan = bagian.length > 0 ? bagian.join(", ") + "." : "";
+
+        if (hasil.tidakKetemu > 0) {
+          pesan +=
+            ` ${hasil.tidakKetemu} temuan TIDAK ditandai di naskah karena` +
+            " letak persisnya tidak ketemu — periksa sendiri lewat daftar" +
+            " di bawah.";
+        }
+
+        if (!hasil.pelacakanMati) {
+          pesan +=
+            " Pelacakan perubahan tidak bisa dimatikan, jadi tanda-tanda ini" +
+            " ikut tercatat Word sebagai revisi format. Matikan Track Changes" +
+            " di tab Review lalu jalankan ulang bila margin jadi penuh.";
+        }
+
+        setInfoPenandaan(pesan.trim() || null);
       } else {
         setInfoPenandaan(null);
       }
@@ -221,43 +285,37 @@ export default function TaskpanePage() {
     }
   };
 
-  // Terima temuan: ubah status jadi diterima & sematkan komentar permanen di Word (Lapis 2)
+  // Terima temuan.
+  //
+  // NASKAHNYA SENGAJA TIDAK DISENTUH. Naskah kerja ini adalah dokumen
+  // "coretan" yang dibawa ke rapat pembahasan bersama unit pemrakarsa —
+  // coretan merah dan usulan hijaunya justru harus tetap terbaca di situ.
+  // Versi bersih dibuat terpisah lewat ekspor, yang menerapkan hanya temuan
+  // berstatus diterima. Yang membedakan sudah-diputuskan dari belum cukup
+  // dari kartu di panel ini; itu keputusan penelaah, 17 Sep 2026.
   const handleTerima = async (temuan: Temuan) => {
     updateStatus(temuan.id, "diterima");
-    if (inWord) {
-      // Komentarnya sudah terpasang sejak analisis, jadi Terima hanya melepas
-      // sorotannya: yang tinggal di dokumen adalah komentar, dan itu memang
-      // yang dibawa ke rapat pembahasan.
-      await hapusSorotan(temuan);
-      setStatusMessage(
-        `Temuan ${temuan.aturan_id} diterima. Komentarnya tetap di dokumen.`
-      );
-    } else {
-      setStatusMessage(`Status temuan ${temuan.aturan_id} diubah menjadi 'Diterima'.`);
-    }
+    setStatusMessage(
+      `T${temuan.nomor} diterima. Coretan dan usulannya tetap di naskah kerja` +
+        " — akan diterapkan saat ekspor versi bersih."
+    );
   };
 
-  // Tolak temuan: ubah status jadi ditolak
+  // Tolak temuan: usulan hijaunya dibuang, teks aslinya dipulihkan persis
+  // seperti sebelum ditandai, komentarnya dihapus. Tidak boleh ada bekas.
   const handleTolak = async (temuan: Temuan) => {
     updateStatus(temuan.id, "ditolak");
-    if (inWord) {
-      // Ditolak berarti tidak ada jejak apa pun yang tertinggal di dokumen —
-      // sorotan dilepas DAN komentarnya dihapus.
-      await hapusSorotan(temuan);
-      await hapusKomentarTemuan(temuan);
-      setStatusMessage(
-        `Temuan ${temuan.aturan_id} ditolak. Sorotan dan komentarnya dihapus dari dokumen.`
-      );
+    if (!inWord) {
+      setStatusMessage(`Status temuan T${temuan.nomor} diubah menjadi 'Ditolak'.`);
       return;
     }
-    setStatusMessage(`Status temuan ${temuan.aturan_id} diubah menjadi 'Ditolak'.`);
-  };
-
-  // Salin teks usulan ke clipboard
-  const handleSalinUsulan = (temuanId: string, teks: string) => {
-    navigator.clipboard.writeText(teks);
-    setCopiedId(temuanId);
-    setTimeout(() => setCopiedId(null), 2000);
+    const berhasil = await tolakTemuan(temuan);
+    setStatusMessage(
+      berhasil
+        ? `T${temuan.nomor} ditolak. Naskah kembali seperti sebelum ditandai.`
+        : `T${temuan.nomor} ditolak di daftar, tetapi tandanya tidak ditemukan` +
+          " lagi di naskah — mungkin sudah diubah manual. Periksa sendiri."
+    );
   };
 
   // Ubah status temuan
@@ -269,6 +327,22 @@ export default function TaskpanePage() {
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 text-slate-900 font-sans antialiased text-xs">
+      {/* Goyangan penanda "pilih jenis dokumen dulu". Ditulis sebagai CSS biasa
+          supaya tidak bergantung pada konfigurasi animasi Tailwind. */}
+      <style>{`
+        @keyframes da-goyang {
+          0%, 100% { transform: translateX(0); }
+          20%      { transform: translateX(-5px); }
+          40%      { transform: translateX(5px); }
+          60%      { transform: translateX(-3px); }
+          80%      { transform: translateX(3px); }
+        }
+        .da-goyang { animation: da-goyang 0.45s ease-in-out; }
+        @media (prefers-reduced-motion: reduce) {
+          .da-goyang { animation: none; }
+        }
+      `}</style>
+
       {/* Top Header */}
       <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-3 py-2.5 shadow-xs">
         <div className="flex items-center justify-between">
@@ -305,6 +379,7 @@ export default function TaskpanePage() {
             </div>
             {inWord ? (
               <div className="grid grid-cols-5 gap-1 text-center font-mono text-[10px]">
+                {/* v… = WordApi, D… = WordApiDesktop */}
                 {apiChecks.map(({ version, supported }) => (
                   <div
                     key={version}
@@ -363,6 +438,46 @@ export default function TaskpanePage() {
 
         {/* Action & Controls Bar */}
         <div className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-xs space-y-2">
+          {/* Jenis dokumen dipilih penelaah. Alat tidak menebaknya: bagian
+              Mengingat sebuah KMK lazim menyebut "Peraturan Menteri Keuangan",
+              sehingga tebakan bisa keliru lalu menuntut bunyi frasa yang salah.
+              Lihat docs/fase1 drafter.md bagian 6.7. */}
+          <div
+            className={`flex items-center justify-between pb-2 border-b text-[11px] rounded px-1 -mx-1 transition-colors ${
+              goyangJenis
+                ? "da-goyang border-rose-300 bg-rose-50"
+                : "border-slate-100"
+            }`}
+          >
+            <span
+              className={`font-medium ${
+                jenisDokumen ? "text-slate-600" : "text-rose-700"
+              }`}
+            >
+              Jenis Dokumen:{!jenisDokumen && " pilih dulu"}
+            </span>
+            <div className="inline-flex rounded-md shadow-2xs">
+              {(["PMK", "KMK"] as const).map((jenis, i) => (
+                <button
+                  key={jenis}
+                  type="button"
+                  onClick={() => setJenisDokumen(jenis)}
+                  className={`px-3 py-1 text-[10px] font-semibold border ${
+                    i === 0 ? "rounded-l" : "rounded-r border-l-0"
+                  } ${
+                    jenisDokumen === jenis
+                      ? "bg-slate-800 text-white border-slate-800"
+                      : jenisDokumen === null
+                      ? "bg-white text-slate-700 border-rose-300 hover:bg-rose-50"
+                      : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  {jenis}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {inWord && (
             <div className="flex items-center justify-between pb-2 border-b border-slate-100 text-[11px]">
               <span className="text-slate-600 font-medium">Cakupan Dokumen:</span>
@@ -393,11 +508,20 @@ export default function TaskpanePage() {
             </div>
           )}
 
+          {/* Analisis ulang ditolak selama masih ada temuan yang belum
+              diputuskan: tiap analisis memasang komentar baru, dan pada
+              pengujian 17 Sep 2026 dokumen contoh berakhir dengan ~18 komentar
+              untuk 5 temuan. Lihat docs/fase1 drafter.md bagian 6.5. */}
           <button
             onClick={handleJalankanAnalisis}
-            disabled={analyzing}
+            disabled={analyzing || adaYangBelumDiputuskan}
+            title={
+              adaYangBelumDiputuskan
+                ? "Selesaikan dulu temuan yang belum diputuskan — analisis ulang akan menumpuk komentar"
+                : undefined
+            }
             className={`w-full py-2 px-3 rounded font-semibold text-white transition flex items-center justify-center gap-1.5 shadow-xs ${
-              analyzing
+              analyzing || adaYangBelumDiputuskan
                 ? "bg-blue-400 cursor-not-allowed"
                 : "bg-blue-700 hover:bg-blue-800 active:scale-[0.99]"
             }`}
@@ -419,6 +543,21 @@ export default function TaskpanePage() {
               </>
             )}
           </button>
+
+          {adaYangBelumDiputuskan && (
+            <div className="text-[10px] text-amber-900 bg-amber-50 px-2 py-1.5 rounded border border-amber-200 space-y-1">
+              <div>
+                Masih ada temuan yang belum diputuskan. Selesaikan dulu sebelum
+                menganalisis ulang, supaya komentarnya tidak menumpuk.
+              </div>
+              <button
+                onClick={handleBersihkanDaftar}
+                className="underline font-medium hover:text-amber-950"
+              >
+                Bersihkan daftar dan mulai dari awal
+              </button>
+            </div>
+          )}
 
           {statusMessage && (
             <div className="text-[10px] text-slate-600 bg-slate-50 px-2 py-1.5 rounded border border-slate-200">
@@ -445,208 +584,89 @@ export default function TaskpanePage() {
           </div>
         )}
 
-        {/* Results Summary & Filter Bar */}
+        {/* Ringkasan hasil */}
         {temuanList.length > 0 && (
-          <div className="space-y-1.5">
-            <div className="grid grid-cols-4 gap-1 text-center font-medium text-[10px]">
-              <button
-                onClick={() => setFilterSeverity("semua")}
-                className={`p-1.5 rounded border transition ${
-                  filterSeverity === "semua"
-                    ? "bg-slate-800 text-white border-slate-800"
-                    : "bg-white text-slate-700 border-slate-200 hover:bg-slate-100"
-                }`}
-              >
-                <div>Semua</div>
-                <div className="font-bold text-[12px]">{stats.total}</div>
-              </button>
-              <button
-                onClick={() => setFilterSeverity("tinggi")}
-                className={`p-1.5 rounded border transition ${
-                  filterSeverity === "tinggi"
-                    ? "bg-rose-700 text-white border-rose-700"
-                    : "bg-rose-50 text-rose-800 border-rose-200 hover:bg-rose-100"
-                }`}
-              >
-                <div>Tinggi</div>
-                <div className="font-bold text-[12px]">{stats.tinggi}</div>
-              </button>
-              <button
-                onClick={() => setFilterSeverity("sedang")}
-                className={`p-1.5 rounded border transition ${
-                  filterSeverity === "sedang"
-                    ? "bg-amber-600 text-white border-amber-600"
-                    : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
-                }`}
-              >
-                <div>Sedang</div>
-                <div className="font-bold text-[12px]">{stats.sedang}</div>
-              </button>
-              <button
-                onClick={() => setFilterSeverity("rendah")}
-                className={`p-1.5 rounded border transition ${
-                  filterSeverity === "rendah"
-                    ? "bg-indigo-700 text-white border-indigo-700"
-                    : "bg-indigo-50 text-indigo-800 border-indigo-200 hover:bg-indigo-100"
-                }`}
-              >
-                <div>Rendah</div>
-                <div className="font-bold text-[12px]">{stats.rendah}</div>
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
-              <span>{paragrafCount} paragraf diperiksa</span>
-              <span>
-                {stats.diterima > 0 && <span className="text-emerald-700 font-semibold">{stats.diterima} diterima &bull; </span>}
-                {stats.ditolak > 0 && <span className="text-slate-500 line-through">{stats.ditolak} ditolak</span>}
-              </span>
-            </div>
+          <div className="flex items-center justify-between text-[10px] text-slate-500 px-1">
+            <span>
+              {stats.total} temuan &bull; {paragrafCount} paragraf diperiksa
+            </span>
+            <span>
+              {stats.diterima > 0 && (
+                <span className="text-emerald-700 font-semibold">
+                  {stats.diterima} diterima{" "}
+                </span>
+              )}
+              {stats.ditolak > 0 && (
+                <span className="text-slate-500 line-through">
+                  {stats.ditolak} ditolak
+                </span>
+              )}
+            </span>
           </div>
         )}
 
         {/* Finding Cards List */}
-        <div className="space-y-2.5">
-          {filteredTemuan.map((temuan) => {
+        <div className="space-y-1.5">
+          {temuanList.map((temuan) => {
             const isSelected = selectedTemuanId === temuan.id;
             const isPlaceholderRujukan =
               temuan.rujukan.butir === "..." || temuan.rujukan.kutipan === "...";
-
-            // Border color by severity
-            let severityBorder = "border-l-indigo-500";
-            let severityBadgeBg = "bg-indigo-50 text-indigo-700 border-indigo-200";
-            if (temuan.tingkat_keparahan === "tinggi") {
-              severityBorder = "border-l-rose-500";
-              severityBadgeBg = "bg-rose-50 text-rose-700 border-rose-200";
-            } else if (temuan.tingkat_keparahan === "sedang") {
-              severityBorder = "border-l-amber-500";
-              severityBadgeBg = "bg-amber-50 text-amber-700 border-amber-200";
-            }
+            // Penjelasan temuan TIDAK diulang di sini — tempatnya di komentar
+            // Word, di titik kesalahannya (bagian 6.6). Panel hanya navigasi.
+            const cuplikan = temuan.lokasi.teks_asli.trim();
+            const ringkas =
+              cuplikan.length > 70 ? cuplikan.slice(0, 70) + "\u2026" : cuplikan;
 
             return (
               <div
                 key={temuan.id}
-                className={`bg-white rounded-lg border border-slate-200 shadow-2xs border-l-4 ${severityBorder} p-3 space-y-2 transition ${
-                  isSelected ? "ring-2 ring-blue-500/40 bg-blue-50/20" : ""
-                }`}
+                className={`bg-white rounded border border-slate-200 px-2.5 py-2 space-y-1.5 transition ${
+                  isSelected ? "ring-2 ring-blue-500/40" : ""
+                } ${temuan.status !== "belum_ditinjau" ? "opacity-60" : ""}`}
               >
-                {/* Card Header */}
-                <div className="flex items-center justify-between gap-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono font-bold text-slate-800 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
-                      {temuan.aturan_id}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono font-bold text-slate-800 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
+                    T{temuan.nomor}
+                  </span>
+                  <span
+                    className={`text-[9px] font-medium px-1.5 py-0.5 rounded border ${
+                      temuan.jenis_tanda === "penggantian"
+                        ? "bg-sky-50 text-sky-700 border-sky-200"
+                        : "bg-amber-50 text-amber-800 border-amber-200"
+                    }`}
+                    title={
+                      temuan.jenis_tanda === "penggantian"
+                        ? "Teks lama merah dicoret, usulan penggantinya hijau di sebelahnya"
+                        : "Diberi blok kuning sebagai peringatan — perbaikannya ditentukan penelaah"
+                    }
+                  >
+                    {temuan.jenis_tanda === "penggantian" ? "usulan" : "catatan"}
+                  </span>
+                  {isPlaceholderRujukan && (
+                    <span className="text-[8px] bg-amber-200 text-amber-900 px-1 rounded font-bold">
+                      rujukan belum diverifikasi
                     </span>
-                    <span
-                      className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border uppercase tracking-wider ${severityBadgeBg}`}
-                    >
-                      {temuan.tingkat_keparahan}
+                  )}
+                  {temuan.status === "diterima" && (
+                    <span className="ml-auto text-emerald-700 text-[9px] font-medium">
+                      diterima
                     </span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {temuan.status === "diterima" && (
-                      <span className="bg-emerald-100 text-emerald-800 font-medium px-1.5 py-0.5 rounded text-[9px]">
-                        ✓ Diterima
-                      </span>
-                    )}
-                    {temuan.status === "ditolak" && (
-                      <span className="bg-slate-200 text-slate-600 font-medium px-1.5 py-0.5 rounded text-[9px] line-through">
-                        Ditolak
-                      </span>
-                    )}
-                    {temuan.status === "belum_ditinjau" && (
-                      <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded text-[9px]">
-                        Belum Ditinjau
-                      </span>
-                    )}
-                  </div>
+                  )}
+                  {temuan.status === "ditolak" && (
+                    <span className="ml-auto text-slate-500 text-[9px] line-through">
+                      ditolak
+                    </span>
+                  )}
                 </div>
 
-                {/* Excerpt / Teks Asli */}
-                <div className="bg-slate-50 p-1.5 rounded border border-slate-100 text-[10px] text-slate-700 font-mono">
+                <div className="text-[10px] text-slate-600 font-mono truncate">
                   <span className="text-slate-400 select-none">
-                    Paragraf #{temuan.lokasi.paragraf_index + 1}:{" "}
+                    #{temuan.lokasi.paragraf_index + 1}{" "}
                   </span>
-                  <span className="text-rose-900 bg-rose-50/60 font-semibold px-0.5 rounded">
-                    &ldquo;{temuan.lokasi.teks_asli}&rdquo;
-                  </span>
+                  &ldquo;{ringkas}&rdquo;
                 </div>
 
-                {/* Catatan Pelanggaran Kaidah */}
-                <p className="text-slate-800 text-[11px] leading-relaxed">
-                  {temuan.catatan}
-                </p>
-
-                {/* Usulan Rumusan (Jika Ada) */}
-                {temuan.usulan_rumusan && (
-                  <div className="bg-emerald-50/70 border border-emerald-200 rounded p-2 space-y-1.5">
-                    <div className="flex items-center justify-between text-[10px] text-emerald-900 font-semibold">
-                      <span>Usulan Rumusan Baku:</span>
-                      <button
-                        onClick={() =>
-                          handleSalinUsulan(temuan.id, temuan.usulan_rumusan!)
-                        }
-                        className="text-emerald-700 hover:text-emerald-900 text-[9px] underline flex items-center gap-0.5"
-                      >
-                        {copiedId === temuan.id ? "Tersalin!" : "Salin Teks"}
-                      </button>
-                    </div>
-                    <div className="font-mono text-[10px] text-emerald-950 bg-white/80 p-1.5 rounded border border-emerald-100 leading-snug">
-                      {temuan.usulan_rumusan}
-                    </div>
-                  </div>
-                )}
-
-                {/* Detail Dasar Hukum (KMK 527) */}
-                <details className="text-[10px] border border-slate-100 rounded bg-slate-50/50 p-1.5 group">
-                  <summary className="cursor-pointer font-medium text-slate-600 flex items-center justify-between select-none">
-                    <span className="flex items-center gap-1">
-                      <span>Dasar Hukum: {temuan.rujukan.sumber}</span>
-                      {isPlaceholderRujukan && (
-                        <span className="text-[8px] bg-amber-200 text-amber-900 px-1 rounded font-bold">
-                          Verifikasi Manual
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-[9px] text-slate-400 group-open:rotate-180 transition-transform">
-                      ▼
-                    </span>
-                  </summary>
-                  <div className="mt-1.5 pt-1.5 border-t border-slate-200 space-y-1 text-slate-600">
-                    <div>
-                      <span className="font-semibold text-slate-700">Nomor Butir:</span>{" "}
-                      {isPlaceholderRujukan ? (
-                        <span className="italic text-amber-800">
-                          Placeholder (belum diisi verifikasi visual Alfa)
-                        </span>
-                      ) : (
-                        temuan.rujukan.butir
-                      )}
-                    </div>
-                    <div>
-                      <span className="font-semibold text-slate-700">Kutipan Kaidah:</span>{" "}
-                      {isPlaceholderRujukan ? (
-                        <span className="italic text-amber-800">
-                          Kutipan visual belum diverifikasi
-                        </span>
-                      ) : (
-                        `"${temuan.rujukan.kutipan}"`
-                      )}
-                    </div>
-                    <div>
-                      <a
-                        href={temuan.rujukan.pdf_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-600 hover:underline flex items-center gap-0.5 font-medium"
-                      >
-                        Buka Dokumen di JDIH &rarr;
-                      </a>
-                    </div>
-                  </div>
-                </details>
-
-                {/* Bottom Action Buttons */}
-                <div className="pt-1.5 flex items-center justify-between border-t border-slate-100 gap-1">
+                <div className="flex items-center justify-between gap-1">
                   <button
                     onClick={() => handleLompatKeLokasi(temuan)}
                     className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-[10px] transition"
@@ -655,29 +675,33 @@ export default function TaskpanePage() {
                     Lompat ke Teks
                   </button>
 
+                  {/* Semua temuan diputuskan dari sini — termasuk yang berupa
+                      usulan penggantian. Daftar yang separuh kartunya bisa
+                      ditekan dan separuhnya menyuruh pindah ke tab Review
+                      membingungkan penelaah. */}
                   <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => handleTerima(temuan)}
-                      className={`px-2.5 py-1 rounded text-[10px] font-medium transition ${
-                        temuan.status === "diterima"
-                          ? "bg-emerald-600 text-white"
-                          : "bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700"
-                      }`}
-                      title="Terima temuan (menghasilkan komentar permanen di Word)"
-                    >
-                      Terima
-                    </button>
-                    <button
-                      onClick={() => handleTolak(temuan)}
-                      className={`px-2.5 py-1 rounded text-[10px] font-medium transition ${
-                        temuan.status === "ditolak"
-                          ? "bg-rose-600 text-white"
-                          : "bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700"
-                      }`}
-                      title="Tolak temuan"
-                    >
-                      Tolak
-                    </button>
+                      <button
+                        onClick={() => handleTerima(temuan)}
+                        className={`px-2.5 py-1 rounded text-[10px] font-medium transition ${
+                          temuan.status === "diterima"
+                            ? "bg-emerald-600 text-white"
+                            : "bg-slate-100 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700"
+                        }`}
+                        title="Ditandai diterima. Naskah kerja tidak berubah — usulannya baru diterapkan saat ekspor versi bersih."
+                      >
+                        Terima
+                      </button>
+                      <button
+                        onClick={() => handleTolak(temuan)}
+                        className={`px-2.5 py-1 rounded text-[10px] font-medium transition ${
+                          temuan.status === "ditolak"
+                            ? "bg-rose-600 text-white"
+                            : "bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700"
+                        }`}
+                        title="Usulan hijau dibuang, coretan merah atau blok kuningnya dilepas, komentarnya dihapus — tanpa bekas"
+                      >
+                        Tolak
+                      </button>
                   </div>
                 </div>
               </div>

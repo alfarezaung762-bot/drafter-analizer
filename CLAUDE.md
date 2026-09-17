@@ -9,6 +9,10 @@ konteks.
 
 ## Dokumentasi
 
+- [`docs/keputusan-ux-penelaahan-fase1.md`](docs/keputusan-ux-penelaahan-fase1.md) - acuan utama perilaku penelaahan Fase 1; diprioritaskan bila bertentangan dengan rancangan lama
+- [`docs/rancangan-analisis-terima-ekspor.md`](docs/rancangan-analisis-terima-ekspor.md) - alur Analisis–Terima–Ekspor: Terima menyimpan jejak revisi dan Ekspor membuat DOCX bersih terpisah tanpa pengguna menyetel Word
+- [`docs/README.md`](docs/README.md) - indeks dan urutan baca dokumentasi
+
 - [`docs/panduan-vibe.md`](docs/panduan-vibe.md) — konvensi dan aturan kerja
   di repo ini
 - [`docs/panduan-officejs.md`](docs/panduan-officejs.md) — sumber kebenaran

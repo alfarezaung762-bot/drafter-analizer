@@ -39,7 +39,7 @@ except ImportError:
     print("python-docx belum terpasang. Jalankan:  pip install python-docx")
     raise SystemExit(1)
 
-from app.models.temuan import ParagrafInput
+from app.models.temuan import JenisDokumen, ParagrafInput
 from app.rules.format_baku import jalankan_semua
 
 
@@ -69,6 +69,7 @@ def main() -> int:
     ap.add_argument("berkas", help="Path ke rancangan .docx")
     ap.add_argument("--paragraf-saja", action="store_true", help="Hanya tampilkan paragraf, tanpa menjalankan aturan")
     ap.add_argument("--batas", type=int, default=60, help="Jumlah paragraf yang ditampilkan (default 60, 0 = semua)")
+    ap.add_argument("--jenis", choices=["PMK", "KMK"], default="PMK", help="Jenis dokumen; di add-in ini dipilih penelaah (default PMK)")
     args = ap.parse_args()
 
     path = Path(args.berkas)
@@ -103,14 +104,23 @@ def main() -> int:
         return 0
 
     paragraf = [ParagrafInput(index=i, teks=e["teks"]) for i, e in enumerate(entri)]
-    temuan = jalankan_semua(paragraf)
+    jenis = JenisDokumen(args.jenis)
+    temuan = jalankan_semua(paragraf, jenis)
 
     print("=" * 78)
     print(f"TEMUAN : {len(temuan)}")
     print("=" * 78)
     for t in temuan:
         print()
-        print(f"[{t.tingkat_keparahan.value.upper():<7}] {t.aturan_id}  paragraf #{t.lokasi.paragraf_index}")
+        print(f"T{t.nomor:<3} [{t.jenis_tanda.value:<12}] {t.aturan_id}  paragraf #{t.lokasi.paragraf_index}")
+        # Rentang yang benar-benar ditandai di Word. Dicetak supaya bisa dilihat
+        # apakah yang tersorot memang sesempit yang dimaksud, bukan satu
+        # paragraf penuh.
+        print(
+            f"  Ditandai: [{t.lokasi.offset_mulai}:"
+            f"{t.lokasi.offset_mulai + t.lokasi.panjang}] "
+            f"{t.lokasi.teks_asli!r}"
+        )
         print(f"  Catatan : {t.catatan}")
         if t.usulan_rumusan:
             print(f"  Usulan  : {t.usulan_rumusan}")

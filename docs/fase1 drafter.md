@@ -11,9 +11,16 @@
 > Disusun dari `project-brief.md`, `pemahaman-jdih-law-analyzer.md`, berkas env
 > Law Analyzer/JDIH, dan kerangka repo `drafter-analiser` yang sudah ada.
 >
-> **Revisi 16 Sep 2026:** bagian 3, 4, 6, 7, 8, 11, 13, 14, dan 15 diubah
-> menyusul keterangan mentor tentang cara penelaah bekerja sebenarnya. Ringkasan
-> perubahannya ada di bagian 6.
+> **Revisi 17 Sep 2026 (kedua):** bagian 6 ditulis ulang total. **Track Changes
+> ditinggalkan** — alat menggambar tandanya sendiri: merah-dicoret untuk yang
+> salah, hijau untuk usulannya, blok kuning untuk yang perlu ditinjau tanpa
+> jawaban pasti. Alasannya di bagian 6.1. Penandaan turun ke tingkat kata
+> (6.5), aturan judul kapital F1-001 dimatikan dan bug klausul Menetapkan
+> diperbaiki (6.10), dan jenis dokumen wajib dipilih tanpa nilai awal (6.12).
+>
+> **Dokumen ini memuat Fase 1 saja**, dari awal sampai pondasinya tuntas. Hal
+> yang baru relevan di Fase 2/3 disebut seperlunya sebagai penanda batas, tidak
+> dirancang di sini.
 
 ---
 
@@ -53,15 +60,16 @@ Bukan masyarakat umum.
 |---|---|---|
 | Baca paragraf dokumen yang sedang terbuka di Word | Telaah dikerjakan satu per satu mengandalkan ketelitian; di dokumen panjang pasti ada yang lolos (PMK 124/2024 = 175 satuan pasal/ayat) | Office.js membaca paragraf dari dokumen aktif, tanpa unggah berkas |
 | Cek judul pembuka = judul pada "Menetapkan" | Kesalahan paling sering (brief bagian 8.6) — beda satu kata pun lolos | Bandingkan teks judul di dua lokasi |
-| Cek judul ditulis kapital seluruhnya | Aturan baku KMK 527 Lampiran II | Pemeriksaan huruf, deterministik |
+| ~~Cek judul ditulis kapital seluruhnya~~ | — | **Dimatikan.** Tidak bisa membedakan judul yang hurufnya campur dari judul yang tampil kapital lewat gaya ALL CAPS — bagian 6.10 |
 | Cek kelengkapan Menimbang / Mengingat / Menetapkan | Struktur wajib yang kadang terlewat | Cari pola baku tiap bagian |
 | Cek frasa baku butir Menimbang terakhir ("perlu menetapkan … tentang …") | Sering hilang atau salah bentuk (brief bagian 8.6) | Pencocokan pola pada butir terakhir |
 | Cek ejaan | Salah tulis lolos saat buru-buru | Kamus/regex bahasa Indonesia, bukan AI — cakupannya lihat bagian 13 langkah 4 |
-| **Usulan rumusan dipasang sebagai perubahan terlacak** | Penelaah tidak perlu mengetik ulang, tapi tetap memutuskan | Track Changes bawaan Word — lihat bagian 6 |
-| **Temuan tanpa pengganti ditandai komentar + warna keparahan** | Sebagian kesalahan tidak punya "jawaban benar" tunggal | `insertComment` + `font.highlightColor` — bagian 6 |
+| **Teks salah ditandai merah + dicoret, usulannya hijau di sebelahnya** | Penelaah tidak perlu mengetik ulang, tapi tetap memutuskan | Alat menggambar sendiri dengan pelacakan mati — bagian 6.3 |
+| **Temuan tanpa pengganti diberi blok kuning + komentar** | Sebagian kesalahan tidak punya "jawaban benar" tunggal | `font.highlightColor` + `insertComment` — bagian 6.3 |
+| **Yang ditandai hanya rentang kata yang salah, bukan paragraf penuh** | Penelaah tidak perlu mencari sendiri huruf mana yang dipersoalkan | Offset presisi dari backend + `Word.search()` — bagian 6.5 |
 | Tiap temuan menyertakan rujukan butir KMK 527 + kutipannya | Penelaah perlu tahu dasar hukumnya, bukan cuma "ini salah" | Tabel rujukan tetap di kode — bagian 10 |
-| Setujui / tolak tiap usulan | Prinsip: alat memberi rekomendasi, tidak pernah memutuskan | Tombol Accept/Reject bawaan Word di ribbon Review |
-| Versi bersih tanpa coretan | Penelaah sekarang memelihara dua berkas manual | Accept All + Save As — satu berkas, dua wujud |
+| Setujui / tolak tiap usulan | Prinsip: alat memberi rekomendasi, tidak pernah memutuskan | Tombol Terima/Tolak di task pane — bagian 6.7 |
+| Versi bersih tanpa coretan | Penelaah sekarang memelihara dua berkas manual | **Belum dibangun** — jalurnya belum ditetapkan, bagian 6.7 |
 | Pilih cakupan: seluruh dokumen atau bagian terpilih | Fleksibilitas penelaah | `document.getSelection()` vs seluruh body |
 
 ---
@@ -71,11 +79,11 @@ Bukan masyarakat umum.
 Jangan dikerjakan agen coding. Diambil dari brief bagian "Di Luar Lingkup" dan
 pembagian fase:
 
-- **Menerapkan usulan tanpa persetujuan penelaah.** Usulan boleh dipasang
-  sebagai *perubahan terlacak* (tracked change) yang masih mentah dan bisa
-  dibatalkan satu klik — tapi tidak boleh ada kode yang memanggil `accept()`
-  sendiri, tidak boleh "terapkan semua", dan tidak boleh menimpa teks saat
-  pelacakan perubahan sedang mati. Lihat bagian 6 dan bagian 14 butir 5.
+- **Menerapkan usulan tanpa persetujuan penelaah.** Usulan boleh *ditampilkan*
+  di sebelah teks aslinya sebagai teks hijau yang bisa dicabut satu klik — tapi
+  teks lama tidak boleh dihapus, tidak boleh ada tombol "terapkan semua", dan
+  tidak boleh ada rentang di luar `lokasi` temuan yang disentuh. Lihat bagian 6
+  dan bagian 14 butir 5.
 - Validasi gambar logo Garuda
 - Deteksi "kelaziman" bahasa
 - Versi untuk masyarakat umum
@@ -108,7 +116,8 @@ Word (dokumen terbuka)
                                                                  ▼
                                                          daftar Temuan (JSON)
                                                                  ▼
-                              Task pane memasang perubahan terlacak / komentar
+                    Task pane menggambar tanda merah/hijau/kuning + komentar
+                    (pelacakan perubahan Word DIMATIKAN selama penandaan)
 ```
 
 | Lapisan | Teknologi | Catatan |
@@ -155,117 +164,400 @@ dokumen, bukan panel terpisah".
 
 ## 6. Cara temuan ditampilkan di dokumen
 
-### 6.1 Kenapa rancangan lama diganti
+> Bagian ini ditulis ulang total 17 Sep 2026. Dua rancangan sebelumnya gugur di
+> Word penelaah, dan keduanya gugur karena alasan yang baru kelihatan setelah
+> dicoba pada naskah sungguhan. Riwayatnya disimpan di 6.1 supaya tidak ada yang
+> mencoba jalan itu lagi.
 
-Rancangan sebelumnya membagi tampilan jadi tiga lapis: sorotan + popup
-(`Critique` + `popupOptions`), komentar permanen, dan task pane. Dua hal
-membatalkannya, keduanya berdasar bukti, bukan dugaan:
+### 6.1 Dua rancangan yang gugur
 
-**Critique mati di Word penelaah.** Diuji langsung di Word 2024 LTSC
-(16 Sep 2026): `isSetSupported("WordApi", "1.7")` melaporkan `true`, tapi
-`insertAnnotations` melempar `RichApi.Error: NotImplemented`. Sebabnya
-Annotation mensyaratkan langganan Microsoft 365 aktif — lisensi beli-putus
-(LTSC) tidak punya itu, berapa pun tinggi requirement set yang dilaporkan
-didukung. Ikut mati bersamanya: popup berisi tombol terima/tolak, dan pewarnaan
-per tingkat keparahan lewat `Critique.colorScheme`.
+**Rancangan A — Critique + popup. Gugur 16 Sep 2026.**
+Diuji di Word 2024 LTSC: `isSetSupported("WordApi", "1.7")` melaporkan `true`,
+tapi `insertAnnotations` melempar `RichApi.Error: NotImplemented`. Annotation
+mensyaratkan langganan Microsoft 365 aktif; lisensi beli-putus tidak punya itu.
+Ikut mati bersamanya: popup berisi tombol terima/tolak, dan pewarnaan lewat
+`Critique.colorScheme`.
 
-**Cara penelaah bekerja ternyata berbeda dari asumsi awal.** Keterangan mentor
-beserta contoh RPMK/RKMK sungguhan (lihat `project-brief.md` bagian 8.13):
-penelaah menghasilkan **dua dokumen** — versi bercoretan (teks salah dicoret,
-usulan ditulis dengan warna berbeda) dan versi bersih yang sudah dimodifikasi.
-Keputusan akhirnya diambil di rapat bersama unit pemrakarsa. Artinya penelaah
-memang rutin menyunting salinan rancangan; yang tidak boleh adalah **memutuskan
-sepihak**, bukan **menyentuh berkas**.
+Pelajaran yang berlaku seterusnya: **requirement set didukung ≠ fitur
+diizinkan.**
 
-Konsekuensinya: aturan lama "alat tidak boleh mengubah satu karakter pun" itu
-terlalu lebar. Yang dijaga bukan keutuhan karakter, melainkan bahwa **tidak ada
-perubahan yang jadi permanen tanpa satu klik persetujuan penelaah.**
+**Rancangan B — Track Changes bawaan Word. Gugur 17 Sep 2026.**
+Track Changes sendiri terbukti jalan — hasil pengujiannya tetap dicatat di 6.2
+karena isinya masih benar dan berguna. Yang membatalkannya dua hal lain:
 
-### 6.2 Dua kelas temuan
+1. **Warna revisi tidak bisa diatur add-in.** Sudah dicari ke seluruh
+   `index.d.ts`: tidak ada `insertedTextColor`, `deletedTextColor`,
+   `revisionColor`, maupun `authorColor`. `RevisionsFilter` hanya punya `markup`
+   dan `view`. Word mewarnai revisi menurut penulisnya. Satu-satunya cara
+   mengubahnya adalah Options Word pada tiap komputer penelaah — dan syarat yang
+   ditetapkan penelaah adalah **tidak menyetel apa pun di Word**.
+2. **Memberi blok warna selagi pelacakan menyala tercatat sebagai revisi.** Pada
+   RKMK 527 sungguhan, dua temuan menghasilkan tiga baris
+   `ajat — Formatted: Highlight` di margin, mengubur komentar yang justru perlu
+   dibaca.
 
-Tiap temuan ditandai menurut apakah ia punya rumusan pengganti yang pasti.
-Pembagian ini bukan buatan — ia jatuh sendiri dari aturan yang sudah ada:
+### 6.2 Hasil pengujian Track Changes — tetap berlaku sebagai catatan
 
-| Kelas (`jenis_tanda`) | Dipakai bila | Cara ditandai | Cara diputuskan |
-|---|---|---|---|
-| `penggantian` | Ada satu rumusan pengganti yang deterministik untuk rentang teks yang ditandai | Perubahan terlacak (Track Changes): teks lama tampil tercoret, usulan tampil di sebelahnya | Accept / Reject bawaan Word (ribbon **Review**) |
-| `catatan` | Tidak ada pengganti tunggal — entah yang salah justru ketiadaan sesuatu, atau alat tidak tahu mana dari dua kemungkinan yang benar | `insertComment` + `font.highlightColor` sesuai tingkat keparahan | Tombol Terima/Tolak di task pane |
+Diuji langsung di Word 2024 LTSC penelaah, 17 Sep 2026, lewat perancah sementara
+yang sesudahnya dicopot. Meski jalur ini tidak jadi dipakai, temuannya masih
+mengikat kalau suatu saat ada yang mempertimbangkannya lagi:
 
-Pemetaan aturan Fase 1 — diverifikasi terhadap `rules/format_baku.py` yang
-sekarang, bukan diperkirakan:
+| Yang diuji | Hasil |
+|---|---|
+| `isSetSupported("WordApi", "1.4")` dan `"1.6"` | keduanya `true` |
+| Membaca `document.changeTrackingMode` | terbaca `"Off"` |
+| Menyetel ke `"TrackAll"` lalu membaca ulang | diterima, terbaca `"TrackAll"` |
+| `insertText(..., "Replace")` selagi pelacakan menyala | teks terganti |
+| Penggantian tercatat sebagai revisi | ya |
+| Mengembalikan mode ke semula | berhasil, kembali `"Off"` |
 
-| Aturan | Kelas | Alasan |
+**Penghapusannya ikut terlacak.** Sempat terlihat seolah tidak — teks lama
+langsung lenyap. Penyebabnya Word sedang di mode **Simple Markup**, yang memang
+menyembunyikan penghapusan. Di **All Markup** teks lama muncul tercoret.
+
+**`getTrackedChanges()` melaporkan kurang dari yang sebenarnya.** Satu
+penggantian menghasilkan satu item bertipe `Added` saja, padahal di dokumen ada
+sisipan *dan* penghapusan. Jumlah dan tipe dari API ini **tidak boleh dipakai
+sebagai bukti** bahwa penandaan berhasil. Inilah salah satu alasan tambahan
+kenapa meninggalkan Track Changes justru melegakan: Terima/Tolak tidak lagi
+berdiri di atas API yang sudah terbukti tidak jujur.
+
+### 6.3 Keputusan: alat menggambar tandanya sendiri
+
+Penandaan berjalan dengan **pelacakan perubahan dimatikan**, lalu mode semula
+dikembalikan supaya setelan Word penelaah tidak diam-diam berubah. Tiga tanda,
+tiga arti yang berbeda:
+
+| Tanda | Artinya | Dipakai bila |
 |---|---|---|
-| F1-001 judul kapital | `penggantian` | Penggantinya `teks.upper()`, mekanis dan pasti |
-| F1-002 judul pembuka ≠ judul Menetapkan | `catatan` | Alat tidak tahu mana dari dua judul itu yang benar |
-| F1-003 kelengkapan struktur | `catatan` | Yang salah adalah ketiadaan bagian; tidak ada teks untuk diganti |
-| F1-004 frasa baku butir Menimbang terakhir | `catatan` | Bunyi bakunya perlu menyebut huruf mana saja yang dirujuk; untuk sekarang cukup jadi catatan. Naik ke `penggantian` hanya setelah aturannya terbukti menyusun butir penuh dengan benar |
-| F1-005 ejaan | `penggantian` | Substitusi kata, mis. `Undang-undang` → `Undang-Undang`, `Tentang` → `tentang` |
+| **Merah `#C00000` + dicoret** | salah, dan ini penggantinya | ada `usulan_rumusan` |
+| **Hijau `#00802B`** | rumusan usulannya, disisipkan di sebelahnya | menyertai yang merah |
+| **Blok kuning** (`highlightColor = "Yellow"`) | perlu ditinjau, alat tidak tahu jawabannya | tidak ada pengganti tunggal |
 
-Pada `backend/tools/contoh/contoh-rancangan-uji.docx` pembagian ini menghasilkan
-3 temuan `penggantian` dan 2 temuan `catatan`.
+Pembedaan kuning itu diminta penelaah dan alasannya benar: memberi warna merah
+pada temuan yang tidak punya pengganti membuat alat seolah mengusulkan teks itu
+dibuang, padahal yang dimaksud cuma "periksa bagian ini". **Merah dipakai hanya
+bila alat punya jawaban.** Pada temuan kuning, warna huruf tidak disentuh sama
+sekali — hanya latarnya.
 
-### 6.3 Aturan penanganan Track Changes
+Seluruh API yang dipakai ada di **WordApi 1.1**, himpunan paling dasar:
+`Font.color`, `Font.strikeThrough`, `Font.highlightColor`, `Range.insertText`,
+`Range.insertContentControl`, `ContentControl.font`, `ContentControl.delete`,
+`ContentControlCollection.getByTag`. Hanya komentar dan `changeTrackingMode`
+yang butuh 1.4. Tidak ada lagi ketergantungan pada `WordApiDesktop`.
 
-1. **Baca mode pelacakan lebih dahulu**, simpan nilainya, baru set
-   `context.document.changeTrackingMode = "TrackAll"`. Sesudah seluruh usulan
-   terpasang, **kembalikan ke nilai semula**. Menyalakan pelacakan diam-diam dan
-   membiarkannya menyala mengubah perilaku Word untuk semua ketikan penelaah
-   sesudahnya — itu kejutan yang tidak boleh dibuat alat.
-2. **Jangan pernah memanggil `accept()` atau `reject()` atas inisiatif kode.**
-   Keduanya hanya boleh jalan sebagai akibat langsung penelaah menekan tombol.
-3. **Jangan menyisipkan penggantian kalau mode pelacakan gagal dinyalakan.**
-   Tanpa pelacakan, penggantian = menimpa naskah diam-diam. Kalau
-   `changeTrackingMode` tidak bisa diset, temuan `penggantian` **turun jadi
-   `catatan`** — komentar dan sorotan warna, tanpa menyentuh teks.
-4. **Temuan `penggantian` tidak diberi sorotan warna.** Coretan revisinya sudah
-   jadi penanda visual; menambah warna di atasnya cuma bikin ramai.
-5. **Komentar tetap dipasang untuk kedua kelas** — komentar memuat *kenapa* +
-   rujukan butir KMK 527, perubahan terlacak memuat *apa* usulannya.
+**Yang harus disadari, dan sudah disetujui penelaah:** Word tidak tahu tanda ini
+usulan mesin. Tab Review menunjukkan 0 revisions, Accept All/Reject All bawaan
+Word tidak melakukan apa-apa, tidak ada nama pengusul maupun waktunya, dan kalau
+berkas dibuka orang lain tanpa add-in tidak ada yang memberi tahu bahwa merah-
+hijau itu usulan alat. Yang mengenali tandanya hanya add-in ini, lewat content
+control bertag yang dipasangnya sendiri.
 
-### 6.4 Pembagian tugas antarmuka
+Itu diterima karena sejalan dengan cara kerja yang sebenarnya: penelaah
+menghasilkan **dua dokumen** — versi bercoretan dan versi bersih
+(`project-brief.md` bagian 8.13). Naskah kerja merah-hijau inilah dokumen
+coretannya; versi bersihnya dibuat terpisah lewat ekspor. Alat ini membantu
+menelaah, bukan menggantikan telaah — penelaah tetap wajib memeriksa ulang.
+
+### 6.4 Content control sebagai jangkar
+
+Tiap tanda dibungkus content control bertag, penampilannya `Hidden` supaya tidak
+ada kotak yang terlihat:
+
+| Tag | Isinya |
+|---|---|
+| `DA-ASLI-{nomor}` | teks bermasalah — yang merah dicoret atau yang berblok kuning |
+| `DA-USUL-{nomor}` | teks usulan hijau yang disisipkan alat |
+
+Tanpa jangkar ini add-in tidak punya cara mengenali kembali tandanya sendiri,
+karena Word tidak menyimpan apa pun tentang "usulan mesin". Dengan jangkar ini
+Tolak bisa mencabut tepat yang perlu dicabut, dan Lompat ke Teks tetap tepat
+sasaran meski naskah sudah bergeser oleh penyisipan usulan.
+
+Kegagalan memasang content control **tidak** menggagalkan penandaan — tandanya
+tetap terpasang, hanya lebih sulit dicabut otomatis nanti.
+
+### 6.5 Penandaan setingkat kata
+
+Sampai 17 Sep 2026, F1-001, F1-002, dan F1-004 selalu mengirim `offset_mulai=0`
+dan `panjang=len(paragraf)`, dan `office.ts` mewarnai `p.getRange()` penuh —
+mengabaikan offset dari backend sama sekali. Akibatnya blok judul tiga baris
+tersorot seluruhnya untuk persoalan yang mungkin cuma satu kata, dan penelaah
+harus mencari sendiri huruf mana yang dipersoalkan.
+
+Sekarang yang ditandai rentang kata yang benar-benar bermasalah:
+
+- **F1-001** — tiap **deret kata beruntun** yang memuat huruf kecil. Deret, bukan
+  kata satuan: kalau judul diketik Dengan Huruf Awal Kapital tiap katanya salah,
+  dan satu temuan per kata berarti belasan komentar untuk satu persoalan yang
+  sama. Dengan deret, judul yang seluruhnya salah jadi satu temuan sepanjang
+  judul — memang itu kenyataannya — sedangkan satu kata nyasar jadi satu temuan
+  sepanjang satu kata.
+- **F1-002** — diff kata (`difflib.SequenceMatcher`) antara judul pembuka dan
+  judul Menetapkan; yang ditandai hanya kata yang berbeda. Pada dokumen contoh,
+  sorotan menyusut dari satu paragraf Menetapkan penuh jadi `PERUNDANG-UNDANGAN`
+  saja.
+- **F1-004** — butir terakhir di dalam paragrafnya, bukan paragraf penuh. Kalau
+  yang kurang cuma titik komanya, yang ditandai satu karakter terakhir.
+- **F1-005** — sudah setingkat kata sejak semula.
+
+Sisi Word menerjemahkan offset itu lewat `Word.search()` pada teks temuan,
+ditambah perhitungan **kemunculan keberapa** kata itu di dalam paragraf.
+Perhitungan itu wajib: tanpa dia, temuan pada kata yang berulang — "PERATURAN"
+di judul pencabutan, misalnya — selalu mendarat di kemunculan pertama, bukan di
+kata yang sebenarnya dipersoalkan.
+
+**Temuan yang rentang presisinya tidak ketemu TIDAK ditandai sama sekali**, dan
+jumlahnya dilaporkan di panel. Menandai satu paragraf penuh karena pencarian
+meleset pernah terjadi di proyek ini dan berakhir menutupi naskah yang tidak
+bersalah.
+
+### 6.6 Dua kelas temuan
+
+| Kelas (`jenis_tanda`) | Dipakai bila | Cara ditandai |
+|---|---|---|
+| `penggantian` | Ada satu rumusan pengganti yang deterministik untuk rentang yang ditandai | Merah + dicoret, usulan hijau di sebelahnya |
+| `catatan` | Tidak ada pengganti tunggal — yang salah adalah ketiadaan sesuatu, atau alat tidak tahu mana dari dua kemungkinan yang benar | Blok kuning, warna huruf tidak disentuh |
+
+Pemetaan aturan Fase 1 — diverifikasi terhadap `rules/format_baku.py`:
+
+| Aturan | Kelas | Aktif | Alasan |
+|---|---|---|---|
+| F1-001 judul kapital | `catatan` | **tidak** | Dimatikan — lihat 6.10 |
+| F1-002 judul pembuka ≠ judul Menetapkan | `catatan` | ya | Alat tidak tahu mana dari dua judul itu yang benar |
+| F1-003 kelengkapan struktur | `catatan` | ya | Yang salah adalah ketiadaan bagian; tidak ada teks untuk diganti |
+| F1-004 frasa baku butir Menimbang terakhir | `catatan` | ya | Bunyi bakunya perlu menyebut huruf mana saja yang dirujuk |
+| F1-005 ejaan | `penggantian` | ya | Substitusi kata, mis. `Undang-undang` → `Undang-Undang` |
+
+Pada `backend/tools/contoh/contoh-rancangan-uji.docx` dengan F1-001 mati:
+2 temuan `penggantian`, 2 temuan `catatan`.
+
+**Tingkat keparahan (tinggi/sedang/rendah) dihapus dari rancangan ini.** Dulu
+dipakai memilih warna sorotan dan menyaring daftar panel; sesudah warnanya
+ditentukan ada-tidaknya usulan, tingkat itu tidak dibaca siapa pun.
+
+### 6.7 Terima, Tolak, dan ekspor versi bersih
+
+**Terima — naskah kerja sengaja TIDAK disentuh.** Yang berubah hanya status
+kartu di panel. Coretan merah dan usulan hijaunya tetap terbaca, karena naskah
+kerja inilah dokumen coretan yang dibawa ke rapat pembahasan bersama unit
+pemrakarsa. Usulan baru benar-benar diterapkan saat ekspor versi bersih.
+
+**Tolak — tidak boleh ada bekas.** Content control `DA-USUL-{n}` dihapus berikut
+isinya (`delete(false)`); `DA-ASLI-{n}` dikembalikan warna, coretan, dan
+sorotannya seperti sebelum ditandai, lalu bungkusnya saja yang dilepas
+(`delete(true)`); komentarnya dihapus.
+
+**Yang membedakan sudah-diputuskan dari belum cukup dari kartu di panel.**
+Keputusan penelaah, 17 Sep 2026 — naskah tidak perlu ikut menandainya.
+
+**Ekspor versi bersih BELUM DIBANGUN.** Ini pekerjaan Fase 1 yang tersisa, dan
+jalurnya belum ditetapkan. Dua kemungkinan, keduanya perlu keputusan penelaah:
+
+| Jalur | Cara | Untung | Rugi |
+|---|---|---|---|
+| Di dalam Word | Add-in menerapkan temuan berstatus diterima, mencabut seluruh tandanya, lalu penelaah **Save As** | Tanpa infrastruktur baru, naskah tidak keluar dari komputer | Naskah kerja ikut berubah; penelaah harus menyimpan versi coretannya lebih dulu |
+| Lewat backend | Dokumen dikirim ke FastAPI, `python-docx` membuat berkas bersihnya | Naskah kerja utuh, hasilnya berkas terpisah | Rancangan PMK/KMK naik ke server — perlu izin |
+
+Sampai salah satunya dipilih, tombol Terima belum menghasilkan naskah final.
+
+### 6.8 Bentuk komentar
+
+Satu komentar per temuan. Tidak lebih.
+
+Komentar memuat **alasan**, bukan mengulang apa yang sudah terlihat. Pada temuan
+`penggantian`, coretan merah dan usulan hijau di naskah sudah memperlihatkan apa
+yang diusulkan berubah.
+
+Dua baris, ditutup nomor urut temuan:
+
+```
+Nama jenis peraturan ditulis dengan huruf kapital pada kedua unsurnya.
+KMK 527/KMK.01/2022 Lamp. II butir 33 — jdih.kemenkeu.go.id/... (T4)
+```
+
+Temuan `catatan` tidak menghasilkan coretan, jadi komentarnya harus menyebut
+sendiri apa yang bermasalah:
+
+```
+Judul pada Menetapkan harus sama persis dengan judul pembuka — di sini berbeda.
+Mana yang benar ditentukan penelaah.
+KMK 527/KMK.01/2022 Lamp. II butir ... — jdih.kemenkeu.go.id/... (T2)
+```
+
+Aturan bentuknya:
+
+- **Tanpa nama produk.** Ruang komentar terlalu sempit.
+- **Tanpa tingkat keparahan.**
+- **Kutipan utuh butirnya tidak ikut di komentar utama.** Taruh sebagai balasan
+  komentar (`Comment.replies`, WordApi 1.4) — dibuka hanya bila penelaah ingin
+  membaca teks aslinya. *Belum dibangun.*
+- **`(T1)`, `(T2)` adalah nomor urut temuan menurut posisinya di dokumen**, sama
+  dengan nomor di daftar panel. Bukan kode aturan. Kode aturan (`F1-005`) tetap
+  ada di data tapi tidak pernah ditampilkan. Hurufnya **T** (temuan), sengaja
+  bukan F, supaya tidak tertukar dengan awalan kode aturan `F1-`.
+
+Nomor itu sekaligus penanda yang dipakai kode untuk menemukan kembali komentarnya
+sendiri saat temuan ditolak. Karena nomornya melekat pada urutan dokumen,
+menjalankan analisis dua kali menghasilkan dua komentar bernomor sama. Itu bukan
+kemungkinan teoretis: pada pengujian 17 Sep 2026 dokumen contoh berakhir dengan
+sekitar 18 komentar padahal temuannya 5. Karena itu **panel wajib menolak
+menganalisis ulang selama masih ada temuan yang belum diputuskan**; jalan
+keluarnya tombol Bersihkan Daftar, yang sekaligus mencabut seluruh tanda bertag
+`DA-*` dari naskah.
+
+### 6.9 Pembagian tugas antarmuka
 
 | Tempat | Isinya |
 |---|---|
-| Perubahan terlacak di naskah | Usulan rumusannya — apa yang diusulkan berubah |
+| Naskah Word | Tandanya sendiri: merah-dicoret, hijau, blok kuning |
 | Komentar Word | Alasan + rujukan butir KMK 527 + tautan PDF JDIH |
-| Ribbon **Review** bawaan Word | Accept / Reject / Next / Previous untuk temuan `penggantian` |
-| Task pane | Daftar ringkas: nomor temuan, tingkat keparahan, tombol Lompat ke Teks; tombol Terima/Tolak **hanya** untuk temuan `catatan` |
+| Balasan komentar | Kutipan utuh butirnya (*belum dibangun*) |
+| Task pane | Pilihan jenis dokumen (PMK/KMK) sebelum analisis; daftar ringkas: nomor temuan, satu baris cuplikan, Lompat ke Teks, Terima/Tolak |
 
-Penjelasan panjang **tidak diulang** di task pane. Alasan temuan cukup ditulis
-sekali, di komentar. Duplikasi catatan yang sama di komentar dan di panel adalah
-keluhan utama terhadap versi sebelumnya — penelaah jadi membaca hal yang sama
-dua kali sambil menggeser dua jendela.
+Penjelasan panjang **tidak diulang** di task pane. Alasan temuan ditulis sekali,
+di komentar. Duplikasi catatan yang sama di komentar dan di panel adalah keluhan
+utama terhadap versi sebelumnya — penelaah membaca hal yang sama dua kali sambil
+menggeser dua jendela.
 
-Accept/Reject untuk temuan `penggantian` sengaja diserahkan ke ribbon Word,
-bukan dibuatkan tombol di panel. Alasannya bukan malas: mencocokkan kembali
-objek `TrackedChange` mana milik temuan mana butuh penanda identitas yang harus
-bertahan lintas sesi, sementara Word sudah melakukannya dengan benar sejak
-awal, lengkap dengan navigasi antar-perubahan. Kalau setelah dicoba penelaah
-ternyata tetap ingin tombolnya ada di panel, itu penambahan belakangan, bukan
-prasyarat.
+**Semua keputusan diambil dari panel.** Rancangan sebelumnya menyerahkan
+Accept/Reject temuan `penggantian` ke ribbon Word. Alasan teknisnya benar,
+hasilnya tetap keliru: penelaah melihat satu daftar yang separuh kartunya bisa
+ditekan dan separuhnya menyuruh pindah tempat. Dikoreksi 17 Sep 2026 atas
+masukan penelaah — dan sejak Track Changes ditinggalkan, ribbon Review memang
+tidak punya apa-apa untuk dikerjakan.
 
-### 6.5 Batas yang sudah diketahui
+### 6.10 Kaidah anti-salah-tandai
 
-- **`TrackedChange.author` bersifat `readonly`** — sudah dicek di `index.d.ts`.
-  Usulan alat akan tercatat atas nama pengguna Word yang sedang membuka
-  dokumen, **bukan** "Drafter Analiser", dan warnanya tidak bisa dibedakan dari
-  suntingan penelaah sendiri. Jejak asal-usul tetap ada lewat komentar
-  pendampingnya yang berpenanda `[Drafter Analiser — …]`.
-- **Warna tidak bisa diatur per makna.** Word mewarnai revisi per penulis.
-  Kebiasaan penelaah memakai merah untuk salah dan hijau untuk usulan tidak
-  berlaku pada perubahan terlacak. Warna per tingkat keparahan tetap ada, tapi
-  hanya pada temuan `catatan`.
-- **"Accept All" menerima semua, termasuk revisi penelaah sendiri** yang
-  kebetulan ada di dokumen yang sama. Ini perlu disampaikan di panel, dan
-  penelaah sebaiknya menjalankan alat pada salinan kerja.
-- **Belum diuji runtime.** `changeTrackingMode` (WordApi 1.4) dan
-  `TrackedChange` beserta `accept()`/`reject()` (WordApi 1.6) sudah diverifikasi
-  ada di `index.d.ts`, dan Word penelaah mendukung sampai 1.9. Tapi pelajaran
-  dari Critique berlaku: **requirement set didukung ≠ fitur diizinkan.** Track
-  Changes adalah fitur inti Word yang tidak terkunci langganan, jadi peluangnya
-  jauh lebih besar — tetapi wajib dibuktikan lewat satu percobaan kecil sebelum
-  sisa pekerjaan dibangun di atasnya. Lihat bagian 13 langkah 5.
+> **Apa pun yang ditandai alat ini wajib benar-benar salah. Aturan yang tidak
+> bisa membuktikan kesalahannya tidak boleh menandai apa pun.**
+
+Kaidah ini ditetapkan penelaah 17 Sep 2026 sesudah dua salah tandai berturut-
+turut pada RKMK 527 sungguhan — keduanya menyorot naskah yang sebenarnya sudah
+benar. Satu salah tandai merusak kepercayaan lebih cepat daripada sepuluh temuan
+benar membangunnya.
+
+**Kasus 1 — F1-001, judul ber-ALL CAPS. Aturannya DIMATIKAN.**
+
+Judul RKMK diketik huruf campur — "Perubahan Atas Keputusan Menteri Keuangan
+Nomor 527/KMK.01/2022 …" — lalu ditampilkan kapital seluruhnya lewat gaya
+paragraf bernama **ALL CAPS**. Buktinya terbaca di panel sendiri: kartu temuan
+menampilkan cuplikan `"Perubahan Atas Keputusan Menteri Keuan…"` sementara di
+badan Word tertulis `PERUBAHAN ATAS KEPUTUSAN MENTERI KEUANGAN NOMOR …`.
+
+Aturan menemukan huruf kecil sungguhan — huruf kecil yang tidak bisa dilihat
+siapa pun.
+
+Penjaga `tampil_kapital` sempat dipasang: frontend membaca `font.allCaps` lalu
+mengirimkannya per paragraf, dan F1-001 melewati paragraf bernilai `true`.
+Penjaga itu **tidak menolong** di Word penelaah. `font.allCaps` ada di
+`WordApiDesktop 1.3`, dan belum jelas apakah requirement set-nya tidak tersedia
+atau propertinya buta terhadap kapital yang datang dari gaya paragraf. Selama
+itu belum jelas, aturannya tidak boleh jalan.
+
+Kandidat jalan keluar: baca OOXML paragrafnya (`Range.getOoxml()`, WordApi 1.1)
+lalu cari penanda `<w:caps/>`, yang memuat definisi gaya juga. **Belum diuji, dan
+dilarang dipasang sebelum diuji.**
+
+Fungsinya sengaja tidak dihapus — logikanya masih benar untuk naskah yang
+hurufnya betul-betul campur, dan tesnya masih menjaga logika itu. Yang dihapus
+hanya pemanggilannya, lewat bendera `AKTIFKAN_F1_001 = False`.
+
+Bendera `tampil_kapital` tetap ada di `ParagrafInput` supaya kontrak lama tidak
+pecah, tapi frontend **tidak lagi mengirimkannya**: satu-satunya pemakainya
+adalah aturan yang sudah mati, dan membacanya berarti satu putaran sync tambahan
+atas ratusan paragraf untuk data yang tidak dipakai.
+
+**Kasus 2 — F1-002, klausul Menetapkan kebablasan. Bug, sudah diperbaiki.**
+
+Klausul `Menetapkan` diambil sampai bertemu penanda bagian berikutnya. Daftar
+penandanya berbunyi `(BAB|Pasal|PERTAMA|KEDUA|KETIGA)` — itu penomoran diktum
+**PMK**. Diktum KMK dimulai **KESATU**, yang tidak ada di daftar itu.
+
+Akibatnya pengambilan melewati klausul Menetapkan dan menelan diktum KESATU
+beserta seluruh isinya. Judul Menetapkan jadi sepanjang belasan paragraf, lalu
+dilaporkan "berbeda dari judul pembuka" — padahal di naskah sama persis.
+
+Tiga perbaikan, dan yang ketiga yang paling penting:
+
+1. Daftar penanda ditambah seluruh penomoran diktum KMK (KESATU–KESEPULUH).
+2. Penghenti yang lebih dapat diandalkan: judul pada Menetapkan selalu diakhiri
+   titik, jadi paragraf pertama yang berakhiran titik menutup klausulnya. Tidak
+   bergantung menebak kata apa yang datang sesudahnya. Titik di tengah nomor
+   peraturan (`527/KMK.01/2022`) tidak kena karena yang diperiksa hanya akhir
+   paragraf.
+3. **Jaring pengaman: kalau hasil pengambilan lebih dari 60 kata, aturannya
+   memilih DIAM.** Judul peraturan terpanjang di JDIH masih jauh di bawah angka
+   itu; melewatinya berarti pengambilan gagal dan kita tidak tahu di mana.
+   Melapor dalam keadaan itu sama dengan menuduh naskah yang mungkin sudah benar.
+
+Dua tes regresi menyusun ulang struktur RKMK itu persis, termasuk diktum KESATU
+dan paragraf lanjutannya. Tanpa perbaikan, keduanya gagal.
+
+Butir 3 adalah bentuk umum kaidah ini di dalam kode: **tiap aturan yang bisa
+kebablasan wajib punya batas kewajaran, dan di luar batas itu memilih diam.**
+
+### 6.11 Batas yang sudah diketahui
+
+- **Warna asli disimpan di memori panel, bukan di dokumen.** Kalau Word ditutup
+  sebelum temuan diputuskan, Tolak hanya bisa mengembalikan warna huruf ke hitam,
+  bukan ke warna aslinya. Menyimpannya di custom XML part akan menghilangkan
+  batas ini — belum dibangun.
+- **Kalau `changeTrackingMode` gagal dimatikan**, tanda alat ikut tercatat Word
+  sebagai revisi format. Panel memberitahukannya dan menyarankan mematikan Track
+  Changes lalu menjalankan ulang. Belum pernah terjadi pada pengujian.
+- **Word tidak memberi tahu add-in** kalau penelaah mengubah naskah sendiri.
+  Tanda yang dihapus manual tidak akan tercermin di panel.
+- **Penelaah sebaiknya menjalankan alat pada salinan kerja**, bukan pada naskah
+  asli. Ini versi pertama yang benar-benar menyisipkan teks ke dokumen. Ctrl+Z
+  tetap bekerja normal.
+
+### 6.12 Jenis dokumen dipilih penelaah, dan wajib
+
+Sebagian aturan berperilaku beda menurut jenis dokumennya. Butir Menimbang
+terakhir harus berbunyi "perlu menetapkan **Peraturan** Menteri Keuangan
+tentang…" pada PMK dan "**Keputusan** Menteri Keuangan" pada KMK (F1-004). Blok
+judul juga berakhir di penanda yang berbeda: PMK di
+`DENGAN RAHMAT TUHAN YANG MAHA ESA`, KMK di
+`MENTERI KEUANGAN REPUBLIK INDONESIA,`.
+
+Sampai 17 Sep 2026 jenis itu **ditebak** oleh `_tentukan_jenis_dokumen()`:
+paragraf pertama yang memuat "PERATURAN MENTERI KEUANGAN" dianggap PMK. Cara itu
+bertumpu pada asumsi bahwa penyebutan pertama selalu datang dari blok judul —
+dan asumsi itu rapuh. Pada RKMK sungguhan, bagian Mengingat memuat *"Peraturan
+Menteri Keuangan Nomor 202/PMK.010/2017…"*. Kalau blok judulnya tidak terbaca
+lebih dulu, KMK itu dikira PMK, lalu F1-004 menuntut bunyi yang salah — alat
+menandai naskah yang sebenarnya sudah benar.
+
+**Keputusan: jenis dokumen dipilih penelaah di task pane, sebelum menekan
+Analisis.** Penelaah sudah tahu pasti dokumen apa yang sedang dia buka;
+menebaknya berarti membangun kerumitan untuk menjawab pertanyaan yang jawabannya
+sudah tersedia gratis.
+
+Ketentuannya:
+
+- **Tidak ada nilai awal.** Panel dimulai tanpa pilihan apa pun. Kalau salah
+  satunya jadi bawaan, penelaah yang lupa memilih tetap dapat hasil analisis —
+  hasil yang diperiksa memakai kaidah jenis dokumen yang keliru, tanpa ada apa
+  pun yang memberi tahu. Lebih baik menolak berjalan daripada diam-diam salah.
+  (Rancangan sebelumnya memakai PMK sebagai bawaan; dibatalkan atas masukan
+  penelaah 17 Sep 2026.)
+- Menekan Analisis tanpa memilih membuat baris pilihan **bergoyang** dan berubah
+  merah, analisisnya tidak jalan. Goyangannya dimatikan sendiri bila sistem
+  operasi meminta `prefers-reduced-motion`.
+- `jenis_dokumen` dikirim ke backend sebagai bagian `AnalisisRequest`, dan
+  **wajib terisi** — bukan opsional.
+- `_tentukan_jenis_dokumen()` **dihapus**. Jenis diteruskan sebagai parameter ke
+  `_ekstrak_judul_pembuka()` dan `cek_frasa_baku_menimbang()`.
+- Cabang darurat di F1-004 yang selama ini jalan saat jenis tidak terdeteksi —
+  melemah jadi sekadar memeriksa ada-tidaknya kata "tentang", tanpa memberi tahu
+  siapa pun — **ikut dihapus**, karena keadaan "jenis tidak diketahui" tidak
+  mungkin lagi terjadi. Ini cacat yang hilang, bukan yang ditambal.
+
+Salah pilih tetap mungkin, tapi akibatnya kelihatan: temuan yang keluar janggal
+beramai-ramai, labelnya terpampang di panel, dan membetulkannya satu klik.
+Peringatan otomatis bila pilihan penelaah bertentangan dengan bunyi baris judul
+**belum dibangun** — tambahkan hanya kalau terbukti penelaah sering salah pilih.
 
 ---
 
@@ -374,85 +666,19 @@ kemampuan baru. Bertentangan dengan prinsip "sederhana dahulu".
 
 ### Kapan database benar-benar diperlukan
 
-Di Fase 2/3, saat analisis berjalan menit sampai jam. Brief bagian 8.9
-mensyaratkan: *"hasil disimpan per satuan sehingga yang sudah selesai tetap
-dapat diakses meskipun proses terputus."* Itu baru butuh penyimpanan.
+Di Fase 2/3, saat analisis berjalan menit sampai jam dan hasilnya harus bertahan
+meski prosesnya terputus (brief bagian 8.9). Skemanya dirancang saat itu tiba —
+**bukan sekarang**. Dokumen ini memuat Fase 1 saja; merancang tabel untuk
+kebutuhan yang belum ada berarti mengunci keputusan sebelum kebutuhannya
+diketahui.
 
-Skema minimal untuk saat itu tiba — dirancang sekarang supaya tidak perlu
-dibongkar ulang:
+Yang perlu diingat sekarang hanya dua hal, supaya tidak menyulitkan nanti:
 
-```sql
--- satu baris per kali analisis dijalankan
-CREATE TABLE analisis (
-    id              UUID PRIMARY KEY,
-    nama_dokumen    TEXT NOT NULL,
-    sidik_dokumen   TEXT NOT NULL,     -- hash isi, untuk deteksi dokumen berubah
-    cakupan         TEXT NOT NULL,     -- 'seluruh' | 'terpilih'
-    fase            SMALLINT NOT NULL,
-    status          TEXT NOT NULL,     -- 'berjalan' | 'selesai' | 'terputus'
-    dibuat_pada     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    selesai_pada    TIMESTAMPTZ
-);
-
--- satuan pemeriksaan = ayat/butir, BUKAN pasal (brief bagian 8.9)
-CREATE TABLE satuan_periksa (
-    id              UUID PRIMARY KEY,
-    analisis_id     UUID NOT NULL REFERENCES analisis(id) ON DELETE CASCADE,
-    urutan          INTEGER NOT NULL,
-    label           TEXT NOT NULL,     -- mis. 'Pasal 3 ayat (2)'
-    status          TEXT NOT NULL,     -- 'antre' | 'selesai' | 'gagal'
-    diperiksa_pada  TIMESTAMPTZ,
-    UNIQUE (analisis_id, urutan)
-);
-
-CREATE TABLE temuan (
-    id                UUID PRIMARY KEY,
-    analisis_id       UUID NOT NULL REFERENCES analisis(id) ON DELETE CASCADE,
-    satuan_id         UUID REFERENCES satuan_periksa(id) ON DELETE CASCADE,
-    aturan_id         TEXT NOT NULL,   -- mis. 'F1-001', kunci ke tabel rujukan di kode
-    tingkat_keparahan TEXT NOT NULL,   -- 'tinggi' | 'sedang' | 'rendah'
-    jenis_tanda       TEXT NOT NULL,   -- 'penggantian' | 'catatan'
-    catatan           TEXT NOT NULL,
-    usulan_rumusan    TEXT,
-    status            TEXT NOT NULL DEFAULT 'belum_ditinjau',
-    dibuat_pada       TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- hanya untuk Fase 3: rujukan hasil pencarian OpenSearch, beda tiap dokumen
-CREATE TABLE rujukan_temuan (
-    id           UUID PRIMARY KEY,
-    temuan_id    UUID NOT NULL REFERENCES temuan(id) ON DELETE CASCADE,
-    nomor        TEXT NOT NULL,
-    tahun        TEXT NOT NULL,
-    pasal        TEXT,
-    kutipan      TEXT NOT NULL,
-    pdf_url      TEXT,
-    skor         REAL
-);
-```
-
-Yang **tidak** masuk database: tabel rujukan KMK 527 (itu kode), dan isi utuh
-dokumen rancangan.
-
-### Lokasi database
-
-**Sekarang, belum dipakai sama sekali:** Neon. Cukup untuk pengembangan, tidak
-ada urgensi karena Fase 1 tidak menyentuhnya sama sekali.
-
-**Sebelum Fase 2 mengolah rancangan sungguhan:** lokasi ini wajib
-dipertimbangkan ulang. Neon di-host di luar infrastruktur Kemenkeu; brief
-bagian 2 dan 8.10 menegaskan rancangan yang belum terbit tidak layak dikirim ke
-layanan luar. Tujuan akhir proyek ini juga bermigrasi ke Law Analyzer yang
-memakai Postgres internal (`POSTGRES_HOST=localhost` di env-nya) — karena
-formatnya sama-sama Postgres, pindah nanti cuma ganti `DATABASE_URL`, tidak ada
-kode yang ditulis ulang.
-
-**ORM: SQLModel, bukan Prisma.** Prisma Client Python sudah tidak dipelihara
-(diarsipkan April 2025), bukan produk resmi Prisma, dan tetap butuh Node.js di
-baliknya meski namanya "untuk Python". SQLModel dibuat oleh pembuat FastAPI
-sendiri dan merupakan cara standar resmi menghubungkan FastAPI ke database.
-
----
+- ORM-nya **SQLModel**, bukan Prisma — satu model dipakai sekaligus sebagai
+  skema validasi FastAPI dan tabel database, sejalan dengan Pydantic yang sudah
+  dipakai di `models/temuan.py`.
+- Nama variabel `DATABASE_URL` sudah disiapkan di `core/config.py` supaya
+  berkas itu tidak dirombak ulang.
 
 ## 10. Tabel rujukan KMK 527 — tanpa AI, tanpa OpenSearch
 
@@ -502,9 +728,9 @@ temuan wajib ditandai "rujukan belum diverifikasi" di antarmuka.
 ```json
 {
   "id": "f-001",
+  "nomor": 1,
   "aturan_id": "F1-001",
   "fase": 1,
-  "tingkat_keparahan": "tinggi",
   "jenis_tanda": "penggantian",
   "lokasi": {
     "paragraf_index": 3,
@@ -512,7 +738,7 @@ temuan wajib ditandai "rujukan belum diverifikasi" di antarmuka.
     "panjang": 48,
     "teks_asli": "Tata Cara Uji Coba Penelaahan Rancangan Peraturan"
   },
-  "catatan": "Judul peraturan seharusnya ditulis kapital seluruhnya.",
+  "catatan": "Judul peraturan ditulis kapital seluruhnya.",
   "usulan_rumusan": "TATA CARA UJI COBA PENELAAHAN RANCANGAN PERATURAN",
   "rujukan": {
     "sumber": "KMK 527/KMK.01/2022 Lampiran II",
@@ -524,22 +750,49 @@ temuan wajib ditandai "rujukan belum diverifikasi" di antarmuka.
 }
 ```
 
+Dua perubahan dari versi sebelumnya:
+
+**`tingkat_keparahan` DIHAPUS.** Dulu dipakai memilih warna sorotan dan
+menyaring daftar panel; keduanya sudah tidak ada. Menyimpan field yang tidak
+dibaca siapa pun hanya menyisakan pertanyaan bagi orang berikutnya yang membaca
+kode.
+
+**`nomor` DITAMBAHKAN** — nomor urut temuan menurut posisinya di dokumen,
+dimulai dari 1. Inilah yang ditampilkan sebagai `(T1)`, `(T2)` di komentar dan
+sebagai nomor di daftar panel. Backend yang menetapkannya, sesudah seluruh
+aturan selesai dijalankan dan temuannya diurutkan menurut `paragraf_index` lalu
+`offset_mulai`.
+
 **`jenis_tanda`** — `"penggantian"` | `"catatan"`. Menentukan cara temuan
-dipasang di dokumen (bagian 6.2). Aturan yang menghasilkan temuan wajib
-menetapkannya eksplisit.
+dipasang di dokumen (bagian 6.3). Aturan yang menghasilkan temuan wajib
+menetapkannya eksplisit, **bukan** disimpulkan dari ada-tidaknya
+`usulan_rumusan`.
 
 Bila `jenis_tanda` = `"penggantian"`, maka `usulan_rumusan` **wajib terisi** dan
 harus berupa teks pengganti harfiah untuk `lokasi.teks_asli` — bukan contoh
-bunyi, bukan penjelasan. Ini kontrak yang mengikat: isi field inilah yang
-disisipkan ke naskah orang.
+bunyi, bukan penjelasan. Isi field inilah yang disisipkan ke naskah orang.
 
 Bila `jenis_tanda` = `"catatan"`, `usulan_rumusan` boleh `null` atau berisi
 contoh bunyi yang hanya ditampilkan, tidak pernah disisipkan.
 
-`offset_mulai` dan `panjang` tetap ada untuk menandai rentang presisi di dalam
-paragraf.
+`catatan` ditulis sebagai **alasan**, bukan pengulangan apa yang sudah terlihat
+di naskah — lihat bagian 6.5.
 
-Salin bentuk ini ke `docs/kontrak-data.md` setiap kali berubah — dua berkas itu
+### Bentuk AnalisisRequest
+
+```json
+{
+  "jenis_dokumen": "PMK",
+  "paragraf": [
+    { "index": 0, "teks": "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA" }
+  ]
+}
+```
+
+`jenis_dokumen` — `"PMK"` | `"KMK"`, **wajib terisi**, dipilih penelaah di task
+pane (bagian 6.7). Backend tidak menebaknya sendiri.
+
+Salin bentuk ini ke `docs/kontrak-data.md` setiap kali berubah; dua berkas itu
 harus selalu sama.
 
 ---
@@ -560,25 +813,16 @@ Karena itu juga: **jangan pernah** beri prefiks ini ke variabel berisi
 kredensial, karena otomatis ikut ter-build ke kode yang bisa dibaca siapa pun
 lewat DevTools.
 
-Tabel di bawah ini untuk Fase 2/3, disiapkan sejak awal supaya `core/config.py`
-tidak dirombak ulang:
+Nama variabel untuk Fase 2/3 (`DATABASE_URL`, `OPENSEARCH_*`, `AZURE_OPENAI_*`)
+sudah dicantumkan di `core/config.py` sejak awal supaya berkas itu tidak dirombak
+ulang nanti. **Tidak satu pun dipakai di Fase 1**, dan rinciannya bukan urusan
+dokumen ini.
 
-| Variabel | Untuk apa | Mulai fase |
-|---|---|---|
-| `DATABASE_URL` | Koneksi Postgres (analisis, satuan, temuan) | Fase 2 |
-| `OPENSEARCH_HOST`, `OPENSEARCH_PORT` | Alamat server pencarian | Fase 3 |
-| `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD` | Autentikasi OpenSearch | Fase 3 |
-| `OPENSEARCH_INDEX` | Index teks pasal (pencarian kata) | Fase 3 |
-| `OPENSEARCH_EMBEDDING_INDEX` | Index vektor (pencarian makna) | Fase 3 |
-| `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION` | Model penjawab | Fase 2 |
-| `AZURE_TASK_DEPLOYMENT` | Nama deployment model penjawab | Fase 2 |
-| `AZURE_EMBEDDING_DEPLOYMENT` | Deployment model pengubah teks→vektor | Fase 3 |
-
-Dua catatan:
+Dua catatan yang perlu diingat saat Fase 2 dimulai:
 
 - Penamaan di `core/config.py` (`AZURE_TASK_DEPLOYMENT`) **tidak sama** dengan
   penamaan di env Law Analyzer (`AZURE_OPENAI_TASK_DEPLOYMENT_NAME`). Perlu
-  diselaraskan saat Fase 2 dimulai, belum masalah sekarang.
+  diselaraskan, belum masalah sekarang.
 - `MINIO_*` tidak diperlukan. Tautan PDF sudah ikut terkirim dari OpenSearch
   sebagai field `pdf_url`.
 
@@ -586,8 +830,9 @@ Dua catatan:
 
 ## 13. Urutan implementasi
 
-Langkah 1–4 **sudah selesai** dan terbukti jalan di Word sungguhan. Langkah 5
-ke bawah adalah pekerjaan yang tersisa.
+Diperbarui 17 Sep 2026. Yang bertanda **selesai** sudah dikerjakan dan lolos
+tesnya; yang bertanda **belum diuji di Word** sudah ditulis dan lolos typecheck
+tetapi belum sekali pun dijalankan di dalam Word.
 
 1. ~~Salin skema Temuan ke `docs/kontrak-data.md`.~~ **Selesai** — perlu
    diperbarui dengan `jenis_tanda`.
@@ -598,21 +843,45 @@ ke bawah adalah pekerjaan yang tersisa.
    "Undang-Undang" dua huruf U kapital (KMK 527 butir 33) dan kata "tentang"
    huruf kecil di judul dasar hukum (butir 32). Jangan memasang kamus besar
    sebelum cakupannya dipastikan ke penelaah.
-5. **Buktikan Track Changes jalan, sebelum apa pun dibangun di atasnya.**
-   Percobaan sekecil mungkin: set `changeTrackingMode = "TrackAll"`, ganti satu
-   kata lewat `insertText(..., "Replace")`, sync, lalu `getTrackedChanges()` dan
-   pastikan jumlahnya bertambah. Kalau melempar `NotImplemented` seperti
-   Critique, **berhenti** dan laporkan — seluruh bagian 6 harus dirancang ulang,
-   jangan diakali sendiri.
-6. **Tambahkan `jenis_tanda`** di `models/temuan.py`, isi eksplisit di tiap
-   fungsi `rules/format_baku.py` sesuai tabel bagian 6.2, perbarui
-   `docs/kontrak-data.md`, tambah tes untuk tiap aturan.
-7. **Pasang jalur `penggantian`** di `office.ts` sesuai aturan bagian 6.3 —
-   termasuk penurunan otomatis ke `catatan` bila pelacakan gagal dinyalakan.
-8. **Ringkas task pane** sesuai bagian 6.4: buang penjelasan panjang, sisakan
-   nomor, tingkat, Lompat ke Teks, dan Terima/Tolak untuk temuan `catatan`.
-9. **Terakhir**, lengkapi tabel rujukan KMK 527 (bagian 10) dengan kutipan
-   yang sudah dibaca visual.
+5. ~~Buktikan Track Changes jalan.~~ **Selesai 17 Sep 2026** — hasilnya di
+   bagian 6.2. Lolos tanpa `NotImplemented`, tetapi jalur ini **tidak jadi
+   dipakai**; alasannya di bagian 6.1. Langkahnya tidak dihapus karena hasil
+   pengujiannya masih mengikat.
+6. ~~Ubah kontrak data.~~ **Selesai** — `tingkat_keparahan` dihapus, `nomor` dan
+   `jenis_tanda` ditambahkan, `jenis_dokumen` jadi wajib di `AnalisisRequest`,
+   `_tentukan_jenis_dokumen()` dihapus, teks `catatan` ditulis ulang jadi bentuk
+   alasan.
+7. ~~Pasang pengaman analisis berulang~~ (bagian 6.8). **Selesai** — panel
+   menolak analisis ulang selama masih ada temuan yang belum diputuskan, dengan
+   jalan keluar Bersihkan Daftar.
+8. ~~Ringkas task pane~~ (bagian 6.9). **Selesai** — penjelasan panjang dibuang,
+   tersisa pemilih jenis dokumen, nomor temuan, cuplikan, Lompat ke Teks, dan
+   Terima/Tolak untuk semua temuan.
+9. ~~Penandaan setingkat kata~~ (bagian 6.5). **Selesai di backend, belum diuji
+   di Word.** F1-001/002/004 mengirim offset presisi; `office.ts` mencarinya
+   lewat `Word.search()` + hitungan kemunculan keberapa.
+10. ~~Matikan F1-001 dan perbaiki bug klausul Menetapkan~~ (bagian 6.10).
+    **Selesai** — dua tes regresi menjaga keduanya.
+11. ~~Ganti lapisan penandaan ke merah/hijau/kuning gambar sendiri~~
+    (bagian 6.3–6.4). **Belum diuji di Word.** Yang wajib dibuktikan di Word
+    sungguhan, pada **salinan** naskah:
+    - content control ber-`appearance: "Hidden"` benar-benar tidak terlihat;
+    - `insertText(..., "After")` mendarat di sebelah teks aslinya, bukan di
+      dalam bungkusnya;
+    - `delete(false)` membuang usulan hijau berikut isinya, `delete(true)`
+      melepas bungkus tanpa menghapus naskah;
+    - Tolak memulihkan naskah tanpa bekas;
+    - tidak ada lagi baris `Formatted: Highlight` di margin.
+12. **Ekspor versi bersih** (bagian 6.7) — jalurnya belum ditetapkan, perlu
+    keputusan penelaah lebih dulu.
+13. **Tambah aturan.** Dengan F1-001 mati, tersisa empat aturan dan pada RKMK
+    yang rapi hasilnya bisa nol temuan. Itu benar, tapi belum cukup untuk
+    peragaan. Daftar kemungkinan pemeriksaan ada di brief bagian 8.11 dan
+    **masih dugaan** — konfirmasikan ke penelaah dulu, jangan dibangun dari
+    tebakan.
+14. **Terakhir**, lengkapi tabel rujukan KMK 527 (bagian 10) dengan kutipan yang
+    sudah dibaca visual. Selama masih placeholder, panel wajib menampilkan
+    penanda "rujukan belum diverifikasi".
 
 ---
 
@@ -624,14 +893,15 @@ ke bawah adalah pekerjaan yang tersisa.
 3. **Kredensial hanya hidup di backend**, tidak pernah sampai ke browser.
 4. **Jangan pakai LLM untuk hal yang bisa diselesaikan regex atau logika biasa.**
    Ini prinsip proyek, bukan saran.
-5. **Alat mengusulkan, penelaah yang memutuskan.** Usulan boleh disisipkan ke
-   naskah **hanya** sebagai perubahan terlacak yang bisa dibatalkan satu klik,
-   dan **hanya** setelah `changeTrackingMode` terbukti menyala. Dilarang:
-   memanggil `accept()`/`reject()` dari kode atas inisiatif sendiri, membuat
-   tombol "terapkan semua", menimpa teks saat pelacakan mati, dan menyentuh
-   rentang di luar `lokasi` temuan. Pelanggaran aturan ini pernah terjadi sekali
-   (fungsi `applyUsulanRumusan` yang menimpa satu paragraf penuh ketika
-   pencarian meleset) dan berakhir dihapus — jangan diulang.
+5. **Alat mengusulkan, penelaah yang memutuskan.** Usulan disisipkan sebagai
+   teks hijau **di sebelah** teks aslinya, dibungkus content control bertag,
+   dan teks lama **tidak dihapus** — cuma diberi warna merah dan coretan.
+   Dilarang: menghapus teks penelaah atas inisiatif kode, membuat tombol
+   "terapkan semua", dan menyentuh rentang di luar `lokasi` temuan. Pelanggaran
+   aturan ini pernah terjadi sekali (fungsi `applyUsulanRumusan` yang menimpa
+   satu paragraf penuh ketika pencarian meleset) dan berakhir dihapus — jangan
+   diulang. Karena itu juga: temuan yang rentang presisinya tidak ketemu
+   **tidak ditandai sama sekali**, bukan diperlebar ke satu paragraf.
 6. **Setiap temuan wajib membawa rujukan yang bisa diperiksa** — diambil dari
    tabel tetap, **tidak boleh dikarang**.
 7. **Jangan menulis apa pun ke basis data produksi JDIH/Law Analyzer.**
@@ -654,7 +924,16 @@ ke bawah adalah pekerjaan yang tersisa.
     menjalankan server.
 13. **Jangan simpan state global di backend.** Tiap permintaan berdiri sendiri.
 14. **Jangan over-engineer untuk skala besar di build pertama.**
-15. **Ikuti urutan di bagian 13**, dan jangan lewati langkah 5.
+15. **Ikuti urutan di bagian 13.**
+16. **Apa pun yang ditandai wajib benar-benar salah** (bagian 6.10). Aturan yang
+    tidak bisa membuktikan kesalahannya harus dimatikan, bukan diperhalus. Tiap
+    aturan yang bisa kebablasan wajib punya batas kewajaran, dan di luar batas
+    itu memilih diam. Satu salah tandai merusak kepercayaan lebih cepat daripada
+    sepuluh temuan benar membangunnya.
+17. **Seluruh penandaan berjalan dengan `changeTrackingMode = "Off"`**, lalu mode
+    semula dikembalikan. Menandai selagi pelacakan menyala membuat tiap warna
+    tercatat sebagai revisi `Formatted: Highlight` dan mengubur komentar yang
+    justru perlu dibaca.
 
 ---
 
@@ -662,21 +941,37 @@ ke bawah adalah pekerjaan yang tersisa.
 
 Build ini berhasil kalau:
 
-- [x] `docs/kontrak-data.md` berisi skema Temuan — perlu diperbarui dengan
-      `jenis_tanda`
+**Sudah tercapai:**
+
+- [x] `docs/kontrak-data.md` berisi skema Temuan yang sama dengan bagian 11
 - [x] Task pane terbuka di Word dan membaca paragraf dokumen aktif
 - [x] Tombol "Analisis" memanggil backend; backend menjalankan seluruh
       pemeriksaan di bagian 3
 - [x] Tiap fungsi di `rules/` punya tes yang jalan tanpa server
-- [ ] Track Changes terbukti jalan di Word penelaah (bagian 13 langkah 5)
-- [ ] Temuan `penggantian` muncul sebagai perubahan terlacak: teks lama tercoret,
-      usulan di sebelahnya
-- [ ] Accept di ribbon Review menghasilkan teks bersih; Reject mengembalikan
-      naskah asli tanpa bekas
-- [ ] Temuan `catatan` muncul sebagai komentar + warna sesuai keparahan, dan
-      bisa diterima/ditolak dari task pane
-- [ ] Komentar memuat alasan + rujukan butir KMK 527; task pane tidak mengulang
-      penjelasan yang sama
-- [ ] Accept All menghasilkan versi bersih yang layak dikirim ke unit pemrakarsa
+- [x] Jenis dokumen wajib dipilih; menekan Analisis tanpa memilih tidak jalan
+- [x] Yang ditandai rentang kata yang salah, bukan paragraf penuh (di backend)
+- [x] Tidak ada aturan yang menandai naskah yang sudah benar — dua salah tandai
+      yang ditemukan pada RKMK 527 sudah ditutup (bagian 6.10)
+- [x] Menjalankan analisis dua kali tidak menumpuk komentar
+- [x] Task pane tidak mengulang penjelasan yang sudah ada di komentar
+
+**Belum, dan wajib dibuktikan di Word sungguhan pada salinan naskah:**
+
+- [ ] Temuan `penggantian` muncul merah tercoret dengan usulan hijau di
+      sebelahnya
+- [ ] Temuan `catatan` muncul sebagai blok kuning tanpa mengubah warna hurufnya
+- [ ] Tepat satu komentar per temuan, berisi alasan + rujukan butir, dua baris
+- [ ] Tidak ada satu pun baris `Formatted: Highlight` di margin
+- [ ] Tolak memulihkan naskah persis seperti sebelum ditandai
+- [ ] Bersihkan Daftar mencabut seluruh tanda `DA-*` tanpa menyentuh warna milik
+      penyusun sendiri
+- [ ] Yang tersorot di Word benar-benar kata yang salah, bukan paragrafnya
+
+**Belum dibangun:**
+
+- [ ] Ekspor versi bersih yang layak dikirim ke unit pemrakarsa (bagian 6.7)
+- [ ] Kutipan utuh butir sebagai balasan komentar (bagian 6.8)
 - [ ] Diuji pada dokumen panjang, bukan cuma dokumen contoh
 - [ ] Tabel rujukan KMK 527 tidak lagi placeholder
+- [ ] Aturan yang cukup banyak untuk berguna pada RKMK yang rapi — lihat
+      bagian 13 langkah 13

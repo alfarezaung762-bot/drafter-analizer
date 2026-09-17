@@ -1,6 +1,14 @@
-"""Skema data Temuan — kontrak final antara backend dan frontend.
+"""Skema data Temuan — kontrak antara backend dan frontend.
 
 Lihat docs/kontrak-data.md untuk penjelasan lengkap tiap field.
+
+Revisi 17 Sep 2026:
+- `tingkat_keparahan` DIHAPUS. Dulu dipakai memilih warna sorotan dan menyaring
+  daftar panel; keduanya sudah tidak ada.
+- `nomor` DITAMBAHKAN — nomor urut temuan menurut posisinya di dokumen,
+  ditampilkan ke penelaah sebagai (T1), (T2), dst.
+- `jenis_tanda` DITAMBAHKAN — menentukan cara temuan dipasang di dokumen.
+- `jenis_dokumen` DITAMBAHKAN di AnalisisRequest, wajib, dipilih penelaah.
 """
 
 from __future__ import annotations
@@ -15,10 +23,23 @@ from pydantic import BaseModel, Field
 # Enum
 # ---------------------------------------------------------------------------
 
-class TingkatKeparahan(str, Enum):
-    TINGGI = "tinggi"
-    SEDANG = "sedang"
-    RENDAH = "rendah"
+class JenisDokumen(str, Enum):
+    """Jenis dokumen yang sedang ditelaah. Dipilih penelaah, tidak ditebak."""
+
+    PMK = "PMK"
+    KMK = "KMK"
+
+
+class JenisTanda(str, Enum):
+    """Cara temuan dipasang di dokumen.
+
+    PENGGANTIAN — ada rumusan pengganti yang pasti untuk lokasi.teks_asli,
+                  dipasang sebagai perubahan terlacak (Track Changes).
+    CATATAN     — tidak ada pengganti tunggal, cukup blok kuning + komentar.
+    """
+
+    PENGGANTIAN = "penggantian"
+    CATATAN = "catatan"
 
 
 class StatusTemuan(str, Enum):
@@ -41,7 +62,7 @@ class LokasiTemuan(BaseModel):
         ..., description="Posisi karakter awal di dalam paragraf"
     )
     panjang: int = Field(
-        ..., description="Panjang karakter yang disorot"
+        ..., description="Panjang karakter yang ditandai"
     )
     teks_asli: str = Field(
         ..., description="Teks asli yang bermasalah"
@@ -75,19 +96,41 @@ class Temuan(BaseModel):
     id: str = Field(
         ..., description="Identifier unik temuan dalam satu sesi analisis"
     )
+    nomor: int = Field(
+        default=0,
+        description=(
+            "Nomor urut menurut posisi di dokumen, mulai dari 1. Diisi "
+            "jalankan_semua() sesudah seluruh temuan diurutkan — aturan "
+            "masing-masing tidak tahu urutan global."
+        ),
+    )
     aturan_id: str = Field(
-        ..., description="Kunci ke tabel rujukan (F1-001, dst.)"
+        ...,
+        description=(
+            "Kunci ke tabel rujukan (F1-001, dst.). INTERNAL — tidak pernah "
+            "ditampilkan ke penelaah; yang dibaca penelaah adalah `nomor`."
+        ),
     )
     fase: int = Field(
         default=1, description="Fase pemeriksaan, selalu 1 untuk Fase 1"
     )
-    tingkat_keparahan: TingkatKeparahan
+    jenis_tanda: JenisTanda = Field(
+        ..., description="Cara temuan dipasang di dokumen"
+    )
     lokasi: LokasiTemuan
     catatan: str = Field(
-        ..., description="Penjelasan temuan untuk penelaah"
+        ...,
+        description=(
+            "ALASAN temuan, bukan pengulangan apa yang sudah terlihat di "
+            "naskah. Dipasang sebagai baris pertama komentar Word."
+        ),
     )
     usulan_rumusan: Optional[str] = Field(
-        default=None, description="Saran perbaikan (opsional)"
+        default=None,
+        description=(
+            "Wajib terisi bila jenis_tanda = penggantian, dan harus berupa "
+            "teks pengganti harfiah untuk lokasi.teks_asli."
+        ),
     )
     rujukan: RujukanTemuan
     status: StatusTemuan = Field(
@@ -104,11 +147,28 @@ class ParagrafInput(BaseModel):
 
     index: int = Field(..., description="Indeks paragraf di dokumen")
     teks: str = Field(..., description="Isi teks paragraf")
+    tampil_kapital: bool = Field(
+        default=False,
+        description=(
+            "True bila paragraf ini DITAMPILKAN kapital seluruhnya lewat "
+            "atribut All Caps, meskipun huruf aslinya campur. Diisi frontend "
+            "dari font.allCaps. Tanpa ini, aturan judul kapital salah menandai "
+            "judul yang sebenarnya sudah tampil kapital — lihat docs/"
+            "fase1 drafter.md bagian 6.9."
+        ),
+    )
 
 
 class AnalisisRequest(BaseModel):
     """Request body untuk POST /analisis/jalankan."""
 
+    jenis_dokumen: JenisDokumen = Field(
+        ...,
+        description=(
+            "PMK atau KMK. WAJIB — dipilih penelaah di task pane sebelum "
+            "menekan Analisis. Backend tidak menebaknya sendiri."
+        ),
+    )
     paragraf: list[ParagrafInput] = Field(
         ..., description="Daftar paragraf dari dokumen"
     )

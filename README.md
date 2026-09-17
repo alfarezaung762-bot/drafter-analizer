@@ -37,4 +37,7 @@ Backend berjalan di `http://localhost:8000`, frontend di `http://localhost:3000`
 
 ## Struktur Proyek
 
-Lihat file-file di `docs/` untuk konteks domain dan konvensi kerja.
+Mulai dari [indeks dokumentasi](docs/README.md). Untuk keputusan perilaku
+penelaahan Fase 1 yang terbaru, baca
+[Keputusan UX Penelaahan](docs/keputusan-ux-penelaahan-fase1.md) dan
+[Rancangan Analisis–Terima–Ekspor](docs/rancangan-analisis-terima-ekspor.md).

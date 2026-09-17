@@ -44,7 +44,19 @@ Urut prioritas:
   tanpa langganan Microsoft 365 aktif). Requirement set yang didukung ≠ fitur
   yang diizinkan; Annotation mensyaratkan langganan, bukan cuma versi Word.
 
-## Pewarnaan sorotan per tingkat keparahan (keputusan 16 Sep 2026)
+## Status keputusan sorotan
+
+> **Keputusan produk terbaru:** jangan memakai sorotan berdasarkan tingkat
+> keparahan atau sorotan seluruh paragraf sebagai mekanisme utama. Lihat
+> [`keputusan-ux-penelaahan-fase1.md`](keputusan-ux-penelaahan-fase1.md).
+> Pengguna tidak perlu mengatur Word: penggantian yang pasti memakai tampilan
+> revisi add-in pada rentang presisi. `font.color` dan `strikeThrough` boleh
+> dipakai hanya bersama snapshot/pemulihan format dan content control bertag.
+> Terima menyimpan tampilan tersebut di naskah kerja; Tolak memulihkannya;
+> pembersihan terjadi pada salinan Ekspor versi bersih. Detail:
+> [`rancangan-analisis-terima-ekspor.md`](rancangan-analisis-terima-ekspor.md).
+
+### Catatan historis - rancangan sebelumnya (jangan diikuti)
 
 `font.highlightColor` dipakai sebagai mekanisme UTAMA untuk mewarnai temuan
 sesuai tingkat keparahan (tinggi/sedang/rendah) di `tandaiSemuaTemuan()`

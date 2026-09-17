@@ -2,7 +2,42 @@
  * Kumpulan fungsi wrapper Office.js untuk Drafter Analiser.
  *
  * Semua pemanggilan Office.js dikumpulkan di file ini.
- * Sumber kebenaran: docs/panduan-officejs.md & frontend/node_modules/@types/office-js/index.d.ts
+ * Sumber kebenaran: frontend/node_modules/@types/office-js/index.d.ts
+ *
+ * ===========================================================================
+ * REVISI BESAR 17 Sep 2026 — TRACK CHANGES DITINGGALKAN
+ * ===========================================================================
+ *
+ * Sebelumnya usulan penggantian dipasang sebagai perubahan terlacak Word.
+ * Itu ditinggalkan atas keputusan penelaah, karena dua alasan yang keduanya
+ * terbukti di naskah sungguhan:
+ *
+ * 1. Warna revisi Track Changes TIDAK BISA diatur add-in. Sudah dicari ke
+ *    seluruh index.d.ts: tidak ada insertedTextColor, deletedTextColor,
+ *    revisionColor, maupun authorColor. RevisionsFilter cuma punya `markup`
+ *    dan `view`. Warnanya ditentukan Word menurut penulis. Satu-satunya cara
+ *    mengubahnya adalah Options Word masing-masing penelaah — dan syarat yang
+ *    dipegang adalah penelaah tidak menyetel apa pun.
+ *
+ * 2. Memberi blok warna selagi pelacakan menyala membuat Word mencatat TIAP
+ *    pewarnaan sebagai revisi "Formatted: Highlight". Pada RKMK 527, dua
+ *    temuan menghasilkan tiga baris revisi format di margin — mengubur
+ *    komentar yang justru perlu dibaca.
+ *
+ * Gantinya: alat menggambar tandanya sendiri dengan pelacakan DIMATIKAN.
+ *   - Teks yang salah  : merah (+ dicoret bila ada usulan penggantinya)
+ *   - Usulan penggantinya: hijau, disisipkan di sebelahnya
+ *   - Satu komentar per temuan, tidak lebih
+ * Font.color, Font.strikeThrough, dan Font.highlightColor semuanya WordApi 1.1
+ * — himpunan paling dasar, tersedia di Word desktop mana pun.
+ *
+ * Yang harus disadari, dan sudah disetujui penelaah:
+ * Word TIDAK tahu tanda ini usulan mesin. Tab Review menunjukkan 0 revisions,
+ * Accept All/Reject All bawaan Word tidak melakukan apa-apa, dan tidak ada
+ * nama pengusul maupun waktunya. Yang mengenali tandanya hanya add-in ini,
+ * lewat content control bertag (WordApi 1.1) yang dipasangnya sendiri.
+ * Naskah kerja merah-hijau inilah dokumen "coretan"; versi bersihnya dibuat
+ * terpisah lewat ekspor.
  */
 
 import { ParagrafInput, Temuan } from "./types";
@@ -15,14 +50,18 @@ export function isOfficeAvailable(): boolean {
 }
 
 /**
- * Cek dukungan requirement set WordApi tertentu secara runtime.
+ * Cek dukungan requirement set tertentu secara runtime.
+ *
+ * PERINGATAN: requirement set didukung TIDAK berarti fiturnya diizinkan.
+ * Critique lolos pemeriksaan ini lalu tetap melempar NotImplemented karena
+ * terkunci lisensi. Karena itu tiap pemanggilan tetap dibungkus try/catch.
  */
-export function checkApiSupport(version: string): boolean {
+export function checkApiSupport(version: string, nama = "WordApi"): boolean {
   if (!isOfficeAvailable() || !Office.context?.requirements) {
     return false;
   }
   try {
-    return Office.context.requirements.isSetSupported("WordApi", version);
+    return Office.context.requirements.isSetSupported(nama, version);
   } catch {
     return false;
   }
@@ -30,6 +69,12 @@ export function checkApiSupport(version: string): boolean {
 
 /**
  * Membaca paragraf dokumen (seluruh dokumen atau teks terpilih).
+ *
+ * Catatan 17 Sep 2026: pembacaan font.allCaps DIHAPUS dari sini. Satu-satunya
+ * pemakainya adalah aturan judul kapital (F1-001), dan aturan itu dimatikan
+ * karena tidak bisa membuktikan kesalahannya — lihat AKTIFKAN_F1_001 di
+ * backend/app/rules/format_baku.py. Membacanya berarti satu putaran sync
+ * tambahan atas ratusan paragraf untuk data yang tidak dipakai siapa pun.
  */
 export async function readParagraphs(
   scope: "all" | "selection" = "all"
@@ -48,13 +93,10 @@ export async function readParagraphs(
     }
 
     // Mode "Bagian Terpilih": nomor paragraf TETAP memakai penomoran seluruh
-    // dokumen, bukan dihitung ulang dari nol di dalam seleksi.
-    //
-    // Sebelumnya paragraf diambil langsung dari getSelection().paragraphs,
-    // sehingga paragraf pertama seleksi bernomor 0. Padahal sorotan dan
+    // dokumen, bukan dihitung ulang dari nol di dalam seleksi. Sorotan dan
     // komentar dicari lewat body.paragraphs — nomor 0 di situ berarti paragraf
-    // pertama dokumen. Akibatnya, memblok bagian tengah naskah lalu menganalisis
-    // membuat tanda mendarat di paragraf yang sama sekali lain.
+    // pertama dokumen, jadi penomoran ulang membuat tanda mendarat di paragraf
+    // yang sama sekali lain.
     const seleksi = context.document.getSelection();
     const irisan = body.items.map((p) =>
       p.getRange().intersectWithOrNullObject(seleksi)
@@ -72,29 +114,41 @@ export async function readParagraphs(
   });
 }
 
-/**
- * Warna asli tiap paragraf sebelum ditimpa font.highlightColor, agar bisa
- * dipulihkan saat temuannya diterima atau ditolak. Kunci = id temuan.
- */
-const warnaAsliTemuan = new Map<string, string | null>();
+// ---------------------------------------------------------------------------
+// Warna dan penanda
+// ---------------------------------------------------------------------------
+
+/** Merah tua — teks yang kurang tepat. Sama dengan "Dark Red" bawaan Word. */
+const WARNA_SALAH = "#C00000";
+
+/** Hijau tua — usulan rumusan pengganti. */
+const WARNA_USULAN = "#00802B";
+
+/** Hitam, dipakai memulihkan warna bila warna asli tidak terbaca. */
+const WARNA_NETRAL = "#000000";
+
+/** Awalan tag content control. Dipakai menemukan kembali tanda milik alat. */
+const TAG_ASLI = "DA-ASLI-";
+const TAG_USUL = "DA-USUL-";
 
 /**
- * Warna sorotan menurut tingkat keparahan.
+ * Format asli tiap rentang sebelum ditimpa, agar Tolak bisa memulihkannya.
+ * Kunci = id temuan.
  *
- * Office untuk Windows Desktop HANYA menerima 15 warna bawaan; nilai lain
- * dibulatkan ke warna terdekat. Karena itu dipakai namanya langsung, bukan
- * hex — supaya hasil di layar persis seperti yang dimaksud.
- *
- * Hijau sengaja dihindari untuk tingkat mana pun: dalam konteks telaah, hijau
- * terbaca sebagai "sudah benar" — kebalikan dari maksud sebuah temuan.
+ * Peta ini hanya hidup di memori tab selama panel terbuka. Kalau Word ditutup
+ * sebelum temuan diputuskan, warna merah/hijaunya ikut tersimpan di berkas dan
+ * add-in tidak lagi tahu warna aslinya — yang bisa dilakukan tinggal
+ * mengembalikannya ke hitam. Ini keterbatasan yang sudah disepakati, bukan
+ * kelalaian; penelaah wajib memeriksa ulang naskahnya.
  */
-function warnaKeparahan(tingkat: string): string {
-  if (tingkat === "tinggi") return "Red";
-  if (tingkat === "sedang") return "Yellow";
-  return "Turquoise";
-}
+type FormatAsli = {
+  color: string | null;
+  strikeThrough: boolean | null;
+  highlightColor: string | null;
+};
+const formatAsliTemuan = new Map<string, FormatAsli>();
 
-/** Panjang aman untuk Word.search() — lihat catatan di cariRangeTemuan(). */
+/** Panjang aman untuk Word.search() — batas Word sendiri ada di sekitar 255. */
 const AMAN_UNTUK_SEARCH = 200;
 
 /** Apakah teks_asli temuan layak dipakai sebagai kata kunci pencarian presisi. */
@@ -108,192 +162,410 @@ function layakDicari(temuan: Temuan): boolean {
   );
 }
 
-/** Isi komentar Word untuk sebuah temuan. */
+/** Kata kunci pencarian sebuah temuan, beserta posisinya di paragraf. */
+function kunciTemuan(temuan: Temuan): { kunci: string; offset: number } {
+  const asli = temuan.lokasi.teks_asli ?? "";
+  const spasiAwal = asli.length - asli.trimStart().length;
+  return {
+    kunci: asli.trim(),
+    offset: temuan.lokasi.offset_mulai + spasiAwal,
+  };
+}
+
+/**
+ * Kemunculan KE-BERAPA (0-based) kata kunci itu di dalam paragraf.
+ *
+ * Word.search() mengembalikan SEMUA kemunculan di paragraf, sedangkan backend
+ * menunjuk satu posisi lewat offset_mulai. Tanpa perhitungan ini, temuan pada
+ * kata yang berulang — "PERATURAN" di judul pencabutan, misalnya — selalu
+ * mendarat di kemunculan pertama, bukan di kata yang sebenarnya dipersoalkan.
+ *
+ * Perhitungannya memakai teks paragraf yang dikirim ke backend, jadi nomor
+ * urutnya sepadan dengan yang dipakai backend saat menghitung offset.
+ */
+function ordinalKemunculan(
+  teksParagraf: string,
+  kunci: string,
+  offset: number
+): number {
+  if (!kunci) return 0;
+  let n = 0;
+  let i = teksParagraf.indexOf(kunci);
+  while (i !== -1 && i < offset) {
+    n++;
+    i = teksParagraf.indexOf(kunci, i + 1);
+  }
+  return n;
+}
+
+/**
+ * Isi komentar Word untuk sebuah temuan — dua baris.
+ *
+ * Baris pertama ALASAN, bukan pengulangan apa yang sudah terlihat di naskah.
+ * Baris kedua rujukan, ditutup nomor temuan.
+ *
+ * Nama produk sengaja TIDAK ditulis: ruang komentar sempit, dan nomor temuan
+ * sudah cukup jadi penanda.
+ */
 function susunIsiKomentar(temuan: Temuan): string {
   const butir = temuan.rujukan.butir;
   const rujukanStr =
     butir && butir !== "..."
       ? `${temuan.rujukan.sumber} butir ${butir}`
-      : `${temuan.rujukan.sumber} (rujukan belum diverifikasi)`;
+      : `${temuan.rujukan.sumber} (butir belum diverifikasi)`;
 
-  // aturan_id ikut dicantumkan supaya komentar ini bisa ditemukan kembali dan
-  // dihapus saat temuannya ditolak. Tanpa penanda itu, komentar yang sudah
-  // masuk dokumen tidak bisa dibedakan satu sama lain.
   return (
-    `[Drafter Analiser — ${temuan.tingkat_keparahan.toUpperCase()} · ${temuan.aturan_id}]\n` +
-    `${temuan.catatan}\n\n` +
-    `Rujukan: ${rujukanStr}\n` +
-    `${temuan.rujukan.pdf_url}`
+    `${temuan.catatan}\n` +
+    `${rujukanStr} — ${temuan.rujukan.pdf_url} ${penandaKomentar(temuan)}`
   );
 }
 
-/** Penanda pengenal di dalam isi komentar, dipakai saat mencari untuk dihapus. */
+/**
+ * Penanda pengenal di dalam isi komentar, dipakai saat mencari untuk dihapus.
+ *
+ * Nomor temuan, bukan aturan_id: inilah yang dibaca penelaah. Konsekuensinya,
+ * dua kali analisis pada dokumen yang sama menghasilkan komentar bernomor sama
+ * — karena itu panel menolak analisis ulang selama masih ada temuan yang belum
+ * diputuskan.
+ */
 function penandaKomentar(temuan: Temuan): string {
-  return `· ${temuan.aturan_id}]`;
+  return `(T${temuan.nomor})`;
 }
 
+// ---------------------------------------------------------------------------
+// Mengatur pelacakan perubahan
+// ---------------------------------------------------------------------------
+
 /**
- * Menandai SELURUH temuan sekaligus: komentar + sorotan warna per tingkat
- * keparahan, dalam satu kali Word.run.
+ * Mematikan pelacakan perubahan sementara, mengembalikan mode semula.
  *
- * Dipanggil tepat sesudah analisis, sehingga penelaah langsung melihat bagian
- * bermasalah berwarna merah/kuning/toska sesuai tingkat keparahan dan bisa
- * mengklik teksnya untuk membaca komentar lewat panel komentar bawaan Word —
- * tanpa menekan Terima lebih dulu.
+ * SELURUH penandaan alat ini wajib berjalan dengan pelacakan mati. Kalau tidak,
+ * tiap pewarnaan dan tiap penyisipan tercatat Word sebagai revisi — persis
+ * keluhan "ajat — Formatted: Highlight" yang memenuhi margin pada RKMK 527.
  *
- * Pewarnaannya memakai font.highlightColor (WordApi 1.1) — SATU-SATUNYA
- * bagian alat yang sungguh mengubah format dokumen, dipakai di sini atas
- * persetujuan eksplisit penelaah (16 Sep 2026) supaya tingkat keparahan
- * langsung kelihatan di naskah, bukan cuma di panel. Warna aslinya dicatat
- * sebelum ditimpa dan DIPULIHKAN saat temuan diterima atau ditolak (lihat
- * hapusSorotan) — begitu itu terjadi, yang tersisa di dokumen murni komentar
- * biasa, tanpa sisa pewarnaan. Teks naskahnya sendiri tidak pernah disentuh.
+ * Mengembalikan mode semula supaya setelan Word penelaah tidak diam-diam
+ * berubah gara-gara memakai alat ini.
+ */
+async function matikanPelacakan(
+  context: Word.RequestContext
+): Promise<{ modeAwal: string | null; berhasilMati: boolean }> {
+  if (!checkApiSupport("1.4")) {
+    return { modeAwal: null, berhasilMati: false };
+  }
+  const doc = context.document;
+  doc.load("changeTrackingMode");
+  await context.sync();
+
+  const modeAwal = doc.changeTrackingMode as unknown as string;
+  if (modeAwal === "Off") {
+    return { modeAwal, berhasilMati: true };
+  }
+  try {
+    doc.changeTrackingMode = "Off";
+    await context.sync();
+    doc.load("changeTrackingMode");
+    await context.sync();
+    return {
+      modeAwal,
+      berhasilMati: (doc.changeTrackingMode as unknown as string) === "Off",
+    };
+  } catch (err) {
+    console.warn("Pelacakan perubahan tidak bisa dimatikan:", err);
+    return { modeAwal, berhasilMati: false };
+  }
+}
+
+async function kembalikanPelacakan(
+  context: Word.RequestContext,
+  modeAwal: string | null
+): Promise<void> {
+  if (modeAwal === null || modeAwal === "Off") return;
+  try {
+    context.document.changeTrackingMode =
+      modeAwal as unknown as Word.ChangeTrackingMode;
+    await context.sync();
+  } catch (err) {
+    console.warn("Mode pelacakan gagal dikembalikan:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Penandaan temuan
+// ---------------------------------------------------------------------------
+
+/** Hasil satu kali penandaan, untuk ditampilkan di panel. */
+export type HasilPenandaan = {
+  /** Jumlah temuan yang tandanya benar-benar terpasang di naskah. */
+  ditandai: number;
+  /** Jumlah usulan hijau yang ikut tersisip. */
+  diusulkan: number;
+  /** Jumlah komentar yang terpasang. */
+  dikomentari: number;
+  /**
+   * Jumlah temuan yang letak persisnya TIDAK ketemu, jadi tidak ditandai sama
+   * sekali. Wajib disampaikan: ada temuan yang tidak kelihatan di naskah.
+   */
+  tidakKetemu: number;
+  /** Pelacakan perubahan berhasil dimatikan selama penandaan. */
+  pelacakanMati: boolean;
+};
+
+const HASIL_KOSONG: HasilPenandaan = {
+  ditandai: 0,
+  diusulkan: 0,
+  dikomentari: 0,
+  tidakKetemu: 0,
+  pelacakanMati: false,
+};
+
+/**
+ * Menandai SELURUH temuan sekaligus, dalam satu kali Word.run.
  *
- * Komentar yang ditolak dihapus kembali lewat hapusKomentarTemuan().
+ * Alurnya:
+ *   1. Matikan pelacakan perubahan, ingat mode semula.
+ *   2. Cari rentang presisi tiap temuan (sekali batch, bukan satu per satu).
+ *   3. Rekam format asli tiap rentang, supaya Tolak bisa memulihkannya.
+ *   4. Pasang tanda dari BAWAH ke ATAS — menyisipkan usulan menggeser posisi
+ *      karakter sesudahnya, jadi yang di bawah dikerjakan lebih dulu.
+ *   5. Kembalikan mode pelacakan.
  *
- * Sengaja dibuat satu Word.run dengan beberapa sinkronisasi terjadwal, bukan
- * satu panggilan per temuan: pada dokumen dengan puluhan temuan, cara lama
- * berarti puluhan perjalanan bolak-balik ke Word.
+ * Temuan yang rentang presisinya tidak ketemu TIDAK ditandai sama sekali.
+ * Menandai satu paragraf penuh karena pencarian meleset pernah terjadi di
+ * proyek ini dan berakhir menutupi naskah yang tidak bersalah.
  */
 export async function tandaiSemuaTemuan(
   daftar: Temuan[]
-): Promise<{ disorot: number; dikomentari: number; memakaiWarnaFont: boolean }> {
+): Promise<HasilPenandaan> {
   if (!isOfficeAvailable() || daftar.length === 0) {
-    return { disorot: 0, dikomentari: 0, memakaiWarnaFont: false };
+    return { ...HASIL_KOSONG };
   }
 
-  const bisaSorot = checkApiSupport("1.1"); // font.highlightColor, dasar
   const bisaKomentar = checkApiSupport("1.4");
-  if (!bisaSorot && !bisaKomentar) {
-    return { disorot: 0, dikomentari: 0, memakaiWarnaFont: false };
-  }
+  const hasil: HasilPenandaan = { ...HASIL_KOSONG };
 
   try {
-    return await Word.run(async (context) => {
-      const body = context.document.body.paragraphs;
-      body.load("items");
+    await Word.run(async (context) => {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items/text");
       await context.sync();
 
-      // Antre semua pencarian presisi dulu, baru satu kali sinkronisasi.
+      const teksParagraf = paragraphs.items.map((p) => p.text ?? "");
+
+      const { modeAwal, berhasilMati } = await matikanPelacakan(context);
+      hasil.pelacakanMati = berhasilMati;
+
+      // --- Tahap 1: cari rentang presisi seluruh temuan sekaligus ---
       const pencarian = daftar.map((t) => {
-        const p = body.items[t.lokasi.paragraf_index];
+        const p = paragraphs.items[t.lokasi.paragraf_index];
         if (!p || !layakDicari(t)) return null;
-        const hasil = p.search(t.lokasi.teks_asli!.trim(), { matchCase: false });
-        hasil.load("items");
-        return hasil;
+        const r = p.search(kunciTemuan(t).kunci, { matchCase: true });
+        r.load("items");
+        return r;
       });
       await context.sync();
 
-      // Range sasaran tiap temuan, dipakai dua tahap berikutnya.
-      const sasaran = daftar.map((t, i) => {
-        const p = body.items[t.lokasi.paragraf_index];
-        if (!p) return null;
-        const hasil = pencarian[i];
-        return hasil && hasil.items.length > 0 ? hasil.items[0] : p.getRange();
+      const rentang = daftar.map((t, i) => {
+        const hasilCari = pencarian[i];
+        if (!hasilCari || hasilCari.items.length === 0) return null;
+        const { kunci, offset } = kunciTemuan(t);
+        const n = ordinalKemunculan(
+          teksParagraf[t.lokasi.paragraf_index] ?? "",
+          kunci,
+          offset
+        );
+        return hasilCari.items[Math.min(n, hasilCari.items.length - 1)];
       });
 
-      // Tahap 1: komentar.
-      let dikomentari = 0;
-      if (bisaKomentar) {
-        daftar.forEach((t, i) => {
-          const range = sasaran[i];
-          if (!range) return;
-          range.insertComment(susunIsiKomentar(t));
-          dikomentari++;
+      // --- Tahap 2: rekam format asli ---
+      const fonts = rentang.map((r) => {
+        if (!r) return null;
+        const f = r.font;
+        f.load("color,strikeThrough,highlightColor");
+        return f;
+      });
+      await context.sync();
+
+      // --- Tahap 3: pasang tanda, dari BAWAH ke ATAS ---
+      const antrean = daftar
+        .map((t, i) => ({ t, i }))
+        .filter((x) => rentang[x.i] !== null)
+        .sort(
+          (a, b) =>
+            b.t.lokasi.paragraf_index - a.t.lokasi.paragraf_index ||
+            b.t.lokasi.offset_mulai - a.t.lokasi.offset_mulai
+        );
+
+      hasil.tidakKetemu = daftar.length - antrean.length;
+
+      for (const { t, i } of antrean) {
+        const r = rentang[i] as Word.Range;
+        const f = fonts[i] as Word.Font;
+
+        formatAsliTemuan.set(t.id, {
+          color: f.color ?? null,
+          strikeThrough: f.strikeThrough ?? null,
+          highlightColor: f.highlightColor ?? null,
         });
-        await context.sync();
-      }
 
-      // Tahap 2: sorotan berwarna per tingkat keparahan — SESUDAH komentar
-      // tersinkronisasi, bukan bersamaan, supaya keduanya tidak berebut
-      // rentang yang sama dalam satu sinkronisasi.
-      //
-      // KEPUTUSAN SADAR, bukan cadangan darurat: font.highlightColor dipakai
-      // langsung sebagai mekanisme utama. Sebelumnya bagian ini hanya jalan
-      // kalau Range.highlight() (WordApi 1.8) gagal total — tapi
-      // Range.highlight() TIDAK punya parameter warna sama sekali, jadi tidak
-      // pernah bisa membedakan tinggi/sedang/rendah, di lingkungan mana pun.
-      // Mengandalkannya sebagai jalan utama berarti sorotan selalu satu warna
-      // pucat bawaan Word, itu sebabnya diganti.
-      //
-      // Ini SATU-SATUNYA bagian alat yang mengubah format dokumen. Warna
-      // asli tiap paragraf dicatat dulu (warnaAsliTemuan) dan DIPULIHKAN saat
-      // temuan diterima atau ditolak (lihat hapusSorotan) — begitu itu
-      // terjadi, yang tersisa di dokumen murni komentar Word biasa, tanpa
-      // sisa pewarnaan apa pun. Teks naskahnya sendiri tidak pernah disentuh.
-      //
-      // Risiko yang tersisa, dan penelaah sudah diberi tahu: kalau dokumen
-      // disimpan lalu ditutup SEBELUM sebuah temuan diputuskan (Terima/
-      // Tolak), warnanya ikut tersimpan — warnaAsliTemuan cuma hidup di
-      // memori tab ini selama panel terbuka, bukan di dokumen atau server.
-      let disorot = 0;
-      let memakaiWarnaFont = false;
-      if (bisaSorot && sasaran.some((r) => r !== null)) {
+        const punyaUsulan =
+          t.jenis_tanda === "penggantian" && !!t.usulan_rumusan;
+
         try {
-          const fonts = sasaran.map((r) => (r ? r.font : null));
-          fonts.forEach((f) => f?.load("highlightColor"));
-          await context.sync();
+          // Urutannya penting. Warna dulu, lalu sisipkan usulan di sebelahnya,
+          // baru dibungkus content control. Kalau dibungkus lebih dulu,
+          // penyisipan "After" bisa mendarat DI DALAM bungkusnya.
+          r.font.color = WARNA_SALAH;
+          // Dicoret HANYA kalau memang ada penggantinya. Temuan tanpa usulan
+          // bukan usul penghapusan — mencoretnya berarti berbohong soal apa
+          // yang dimaksud alat.
+          if (punyaUsulan) r.font.strikeThrough = true;
 
-          daftar.forEach((t, i) => {
-            const f = fonts[i];
-            if (!f) return;
-            warnaAsliTemuan.set(t.id, f.highlightColor ?? null);
-            f.highlightColor = warnaKeparahan(t.tingkat_keparahan);
-            disorot++;
-          });
-          await context.sync();
-          memakaiWarnaFont = true;
+          if (punyaUsulan) {
+            const usulan = r.insertText(` ${t.usulan_rumusan}`, "After");
+            usulan.font.color = WARNA_USULAN;
+            usulan.font.strikeThrough = false;
+            usulan.font.highlightColor = null as unknown as string;
+            bungkusContentControl(usulan, `${TAG_USUL}${t.nomor}`, t.nomor);
+            hasil.diusulkan++;
+          }
+
+          bungkusContentControl(r, `${TAG_ASLI}${t.nomor}`, t.nomor);
+          hasil.ditandai++;
+
+          // Satu komentar per temuan. Tidak lebih.
+          if (bisaKomentar) {
+            r.insertComment(susunIsiKomentar(t));
+            hasil.dikomentari++;
+          }
         } catch (err) {
-          console.warn("Gagal memasang warna sorotan:", err);
-          disorot = 0;
-          memakaiWarnaFont = false;
+          console.warn(`Tanda T${t.nomor} gagal dipasang:`, err);
         }
       }
+      await context.sync();
 
-      return { disorot, dikomentari, memakaiWarnaFont };
+      await kembalikanPelacakan(context, modeAwal);
     });
   } catch (err) {
     console.warn("Gagal menandai temuan di dokumen:", err);
-    return { disorot: 0, dikomentari: 0, memakaiWarnaFont: false };
+  }
+
+  return hasil;
+}
+
+/**
+ * Membungkus rentang dengan content control bertag, penampilannya disembunyikan.
+ *
+ * Inilah satu-satunya cara add-in mengenali kembali tandanya sendiri: Word
+ * tidak menyimpan apa pun tentang "usulan mesin". Kegagalan di sini tidak
+ * menggagalkan penandaan — tandanya tetap terpasang, hanya lebih sulit dicabut
+ * otomatis nanti.
+ */
+function bungkusContentControl(
+  rentang: Word.Range,
+  tag: string,
+  nomor: number
+): void {
+  try {
+    const cc = rentang.insertContentControl();
+    cc.tag = tag;
+    cc.title = `Drafter Analiser T${nomor}`;
+    cc.appearance = "Hidden";
+    cc.cannotDelete = false;
+    cc.cannotEdit = false;
+  } catch (err) {
+    console.warn(`Content control ${tag} gagal dipasang:`, err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Keputusan atas temuan
+// ---------------------------------------------------------------------------
+
+/**
+ * Menolak sebuah temuan: usulan hijaunya dibuang, teks aslinya dipulihkan
+ * persis seperti sebelum ditandai, komentarnya dihapus.
+ *
+ * Sesudah ini tidak boleh ada bekas apa pun di naskah.
+ */
+export async function tolakTemuan(temuan: Temuan): Promise<boolean> {
+  if (!isOfficeAvailable()) return false;
+
+  try {
+    return await Word.run(async (context) => {
+      const { modeAwal } = await matikanPelacakan(context);
+      const body = context.document.body;
+
+      const ccUsul = body.contentControls.getByTag(`${TAG_USUL}${temuan.nomor}`);
+      const ccAsli = body.contentControls.getByTag(`${TAG_ASLI}${temuan.nomor}`);
+      ccUsul.load("items");
+      ccAsli.load("items");
+      await context.sync();
+
+      // Usulan hijau dibuang berikut isinya — keepContent = false.
+      ccUsul.items.forEach((cc) => cc.delete(false));
+
+      // Teks asli: kembalikan formatnya, lalu bungkusnya saja yang dilepas —
+      // keepContent = true, supaya naskahnya tidak ikut terhapus.
+      const asli = formatAsliTemuan.get(temuan.id);
+      ccAsli.items.forEach((cc) => {
+        // ContentControl.font, bukan getRange().font: yang pertama WordApi 1.1,
+        // yang kedua 1.3. Seluruh penandaan alat ini sengaja dijaga di 1.1.
+        const f = cc.font;
+        f.color = asli?.color ?? WARNA_NETRAL;
+        f.strikeThrough = asli?.strikeThrough ?? false;
+        f.highlightColor = (asli?.highlightColor ??
+          null) as unknown as string;
+        cc.delete(true);
+      });
+      await context.sync();
+
+      const adaTanda = ccUsul.items.length > 0 || ccAsli.items.length > 0;
+      formatAsliTemuan.delete(temuan.id);
+
+      await hapusKomentarTemuanDi(context, temuan);
+      await kembalikanPelacakan(context, modeAwal);
+      return adaTanda;
+    });
+  } catch (err) {
+    console.warn(`Gagal menolak temuan T${temuan.nomor}:`, err);
+    return false;
   }
 }
 
 /**
- * Menghapus komentar milik sebuah temuan — dipakai saat temuan ditolak, supaya
- * tidak ada jejak apa pun yang tertinggal di dokumen.
+ * Menghapus komentar milik sebuah temuan, dicari lewat penanda (T{n}) di isinya.
  */
-export async function hapusKomentarTemuan(temuan: Temuan): Promise<boolean> {
-  if (!isOfficeAvailable() || !checkApiSupport("1.4")) {
-    return false;
-  }
+async function hapusKomentarTemuanDi(
+  context: Word.RequestContext,
+  temuan: Temuan
+): Promise<boolean> {
+  if (!checkApiSupport("1.4")) return false;
   try {
-    return await Word.run(async (context) => {
-      const paragraphs = context.document.body.paragraphs;
-      paragraphs.load("items");
-      await context.sync();
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load("items");
+    await context.sync();
 
-      const p = paragraphs.items[temuan.lokasi.paragraf_index];
-      if (!p) return false;
+    const p = paragraphs.items[temuan.lokasi.paragraf_index];
+    if (!p) return false;
 
-      // Sengaja mencari di SELURUH paragraf, bukan di rentang presisi tempat
-      // komentar tadi dipasang. Rentang sempit berisiko meleset kalau posisinya
-      // bergeser sedikit; paragraf pasti memuat jangkar komentarnya.
-      const komentar = p.getRange().getComments();
-      komentar.load("items/content");
-      await context.sync();
+    // Sengaja mencari di SELURUH paragraf, bukan di rentang presisi: rentang
+    // sempit berisiko meleset kalau posisinya bergeser sedikit, sedangkan
+    // paragraf pasti memuat jangkar komentarnya.
+    const komentar = p.getRange().getComments();
+    komentar.load("items/content");
+    await context.sync();
 
-      const penanda = penandaKomentar(temuan);
-      let adaYangDihapus = false;
-      komentar.items.forEach((k) => {
-        if (k.content && k.content.includes(penanda)) {
-          k.delete();
-          adaYangDihapus = true;
-        }
-      });
-
-      if (adaYangDihapus) await context.sync();
-      return adaYangDihapus;
+    const penanda = penandaKomentar(temuan);
+    let adaYangDihapus = false;
+    komentar.items.forEach((k) => {
+      if (k.content && k.content.includes(penanda)) {
+        k.delete();
+        adaYangDihapus = true;
+      }
     });
+
+    if (adaYangDihapus) await context.sync();
+    return adaYangDihapus;
   } catch (err) {
     console.warn("Gagal menghapus komentar temuan:", err);
     return false;
@@ -301,300 +573,96 @@ export async function hapusKomentarTemuan(temuan: Temuan): Promise<boolean> {
 }
 
 /**
- * Menavigasi dan menyorot posisi temuan di dalam dokumen Word.
+ * Membersihkan SELURUH tanda milik alat dari naskah — jalan keluar darurat
+ * ketika daftar panel terlanjur kacau.
+ *
+ * Yang dihapus hanya yang bertag DA-*. Sorotan dan warna milik penyusun
+ * sendiri tidak disentuh: sebagian penyusun memakai warna untuk menandai
+ * ketentuan baru, dan menghapusnya berarti membuang informasi milik mereka.
  */
-export async function selectFindingLocation(temuan: Temuan): Promise<boolean> {
-  if (!isOfficeAvailable()) {
-    return false;
-  }
+export async function bersihkanSemuaTanda(): Promise<number> {
+  if (!isOfficeAvailable()) return 0;
 
   try {
     return await Word.run(async (context) => {
-      const paragraphs = context.document.body.paragraphs;
-      paragraphs.load("items");
+      const { modeAwal } = await matikanPelacakan(context);
+      const kontrol = context.document.body.contentControls;
+      kontrol.load("items/tag");
       await context.sync();
 
-      if (temuan.lokasi.paragraf_index >= paragraphs.items.length) {
-        return false;
+      const usul = kontrol.items.filter((cc) => cc.tag?.startsWith(TAG_USUL));
+      const asli = kontrol.items.filter((cc) => cc.tag?.startsWith(TAG_ASLI));
+
+      usul.forEach((cc) => cc.delete(false));
+      asli.forEach((cc) => {
+        const f = cc.font;
+        f.color = WARNA_NETRAL;
+        f.strikeThrough = false;
+        f.highlightColor = null as unknown as string;
+        cc.delete(true);
+      });
+      await context.sync();
+
+      formatAsliTemuan.clear();
+      await kembalikanPelacakan(context, modeAwal);
+      return usul.length + asli.length;
+    });
+  } catch (err) {
+    console.warn("Gagal membersihkan tanda:", err);
+    return 0;
+  }
+}
+
+/**
+ * Menavigasi dan menyorot posisi temuan di dalam dokumen Word.
+ *
+ * Memakai content control kalau ada — itu penunjuk paling tepat sesudah naskah
+ * bergeser oleh penyisipan usulan. Kalau tidak ada, jatuh ke pencarian teks
+ * dengan perhitungan kemunculan keberapa.
+ */
+export async function selectFindingLocation(temuan: Temuan): Promise<boolean> {
+  if (!isOfficeAvailable()) return false;
+
+  try {
+    return await Word.run(async (context) => {
+      const body = context.document.body;
+      const cc = body.contentControls.getByTag(`${TAG_ASLI}${temuan.nomor}`);
+      cc.load("items");
+      await context.sync();
+
+      if (cc.items.length > 0) {
+        cc.items[0].getRange().select();
+        await context.sync();
+        return true;
       }
 
-      const p = paragraphs.items[temuan.lokasi.paragraf_index];
+      const paragraphs = body.paragraphs;
+      paragraphs.load("items/text");
+      await context.sync();
 
-      // Jika teks asli tersedia, coba sorot bagian teks yang spesifik
-      if (temuan.lokasi.teks_asli && temuan.lokasi.teks_asli.trim().length > 0) {
-        const searchResults = p.search(temuan.lokasi.teks_asli.trim(), {
-          matchCase: false,
-        });
-        searchResults.load("items");
+      const p = paragraphs.items[temuan.lokasi.paragraf_index];
+      if (!p) return false;
+
+      if (layakDicari(temuan)) {
+        const { kunci, offset } = kunciTemuan(temuan);
+        const cari = p.search(kunci, { matchCase: true });
+        cari.load("items");
         await context.sync();
 
-        if (searchResults.items.length > 0) {
-          searchResults.items[0].select();
+        if (cari.items.length > 0) {
+          const n = ordinalKemunculan(p.text ?? "", kunci, offset);
+          cari.items[Math.min(n, cari.items.length - 1)].select();
           await context.sync();
           return true;
         }
       }
 
-      // Fallback: pilih seluruh paragraf
       p.getRange().select();
       await context.sync();
       return true;
     });
   } catch (err) {
     console.warn("Gagal memilih lokasi temuan:", err);
-    return false;
-  }
-}
-
-/**
- * Lapis 2: Menyisipkan komentar permanen Word (WordApi 1.4). TIDAK DIPANGGIL
- * dari alur aktif saat ini — tandaiSemuaTemuan() menyisipkan komentar untuk
- * seluruh temuan sendiri, lewat susunIsiKomentar(). Dipertahankan untuk jalur
- * satu-temuan (mis. dipakai ulang manual dari luar alur analisis).
- *
- * Catatan penting: usulan_rumusan sengaja TIDAK disertakan dalam komentar
- * agar penelaah menyunting sendiri (sesuai dokumen kontrak & rancangan).
- */
-export async function insertPermanentComment(temuan: Temuan): Promise<boolean> {
-  if (!isOfficeAvailable() || !checkApiSupport("1.4")) {
-    console.warn("WordApi 1.4 tidak didukung.");
-    return false;
-  }
-
-  try {
-    return await Word.run(async (context) => {
-      // Memakai pencari range bersama — di dalamnya sudah ada pengaman terhadap
-      // teks yang terlalu panjang atau memuat karakter khusus, yang sebelumnya
-      // membuat sebagian temuan "diterima" tanpa pernah menghasilkan komentar.
-      const targetRange = await cariRangeTemuan(context, temuan);
-      if (!targetRange) {
-        return false;
-      }
-
-      // Isi komentar disusun di satu tempat (susunIsiKomentar) supaya penanda
-      // pengenalnya selalu sama — itu yang dipakai hapusKomentarTemuan() untuk
-      // menemukan kembali komentar yang harus dihapus saat temuan ditolak.
-      targetRange.insertComment(susunIsiKomentar(temuan));
-      await context.sync();
-      return true;
-    });
-  } catch (err) {
-    console.warn("Gagal menyisipkan komentar permanen:", err);
-    return false;
-  }
-}
-
-/**
- * Penanda bahwa Critique/insertAnnotations ditolak Word di lingkungan ini.
- *
- * Pemeriksaan isSetSupported("WordApi", "1.7") TIDAK cukup: requirement set-nya
- * bisa tersedia sementara insertAnnotations tetap melempar NotImplemented,
- * karena fitur Annotation mensyaratkan langganan Microsoft 365 — bukan sekadar
- * versi Word tertentu. Lisensi beli-putus (mis. Office LTSC 2024) melaporkan
- * 1.7/1.8 sebagai didukung namun menolak panggilannya.
- *
- * Tanpa penanda ini, tiap temuan memicu satu perjalanan bolak-balik ke Word
- * yang sudah pasti gagal. Sekali gagal, berhenti mencoba sampai halaman dimuat
- * ulang.
- */
-let critiqueDitolakHost = false;
-
-/** Apakah Critique sudah terbukti ditolak host di sesi ini. */
-export function critiqueTersedia(): boolean {
-  return !critiqueDitolakHost;
-}
-
-/**
- * Mencari range yang tepat untuk sebuah temuan di dalam dokumen.
- * Dipakai bersama oleh sorotan, komentar, dan navigasi.
- */
-async function cariRangeTemuan(
-  context: Word.RequestContext,
-  temuan: Temuan
-): Promise<Word.Range | null> {
-  const paragraphs = context.document.body.paragraphs;
-  paragraphs.load("items");
-  await context.sync();
-
-  if (temuan.lokasi.paragraf_index >= paragraphs.items.length) {
-    return null;
-  }
-
-  const p = paragraphs.items[temuan.lokasi.paragraf_index];
-  const teks = temuan.lokasi.teks_asli?.trim();
-
-  // Word.search() mewarisi batasan Find bawaan Word: teks pencarian yang terlalu
-  // panjang ditolak, dan sebagian karakter (^, *, ?, kurung siku) diperlakukan
-  // khusus. Butir Menimbang di rancangan nyata mudah melewati 255 karakter —
-  // contoh: butir "c. bahwa berdasarkan pertimbangan..." pada RPMK Wasdal
-  // panjangnya sekitar 270 karakter. Kalau search() melempar, seluruh
-  // pemanggilnya gagal dan komentar tidak jadi disisipkan.
-  //
-  // Karena itu pencarian presisi hanya dicoba untuk potongan pendek dan bersih.
-  // Untuk sisanya, seluruh paragraf dipakai sebagai sasaran — komentarnya tetap
-  // menempel di tempat yang benar, hanya cakupannya seluas paragraf.
-  if (teks && layakDicari(temuan)) {
-    try {
-      const hasil = p.search(teks, { matchCase: false });
-      hasil.load("items");
-      await context.sync();
-      if (hasil.items.length > 0) {
-        return hasil.items[0];
-      }
-    } catch {
-      // Pencarian gagal bukan alasan membatalkan — jatuh ke paragraf penuh.
-    }
-  }
-
-  return p.getRange();
-}
-
-/**
- * Lapis 1 pengganti: sorotan sementara (WordApi 1.8). TIDAK DIPANGGIL dari
- * alur aktif saat ini — task pane memakai tandaiSemuaTemuan(), yang sejak
- * 16 Sep 2026 langsung memakai font.highlightColor per tingkat keparahan
- * (lihat komentar di sana). Dipertahankan untuk kemungkinan dipakai lagi
- * kalau suatu saat WordApi 1.8 + langganan Microsoft 365 tersedia dan
- * sorotan tanpa sentuh format sama sekali jadi pilihan lagi.
- *
- * Range.highlight() menyoroti teks TANPA mengubah isi dokumen, tapi tidak
- * menerima parameter warna sama sekali — seluruh temuan tersorot dengan satu
- * gaya yang sama, tidak bisa dibedakan menurut tingkat keparahan. Pewarnaan
- * per tingkat hanya mungkin lewat Critique.colorScheme (butuh langganan) atau
- * font.highlightColor (mengubah format, lihat tandaiSemuaTemuan).
- */
-export async function sorotSementara(temuan: Temuan): Promise<boolean> {
-  if (!isOfficeAvailable() || !checkApiSupport("1.8")) {
-    return false;
-  }
-  try {
-    return await Word.run(async (context) => {
-      const range = await cariRangeTemuan(context, temuan);
-      if (!range) return false;
-      range.highlight();
-      await context.sync();
-      return true;
-    });
-  } catch (err) {
-    console.warn("Gagal menyorot sementara:", err);
-    return false;
-  }
-}
-
-/** Menghapus sorotan sementara pada lokasi temuan (WordApi 1.8). */
-export async function hapusSorotan(temuan: Temuan): Promise<boolean> {
-  if (!isOfficeAvailable()) {
-    return false;
-  }
-  try {
-    return await Word.run(async (context) => {
-      const range = await cariRangeTemuan(context, temuan);
-      if (!range) return false;
-
-      if (checkApiSupport("1.8")) {
-        try {
-          range.removeHighlight();
-        } catch {
-          // Tidak apa-apa — mungkin memang tidak ada sorotan sementara.
-        }
-      }
-
-      // Kalau tadi terpaksa memakai font.highlightColor, kembalikan ke warna
-      // ASLI paragraf itu, bukan sekadar dikosongkan. Sebagian penyusun
-      // memakai sorotan sendiri untuk menandai ketentuan baru; mengosongkannya
-      // begitu saja berarti menghapus informasi milik mereka.
-      if (warnaAsliTemuan.has(temuan.id)) {
-        const asli = warnaAsliTemuan.get(temuan.id) ?? null;
-        range.font.highlightColor = asli as unknown as string;
-        warnaAsliTemuan.delete(temuan.id);
-      }
-
-      await context.sync();
-      return true;
-    });
-  } catch (err) {
-    console.warn("Gagal menghapus sorotan:", err);
-    return false;
-  }
-}
-
-/**
- * Menandai SATU temuan: coba Critique dulu, jatuh ke sorotan sementara.
- * TIDAK DIPANGGIL dari alur aktif saat ini — task pane memakai
- * tandaiSemuaTemuan() untuk seluruh temuan sekaligus. Dipertahankan untuk
- * kemungkinan pemakaian ulang, sama seperti sorotSementara().
- */
-export async function tandaiTemuan(temuan: Temuan): Promise<"critique" | "sorotan" | "gagal"> {
-  if (critiqueTersedia()) {
-    const ok = await insertCritiqueAnnotation(temuan);
-    if (ok) return "critique";
-  }
-  const ok = await sorotSementara(temuan);
-  return ok ? "sorotan" : "gagal";
-}
-
-/**
- * Lapis 1: Menyisipkan sorotan / Critique Annotation (WordApi 1.7/1.8).
- *
- * Warna sesuai tingkat keparahan:
- * - tinggi: Red
- * - sedang: Berry
- * - rendah: Lavender
- * (Green tidak dipakai)
- */
-export async function insertCritiqueAnnotation(temuan: Temuan): Promise<boolean> {
-  if (!isOfficeAvailable() || !checkApiSupport("1.7") || critiqueDitolakHost) {
-    return false;
-  }
-
-  try {
-    return await Word.run(async (context) => {
-      const paragraphs = context.document.body.paragraphs;
-      paragraphs.load("items");
-      await context.sync();
-
-      if (temuan.lokasi.paragraf_index >= paragraphs.items.length) {
-        return false;
-      }
-
-      const p = paragraphs.items[temuan.lokasi.paragraf_index];
-
-      let color: "Red" | "Berry" | "Lavender" = "Lavender";
-      if (temuan.tingkat_keparahan === "tinggi") {
-        color = "Red";
-      } else if (temuan.tingkat_keparahan === "sedang") {
-        color = "Berry";
-      }
-
-      const start = Math.max(0, temuan.lokasi.offset_mulai);
-      const length = temuan.lokasi.panjang > 0 ? temuan.lokasi.panjang : 1;
-
-      const critique: Word.Critique = {
-        colorScheme: color,
-        start,
-        length,
-      };
-
-      p.insertAnnotations({
-        critiques: [critique],
-      });
-
-      await context.sync();
-      return true;
-    });
-  } catch (err) {
-    // NotImplemented = fitur Annotation dikunci lisensi, bukan kesalahan sesaat.
-    // Tandai sekali, lalu berhenti mencoba untuk seluruh temuan berikutnya.
-    const kode = (err as { code?: string })?.code;
-    if (kode === "NotImplemented") {
-      critiqueDitolakHost = true;
-      console.info(
-        "Critique tidak didukung Word di sini (fitur Annotation mensyaratkan " +
-          "langganan Microsoft 365). Beralih ke sorotan sementara."
-      );
-    } else {
-      console.warn("Gagal menyisipkan critique annotation:", err);
-    }
     return false;
   }
 }
