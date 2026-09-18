@@ -93,12 +93,11 @@ Dijalankan terhadap `uji-pmk-lengkap.docx` sebagai **PMK**, seluruh aturan menya
 
 ### Naskah KMK — hasil NYATA hari ini
 
-Dijalankan terhadap `uji-kmk-lengkap.docx` sebagai **KMK**, seluruh aturan menyala. Keluar **2 temuan**.
+Dijalankan terhadap `uji-kmk-lengkap.docx` sebagai **KMK**, seluruh aturan menyala. Keluar **1 temuan**.
 
 | # | Aturan | Jenis | Par | Yang ditandai |
 |---|---|---|---|---|
 | T1 | F1-004 | catatan | 9 | `bahwa berdasarkan pertimbangan sebagaima…` |
-| T2 | F1-002 | catatan | 16 | _(tanpa lokasi — jadi peringatan dokumen)_ |
 
 ---
 

@@ -427,9 +427,24 @@ def _ekstrak_judul_menetapkan(paragraf: list[ParagrafInput]) -> Optional[dict]:
 
     gabungan = " ".join(parts)
 
-    # Normalisasi: buang teks sampai "Menetapkan :"
+    # Normalisasi: buang teks sampai label "Menetapkan", titik dua OPSIONAL.
+    #
+    # DIPERBAIKI 18 Sep 2026 — memperbaiki salah tandai yang terbukti.
+    #
+    # Titik dua sempat diwajibkan di sini, padahal `_AWAL_MENETAPKAN` di atas
+    # sudah membuatnya opsional untuk naskah BERTABEL — di situ label
+    # "Menetapkan" dan isinya jatuh di sel, dan karenanya di paragraf, yang
+    # berbeda, sehingga paragraf labelnya cuma berbunyi "Menetapkan" tanpa
+    # tanda apa pun. Perbaikan Kasus 3 hanya terpasang separuh: klausulnya
+    # ketemu, tapi normalisasinya gagal.
+    #
+    # Akibatnya kata "Menetapkan" ikut terbawa ke dalam judul, awalan
+    # "KEPUTUSAN MENTERI KEUANGAN TENTANG" tidak terpotong karena jangkar `^`
+    # tidak lagi mengenai apa pun, dan judul yang SAMA PERSIS dengan judul
+    # pembuka dilaporkan berbeda. Ditemukan 18 Sep 2026 lewat naskah uji KMK
+    # bertabel di tools/contoh/.
     gabungan = re.sub(
-        r"^.*?Menetapkan\s*:\s*", "", gabungan, flags=re.IGNORECASE
+        r"^.*?Menetapkan\b\s*:?\s*", "", gabungan, flags=re.IGNORECASE
     )
 
     # Buang awalan "PERATURAN/KEPUTUSAN MENTERI KEUANGAN TENTANG"

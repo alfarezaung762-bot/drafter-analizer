@@ -1453,3 +1453,50 @@ class TestRegresi18September:
         temuan = cek_judul_konsisten(doc_beda, JenisDokumen.PMK)
         assert len(temuan) == 1
         assert temuan[0].lokasi.teks_asli == "KELUARAN"
+
+    # --- Kasus 12: klausul Menetapkan bertabel, tanpa titik dua ------------
+
+    def test_f1_002_naskah_bertabel_judul_sama_tidak_dituduh_beda(self):
+        """Regresi. Label "Menetapkan" dan isinya di sel yang berbeda.
+
+        `_AWAL_MENETAPKAN` sudah membuat titik dua opsional sejak Kasus 3,
+        tetapi normalisasinya masih mewajibkannya — perbaikan itu terpasang
+        separuh. Akibatnya kata "Menetapkan" ikut terbawa ke dalam judul,
+        awalan "KEPUTUSAN MENTERI KEUANGAN TENTANG" tidak terpotong karena
+        jangkar `^` tidak lagi mengenai apa pun, dan judul yang SAMA PERSIS
+        dengan judul pembuka dilaporkan berbeda.
+
+        Bentuk bertabel inilah yang dipakai naskah sungguhan, jadi salah
+        tandai ini akan muncul pada hampir setiap KMK yang rapi.
+        """
+        doc = _buat_dokumen([
+            "KEPUTUSAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 88/KMK.01/2026",
+            "TENTANG",
+            "PENETAPAN PEJABAT PENGELOLA KEUANGAN",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "Menimbang",
+            "a. bahwa dalam rangka tertib administrasi perlu ditetapkan pejabat;",
+            "Mengingat",
+            "1. Undang-Undang Nomor 1 Tahun 2004 tentang Perbendaharaan Negara;",
+            "M E M U T U S K A N :",
+            "Menetapkan",
+            "KEPUTUSAN MENTERI KEUANGAN TENTANG PENETAPAN PEJABAT PENGELOLA "
+            "KEUANGAN.",
+            "KESATU",
+            "Menetapkan pejabat pengelola keuangan sebagaimana tercantum dalam "
+            "Lampiran yang merupakan bagian tidak terpisahkan.",
+        ])
+        assert cek_judul_konsisten(doc, JenisDokumen.KMK) == []
+
+        # Penjaga sisi sebaliknya: perbedaan yang NYATA tetap harus ketemu,
+        # meski bentuknya bertabel.
+        doc_beda = list(doc)
+        doc_beda[11] = ParagrafInput(
+            index=11,
+            teks="KEPUTUSAN MENTERI KEUANGAN TENTANG PENUNJUKAN PEJABAT "
+            "PENGELOLA KEUANGAN.",
+        )
+        temuan = cek_judul_konsisten(doc_beda, JenisDokumen.KMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.teks_asli == "PENUNJUKAN"

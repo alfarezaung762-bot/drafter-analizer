@@ -676,6 +676,47 @@ menerima bentuk rapat maupun renggang. Seluruh aturan yang membutuhkannya wajib
 lewat situ — supaya tidak ada aturan yang diam-diam memakai pencocokan yang
 lebih sempit lagi.
 
+**Kasus 11 — F1-002 menuduh judul berbeda padahal yang beda cuma titiknya.
+Bug, sudah diperbaiki.**
+
+Normalisasi kedua sisi tidak simetris: `_ekstrak_judul_menetapkan()` membuang
+titik di akhir, sedangkan judul pembuka dibandingkan apa adanya. Pada naskah
+yang judul pembukanya diakhiri titik — kesalahan yang **sudah** dilaporkan
+F1-006 — F1-002 ikut melapor "judulnya berbeda", padahal kata per katanya sama
+persis. Penelaah melihat dua tanda di dua tempat, salah satunya menuduh
+perbedaan yang tidak ada.
+
+Sekarang kedua sisi lewat `_samakan_untuk_banding()` yang sama. Pembagian
+tugasnya jadi tegas: **F1-006 dan F1-012 mengurusi tanda baca penutupnya,
+F1-002 mengurusi isi judulnya.** Tidak saling menuduh.
+
+**Kasus 12 — F1-002 salah tandai pada naskah BERTABEL. Bug, sudah diperbaiki.**
+
+Yang paling berdampak dari semuanya, karena bentuk bertabel itulah yang dipakai
+naskah sungguhan.
+
+Perbaikan Kasus 3 ternyata terpasang **separuh**. `_AWAL_MENETAPKAN` sudah
+dibuat menerima label tanpa titik dua — bentuk yang muncul ketika label
+"Menetapkan" dan isinya jatuh di sel yang berbeda — tetapi normalisasi di
+bawahnya masih mewajibkan titik dua (`^.*?Menetapkan\s*:\s*`). Akibatnya
+berantai:
+
+1. kata "Menetapkan" ikut terbawa ke dalam judul;
+2. awalan "KEPUTUSAN MENTERI KEUANGAN TENTANG" tidak terpotong, karena
+   jangkar `^` tidak lagi mengenai apa pun;
+3. judul yang **sama persis** dengan judul pembuka dilaporkan berbeda, dan yang
+   tersorot justru kata "Menetapkan" itu sendiri.
+
+Artinya hampir setiap KMK rapi yang pembukaannya bertabel akan mendapat satu
+salah tandai. Titik duanya sekarang opsional juga di normalisasinya.
+
+**Cara keduanya ditemukan, dan kenapa itu penting.** Keduanya tidak ketahuan
+dari membaca kode maupun dari 86 tes yang sudah ada — keduanya muncul saat
+naskah uji di `tools/contoh/` disusun, yaitu saat ada naskah yang
+kesalahannya sudah diketahui lebih dulu lalu hasilnya dicocokkan. Itu pula
+kegunaan berkas uji itu seterusnya: bukan sekadar contoh, melainkan alat
+untuk menemukan salah tandai yang belum terpikirkan. Lihat bagian 16.2.
+
 ### 6.11 Batas yang sudah diketahui
 
 - **Warna asli disimpan di memori panel, bukan di dokumen.** Kalau Word ditutup
@@ -905,11 +946,17 @@ drafter-analiser/
     │       ├── test_format_baku.py  ← 86 tes. Tiap salah tandai yang pernah
     │       │                           terjadi punya tes regresinya sendiri
     │       └── test_api_analisis.py ← tes endpoint
-    └── tools/
-        ├── cek_docx.py              ← alat diagnosa: jalankan aturan terhadap
-        │                              .docx TANPA membuka Word. BUKAN bagian
-        │                              produk, tidak ikut ke add-in
-        └── contoh/contoh-rancangan-uji.docx
+    └── tools/                       ← alat diagnosa. BUKAN bagian produk,
+        │                              tidak ikut ke add-in
+        ├── cek_docx.py              ← jalankan aturan terhadap sebuah .docx
+        │                              TANPA membuka Word
+        ├── buat_contoh_uji.py       ← bangkitkan naskah uji + kunci jawabannya
+        └── contoh/
+            ├── contoh-rancangan-uji.docx  ← naskah contoh lama
+            ├── uji-pmk-lengkap.docx       ← naskah PMK, kesalahannya diketahui
+            ├── uji-kmk-lengkap.docx       ← naskah KMK, pembukaan BERTABEL
+            └── KUNCI-UJI.md               ← kunci, DIBANGKITKAN — jangan
+                                             disunting tangan
 ```
 
 Tiga berkas bertanda ★★ dan ★ itu yang menanggung hampir seluruh pekerjaan.
@@ -1517,9 +1564,9 @@ tetapi belum sekali pun dijalankan di dalam Word.
     legal di panel padam untuk semuanya. Riwayat verifikasinya di
     `rules/rujukan_kmk527.py`, dan tes
     `test_semua_aturan_punya_rujukan_terverifikasi` menjaganya tetap begitu.
-15. ~~Tutup empat salah tandai dan satu lubang cakupan yang ditemukan pada
-    pembacaan ulang seluruh kode~~ (bagian 6.10 Kasus 6–10). **Selesai
-    18 Sep 2026**, dengan delapan tes regresi di kelas
+15. ~~Tutup enam salah tandai dan satu lubang cakupan yang ditemukan pada
+    pembacaan ulang seluruh kode dan penyusunan naskah uji~~ (bagian 6.10
+    Kasus 6–12). **Selesai 18 Sep 2026**, dengan sepuluh tes regresi di kelas
     `TestRegresi18September`. Ikut dibereskan di sisi Word: Bersihkan Daftar
     tidak lagi menimpa warna penyusun dan ikut menghapus komentar alat,
     cakupan "Bagian Terpilih" punya jalur cadangan runtime, dan rentang yang
@@ -1594,9 +1641,11 @@ Build ini berhasil kalau:
 - [x] Tiap fungsi di `rules/` punya tes yang jalan tanpa server
 - [x] Jenis dokumen wajib dipilih; menekan Analisis tanpa memilih tidak jalan
 - [x] Yang ditandai rentang kata yang salah, bukan paragraf penuh (di backend)
-- [x] Tidak ada aturan yang menandai naskah yang sudah benar — sepuluh salah
+- [x] Tidak ada aturan yang menandai naskah yang sudah benar — dua belas salah
       tandai yang sudah ditemukan semuanya ditutup dan dijaga tes regresi
-      (bagian 6.10 Kasus 1–10)
+      (bagian 6.10 Kasus 1–12). **Yang belum ditemukan tentu tidak terhitung** —
+      karena itu 16.2 wajib dijalankan pada naskah sungguhan, bukan cuma pada
+      naskah uji
 - [x] Menjalankan analisis dua kali tidak menumpuk komentar, dan Bersihkan
       Daftar benar-benar mengosongkan naskah dari tanda **dan** komentar alat
 - [x] Task pane tidak mengulang penjelasan yang sudah ada di komentar
@@ -1641,7 +1690,7 @@ cuma membuang naskah uji.
 ### 16.1 Empat perintah yang wajib hijau sebelum apa pun
 
 ```bash
-cd backend && python -m pytest tests/ -q          # harus: 86 passed
+cd backend && python -m pytest tests/ -q          # harus: 88 passed
 cd frontend && npx tsc --noEmit                    # harus: tanpa keluaran
 cd frontend && npx eslint src --max-warnings=0     # harus: tanpa keluaran
 cd frontend && npm run build                       # harus: Compiled successfully
@@ -1650,7 +1699,40 @@ cd frontend && npm run build                       # harus: Compiled successfull
 Kalau keempatnya hijau, yang terbukti baru satu hal: kode yang ada sudah sesuai
 dengan yang dijanjikannya sendiri. **Itu belum berarti aturannya benar.**
 
-### 16.2 Uji aturan terhadap naskah nyata, tanpa membuka Word
+### 16.2 Uji aturan terhadap naskah, tanpa membuka Word
+
+**Mulai dari naskah uji yang kesalahannya sudah diketahui.** Dua berkas di
+`tools/contoh/`, beserta kunci jawabannya:
+
+```bash
+cd backend && python tools/cek_docx.py tools/contoh/uji-pmk-lengkap.docx --jenis PMK
+cd backend && python tools/cek_docx.py tools/contoh/uji-kmk-lengkap.docx --jenis KMK
+```
+
+Cocokkan hasilnya dengan `tools/contoh/KUNCI-UJI.md`. Kunci itu memuat dua
+tabel yang harus dibandingkan: **apa yang sengaja dirusak** dan **apa yang
+benar-benar keluar hari ini**. Selisihnya yang berarti:
+
+- ada di keduanya → aturannya bekerja;
+- ada di rencana, tidak ada di hasil → aturannya diam, belum tentu cacat;
+- **ada di hasil, tidak ada di rencana → salah tandai.** Ini yang wajib
+  dilaporkan.
+
+Kedua berkas itu juga memuat **jebakan yang sengaja dipasang** — bagian yang
+kelihatan salah tetapi sebenarnya benar, dan tidak boleh ditandai: isi diktum
+KMK yang diawali kata "Menetapkan", nama resmi peraturan lain yang memuat
+"Republik Indonesia", "undang-undang" generik di batang tubuh, label yang
+berdiri sendiri di sel tabel, dan `M E M U T U S K A N :` berspasi huruf.
+
+Keduanya dibangkitkan `tools/buat_contoh_uji.py`, dan **kuncinya ikut
+dibangkitkan dari sumber yang sama** — supaya tidak pernah bisa berbeda dari
+naskahnya. Kalau aturannya berubah, jalankan ulang skripnya.
+
+Cara ini bukan basa-basi: **Kasus 11 dan 12 di bagian 6.10 ditemukan justru
+saat naskah uji itu disusun**, bukan dari membaca kode dan bukan dari 86 tes
+yang sudah ada.
+
+**Lalu lanjutkan ke naskah sungguhan.**
 
 ```bash
 cd backend && python tools/cek_docx.py <berkas.docx> --jenis PMK
