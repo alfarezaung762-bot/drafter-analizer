@@ -16,6 +16,11 @@ import {
   tolakTemuan,
   bersihkanSemuaTanda,
 } from "@/lib/office";
+import {
+  ATURAN_FASE1,
+  ATURAN_BISA_DIPILIH,
+  SEMUA_ID_AKTIF,
+} from "@/lib/aturan-fase1";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
@@ -68,7 +73,21 @@ export default function TaskpanePage() {
   const [selectedTemuanId, setSelectedTemuanId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showPengaturan, setShowPengaturan] = useState(false);
+  // Aturan mana saja yang dijalankan. Semula semuanya. Penelaah bisa mematikan
+  // satu aturan yang salah tandai tanpa menunggu kodenya diperbaiki — dan bisa
+  // memeriksa manual apa yang sebenarnya diperiksa tiap aturan.
+  const [aturanAktif, setAturanAktif] = useState<Set<string>>(
+    () => new Set(SEMUA_ID_AKTIF)
+  );
+  const [aturanTerbuka, setAturanTerbuka] = useState<string | null>(null);
   const [infoPenandaan, setInfoPenandaan] = useState<string | null>(null);
+  // Temuan yang TIDAK tertandai di naskah. Kartunya harus memuat alasannya
+  // sendiri — bagi temuan ini tidak ada komentar di naskah yang bisa dibaca,
+  // dan tombol Terima/Tolak tidak punya apa pun untuk dikerjakan.
+  const [idTidakDitandai, setIdTidakDitandai] = useState<Set<string>>(
+    () => new Set()
+  );
 
   // Web mode fallback state
   const [webInputText, setWebInputText] = useState(CONTOH_DRAFT_PMK);
@@ -134,9 +153,32 @@ export default function TaskpanePage() {
   // Sejak semua keputusan pindah ke panel, SELURUH temuan dihitung — tidak ada
   // lagi temuan yang statusnya tidak terpantau. Tombol Bersihkan Daftar tetap
   // ada untuk keluar dari keadaan yang terlanjur kacau.
-  const adaYangBelumDiputuskan = useMemo(
-    () => temuanList.some((t) => t.status === "belum_ditinjau"),
+  // Temuan yang tidak punya tanda di naskah tidak bisa diputuskan — tidak ada
+  // apa pun untuk diterima atau ditolak di sana. Memasukkannya ke hitungan ini
+  // berarti mengunci tombol Analisis selamanya.
+  const tidakTertandai = (t: Temuan) =>
+    idTidakDitandai.has(t.id) || !t.lokasi.teks_asli.trim();
+
+  // Temuan yang punya teks untuk ditunjuk — inilah yang jadi kartu.
+  const temuanBerlokasi = useMemo(
+    () => temuanList.filter((t) => t.lokasi.teks_asli.trim()),
     [temuanList]
+  );
+
+  // Temuan tanpa lokasi (F1-003: sebuah bagian wajib tidak ada). Bukan kartu —
+  // tidak ada yang bisa dilompati dan tidak ada yang bisa diterima/ditolak.
+  // Ditampilkan sebagai peringatan dokumen, sebaris, di atas daftar.
+  const peringatanDokumen = useMemo(
+    () => temuanList.filter((t) => !t.lokasi.teks_asli.trim()),
+    [temuanList]
+  );
+
+  const adaYangBelumDiputuskan = useMemo(
+    () =>
+      temuanBerlokasi.some(
+        (t) => t.status === "belum_ditinjau" && !tidakTertandai(t)
+      ),
+    [temuanBerlokasi, idTidakDitandai]
   );
 
   // Mengosongkan daftar panel SEKALIGUS mencabut seluruh tanda alat dari
@@ -164,7 +206,7 @@ export default function TaskpanePage() {
   // Gate legal: periksa apakah ada temuan dengan rujukan placeholder
   const adaRujukanBelumVerifikasi = useMemo(() => {
     return temuanList.some(
-      (t) => t.rujukan.butir === "..." || t.rujukan.kutipan === "..."
+      (t) => t.rujukan.status !== "visual"
     );
   }, [temuanList]);
 
@@ -177,6 +219,15 @@ export default function TaskpanePage() {
       setGoyangJenis(true);
       setStatusMessage("Pilih dulu PMK atau KMK sebelum menganalisis.");
       window.setTimeout(() => setGoyangJenis(false), 600);
+      return;
+    }
+
+    if (aturanAktif.size === 0) {
+      setStatusMessage(
+        "Semua pemeriksaan dimatikan di Pengaturan — tidak ada yang bisa" +
+          " diperiksa. Nyalakan setidaknya satu."
+      );
+      setShowPengaturan(true);
       return;
     }
 
@@ -205,6 +256,7 @@ export default function TaskpanePage() {
       const reqBody: AnalisisRequest = {
         jenis_dokumen: jenisDokumen,
         paragraf: paragraphs,
+        aturan_aktif: [...aturanAktif],
       };
       const res = await fetch(`${API_BASE}/analisis/jalankan`, {
         method: "POST",
@@ -245,11 +297,12 @@ export default function TaskpanePage() {
 
         let pesan = bagian.length > 0 ? bagian.join(", ") + "." : "";
 
-        if (hasil.tidakKetemu > 0) {
+        setIdTidakDitandai(new Set(hasil.idTidakDitandai));
+        if (hasil.idTidakDitandai.length > 0) {
           pesan +=
-            ` ${hasil.tidakKetemu} temuan TIDAK ditandai di naskah karena` +
-            " letak persisnya tidak ketemu — periksa sendiri lewat daftar" +
-            " di bawah.";
+            ` ${hasil.idTidakDitandai.length} temuan TIDAK ditandai di naskah` +
+            " karena letak persisnya tidak ketemu — alasannya ada di kartunya" +
+            " masing-masing di bawah.";
         }
 
         if (!hasil.pelacakanMati) {
@@ -262,6 +315,7 @@ export default function TaskpanePage() {
         setInfoPenandaan(pesan.trim() || null);
       } else {
         setInfoPenandaan(null);
+        setIdTidakDitandai(new Set());
       }
 
       setStatusMessage(
@@ -359,14 +413,190 @@ export default function TaskpanePage() {
               </p>
             </div>
           </div>
-          <button
-            onClick={() => setShowDiagnostics(!showDiagnostics)}
-            className="text-[10px] px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-100 transition"
-            title="Info Lingkungan & WordApi"
-          >
-            {inWord ? "Word Connected" : "Web Preview"}
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                setShowPengaturan(!showPengaturan);
+                setShowDiagnostics(false);
+              }}
+              aria-expanded={showPengaturan}
+              className={`p-1 rounded border transition ${
+                showPengaturan
+                  ? "bg-slate-800 border-slate-800 text-white"
+                  : "border-slate-200 text-slate-600 hover:bg-slate-100"
+              }`}
+              title="Pengaturan — pilih pemeriksaan yang dijalankan"
+            >
+              <svg
+                className="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+              </svg>
+            </button>
+            <button
+              onClick={() => {
+                setShowDiagnostics(!showDiagnostics);
+                setShowPengaturan(false);
+              }}
+              className="text-[10px] px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-100 transition"
+              title="Info Lingkungan & WordApi"
+            >
+              {inWord ? "Word Connected" : "Web Preview"}
+            </button>
+          </div>
         </div>
+
+        {/* Panel Pengaturan — daftar pemeriksaan Fase 1.
+            Dua gunanya sekaligus: mematikan aturan yang salah tandai tanpa
+            menunggu kode diperbaiki, DAN memperlihatkan apa yang sebenarnya
+            diperiksa tiap aturan supaya penelaah bisa mengecek manual. */}
+        {showPengaturan && (
+          <div className="mt-2.5 p-2 bg-slate-100 rounded border border-slate-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-700 text-[11px]">
+                Fase 1 — Koreksi Format Baku
+              </span>
+              <div className="flex items-center gap-2 text-[10px]">
+                <button
+                  onClick={() => setAturanAktif(new Set(SEMUA_ID_AKTIF))}
+                  className="text-blue-700 hover:underline"
+                >
+                  Pilih semua
+                </button>
+                <button
+                  onClick={() => setAturanAktif(new Set())}
+                  className="text-slate-500 hover:underline"
+                >
+                  Kosongkan
+                </button>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-slate-500 leading-snug">
+              Seluruh pemeriksaan di bawah deterministik — tanpa AI. Klik nama
+              pemeriksaan untuk melihat rinciannya.
+            </p>
+
+            {ATURAN_FASE1.map((aturan) => {
+              const mati = !!aturan.dimatikan;
+              const dipilih = aturanAktif.has(aturan.id);
+              const terbuka = aturanTerbuka === aturan.id;
+
+              return (
+                <div
+                  key={aturan.id}
+                  className={`rounded border bg-white ${
+                    mati ? "border-slate-200 opacity-60" : "border-slate-300"
+                  }`}
+                >
+                  <div className="flex items-start gap-1.5 px-1.5 py-1.5">
+                    <input
+                      type="checkbox"
+                      id={`aturan-${aturan.id}`}
+                      checked={dipilih && !mati}
+                      disabled={mati}
+                      onChange={(e) =>
+                        setAturanAktif((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(aturan.id);
+                          else next.delete(aturan.id);
+                          return next;
+                        })
+                      }
+                      className="mt-0.5 accent-blue-700"
+                    />
+                    <button
+                      onClick={() =>
+                        setAturanTerbuka(terbuka ? null : aturan.id)
+                      }
+                      className="flex-1 text-left"
+                      aria-expanded={terbuka}
+                    >
+                      <span className="text-[11px] text-slate-800 leading-snug">
+                        {aturan.judul}
+                      </span>
+                      {mati && (
+                        <span className="ml-1 text-[8px] bg-slate-300 text-slate-700 px-1 rounded font-bold align-middle">
+                          dimatikan
+                        </span>
+                      )}
+                      <span className="block text-[9px] text-slate-400">
+                        {terbuka ? "sembunyikan rincian" : "lihat rincian"}
+                      </span>
+                    </button>
+                  </div>
+
+                  {terbuka && (
+                    <div className="px-2 pb-2 pt-0.5 space-y-1.5 text-[10px] leading-snug border-t border-slate-100">
+                      {mati && (
+                        <p className="text-rose-800 bg-rose-50 border border-rose-200 rounded px-1.5 py-1">
+                          <span className="font-semibold">
+                            Kenapa dimatikan:{" "}
+                          </span>
+                          {aturan.dimatikan}
+                        </p>
+                      )}
+                      <div>
+                        <p className="font-semibold text-slate-700">
+                          Yang diperiksa
+                        </p>
+                        <ul className="list-disc ml-3.5 text-slate-600 space-y-0.5">
+                          {aturan.diperiksa.map((baris, i) => (
+                            <li key={i}>{baris}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-700">
+                          Yang TIDAK diperiksa
+                        </p>
+                        <ul className="list-disc ml-3.5 text-slate-500 space-y-0.5">
+                          {aturan.tidakDiperiksa.map((baris, i) => (
+                            <li key={i}>{baris}</li>
+                          ))}
+                        </ul>
+                      </div>
+                      <p className="text-slate-600">
+                        <span className="font-semibold text-slate-700">
+                          Tandanya di naskah:{" "}
+                        </span>
+                        {aturan.tanda}
+                      </p>
+                      {aturan.catatanSumber && (
+                        <p className="text-amber-900 bg-amber-50 border border-amber-200 rounded px-1.5 py-1">
+                          <span className="font-semibold">
+                            Dasar aturannya belum pasti:{" "}
+                          </span>
+                          {aturan.catatanSumber}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
+              {aturanAktif.size} dari {ATURAN_BISA_DIPILIH.length} pemeriksaan
+              dinyalakan.
+              {aturanAktif.size === 0 && " Analisis tidak akan menemukan apa pun."}
+            </p>
+          </div>
+        )}
 
         {/* WordApi Diagnostic Accordion */}
         {showDiagnostics && (
@@ -571,7 +801,7 @@ export default function TaskpanePage() {
           <div className="bg-amber-50 border border-amber-300 text-amber-900 px-2.5 py-2 rounded-lg flex items-start gap-1.5 text-[11px] leading-snug">
             <span className="text-amber-600 font-bold text-sm leading-none">&#9888;</span>
             <div>
-              <span className="font-bold">Penanda Gate Legal:</span> Beberapa dasar hukum rujukan masih bertanda placeholder (&quot;...&quot;) dan belum diverifikasi secara visual oleh penelaah hukum.
+              <span className="font-bold">Penanda Gate Legal:</span> Sebagian rujukan butir KMK 527 belum dibaca dan diketik ulang manusia dari naskah aslinya — isinya berasal dari ekstraksi teks yang OCR-nya rusak. Periksa butirnya sendiri sebelum memakai temuan ini sebagai dasar koreksi.
             </div>
           </div>
         )}
@@ -606,16 +836,36 @@ export default function TaskpanePage() {
         )}
 
         {/* Finding Cards List */}
+        {/* Peringatan dokumen — temuan yang tidak punya lokasi di naskah.
+            Sebaris, bukan kartu: tidak ada yang bisa dilompati maupun
+            diputuskan. */}
+        {peringatanDokumen.length > 0 && (
+          <div className="bg-rose-50 border border-rose-300 text-rose-900 px-2.5 py-2 rounded-lg text-[11px] leading-snug space-y-1">
+            {peringatanDokumen.map((t) => (
+              <div key={t.id} className="flex items-start gap-1.5">
+                <span className="text-rose-600 font-bold leading-none">
+                  &#9888;
+                </span>
+                <span>{t.catatan}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="space-y-1.5">
-          {temuanList.map((temuan) => {
+          {temuanBerlokasi.map((temuan) => {
             const isSelected = selectedTemuanId === temuan.id;
             const isPlaceholderRujukan =
-              temuan.rujukan.butir === "..." || temuan.rujukan.kutipan === "...";
+              temuan.rujukan.status !== "visual";
             // Penjelasan temuan TIDAK diulang di sini — tempatnya di komentar
             // Word, di titik kesalahannya (bagian 6.6). Panel hanya navigasi.
             const cuplikan = temuan.lokasi.teks_asli.trim();
             const ringkas =
               cuplikan.length > 70 ? cuplikan.slice(0, 70) + "\u2026" : cuplikan;
+            // Temuan tanpa tanda di naskah: tidak ada komentar yang bisa dibaca
+            // di sana, jadi alasannya HARUS muncul di kartu ini. Tombol
+            // Terima/Tolak disembunyikan \u2014 tidak ada yang bisa diputuskan.
+            const tanpaTanda = tidakTertandai(temuan);
 
             return (
               <div
@@ -642,6 +892,11 @@ export default function TaskpanePage() {
                   >
                     {temuan.jenis_tanda === "penggantian" ? "usulan" : "catatan"}
                   </span>
+                  {tanpaTanda && (
+                    <span className="text-[8px] bg-slate-200 text-slate-700 px-1 rounded font-bold">
+                      tidak ditandai di naskah
+                    </span>
+                  )}
                   {isPlaceholderRujukan && (
                     <span className="text-[8px] bg-amber-200 text-amber-900 px-1 rounded font-bold">
                       rujukan belum diverifikasi
@@ -679,6 +934,10 @@ export default function TaskpanePage() {
                       usulan penggantian. Daftar yang separuh kartunya bisa
                       ditekan dan separuhnya menyuruh pindah ke tab Review
                       membingungkan penelaah. */}
+                  {/* Tombol keputusan SELALU ada. Menyembunyikannya pernah
+                      dicoba dan langsung dilaporkan penelaah sebagai janggal —
+                      kartu yang bentuknya berubah-ubah membuat daftar sulit
+                      dibaca sekilas. */}
                   <div className="flex items-center gap-1">
                       <button
                         onClick={() => handleTerima(temuan)}

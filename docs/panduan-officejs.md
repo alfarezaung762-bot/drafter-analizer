@@ -4,71 +4,79 @@ Peringatan utama: dokumentasi Office.js jarang muncul di data latih model, jadi
 model cenderung mengarang method yang tidak ada atau memakai pola dari versi API
 yang berbeda. **Selalu verifikasi sebelum menulis kode.**
 
-## Sumber Kebenaran
+## Sumber kebenaran
 
 Urut prioritas:
 
 1. `frontend/node_modules/@types/office-js/index.d.ts` — definisi TypeScript
-   resmi. Setiap method punya anotasi `[Api set: ...]` yang menyebut requirement
+   resmi. Tiap method punya anotasi `[Api set: ...]` yang menyebut requirement
    set-nya. Cara cek: `grep -n "namaMethod" -B 8 index.d.ts`
-2. Repo dokumentasi resmi (open source, berisi tutorial dan contoh kode):
-   `OfficeDev/office-js-docs-pr` di GitHub — cukup clone, tidak perlu scraping.
-3. Referensi Word JavaScript API di situs Microsoft Learn.
+2. Repo dokumentasi resmi `OfficeDev/office-js-docs-pr` di GitHub.
+3. Referensi Word JavaScript API di Microsoft Learn.
 
-## Versi yang Sudah Diverifikasi dari `index.d.ts`
+## API yang dipakai Fase 1 — sudah diverifikasi ke `index.d.ts`
 
-| API | Requirement set | Catatan |
+Seluruh penandaan sengaja dijaga di **WordApi 1.1**, himpunan paling dasar, agar
+jalan di Word desktop mana pun termasuk lisensi beli-putus.
+
+| API | Requirement set | Dipakai untuk |
 |---|---|---|
-| `Range.insertComment` | WordApi 1.4 | komentar permanen, tersimpan di file |
-| `Paragraph.insertAnnotations` | WordApi 1.7 | **wajib langganan Microsoft 365** |
-| `Critique.colorScheme` / `.start` / `.length` | WordApi 1.7 | warna: Red, Green, Blue, Lavender, Berry |
-| `Critique.popupOptions` | WordApi 1.8 | berisi daftar `suggestions` + tombol Accept/Reject |
-| `Range.highlight()` | WordApi 1.8 | sorotan **sementara**, tidak mengubah dokumen |
-| `font.highlightColor` | WordApi 1.1 | sorotan **permanen**, mengubah dokumen |
+| `Font.color` | WordApi 1.1 | merah `#C00000` untuk teks salah, hijau `#00802B` untuk usulan |
+| `Font.strikeThrough` | WordApi 1.1 | coretan pada teks yang ada penggantinya |
+| `Font.highlightColor` | WordApi 1.1 | blok kuning untuk temuan tanpa pengganti |
+| `Range.insertText(..., "After")` | WordApi 1.1 | menyisipkan usulan di sebelah teks aslinya |
+| `Range.insertContentControl()` | WordApi 1.1 | membungkus tanda agar bisa ditemukan kembali |
+| `ContentControl.tag` / `.title` / `.appearance` | WordApi 1.1 | penanda `DA-ASLI-{n}` dan `DA-USUL-{n}`, tampilan `Hidden` |
+| `ContentControl.font` | WordApi 1.1 | memulihkan format saat Tolak — **bukan** `getRange().font`, yang butuh 1.3 |
+| `ContentControl.delete(keepContent)` | WordApi 1.1 | `false` membuang usulan berikut isinya, `true` melepas bungkus saja |
+| `ContentControlCollection.getByTag()` | WordApi 1.1 | menemukan kembali tanda milik alat |
+| `Range.search()` | WordApi 1.1 | mencari letak temuan dari `lokasi.teks_asli` |
+| `Range.insertComment` | WordApi 1.4 | komentar permanen, tersimpan di berkas |
+| `Document.changeTrackingMode` | WordApi 1.4 | **dimatikan** selama penandaan, lalu dikembalikan |
+| `Comment.replies` | WordApi 1.4 | rencana tempat kutipan utuh butir — belum dipakai |
 
-## Hal yang Mudah Keliru
+## Jebakan yang sudah terbukti
 
-- Annotation (critique) **tidak persisten** — hilang saat dokumen ditutup.
-  Dokumen sama sekali tidak berubah. Untuk hasil yang perlu dibawa keluar,
-  gunakan `insertComment`.
-- Warna komentar Word tidak deterministik antar-komputer. Jangan mengandalkan
-  warna komentar untuk menyampaikan tingkat keparahan — tulis di dalam teksnya.
-- Deklarasikan di manifest versi minimum yang **benar-benar dipakai**. Versi
+- **Requirement set didukung ≠ fitur diizinkan.** `isSetSupported("WordApi",
+  "1.7")` melaporkan `true` di Word 2024 LTSC, tetapi `insertAnnotations` tetap
+  melempar `RichApi.Error: NotImplemented` — Annotation mensyaratkan langganan
+  Microsoft 365 aktif, bukan cuma versi Word. Tiap fitur baru wajib punya jalur
+  cadangan runtime.
+- **Tidak ada API warna revisi sama sekali.** Sudah dicari ke seluruh
+  `index.d.ts`: tidak ada `insertedTextColor`, `deletedTextColor`,
+  `revisionColor`, maupun `authorColor`. `RevisionsFilter` hanya punya `markup`
+  dan `view`. Warna revisi ditentukan Word menurut penulisnya. Inilah sebab
+  Track Changes ditinggalkan — lihat `fase1 drafter.md` bagian 6.1.
+- **`Word.search()` dibatasi sekitar 255 karakter.** Temuan yang teksnya lebih
+  panjang tidak akan pernah ketemu, jadi tidak pernah tertandai. Backend
+  memotong rentang `catatan` di 120 karakter untuk ini.
+- **`search()` mengembalikan SEMUA kemunculan** di paragraf, bukan yang ada di
+  `offset_mulai`. Perlu dihitung kemunculan keberapa, kalau tidak temuan pada
+  kata yang berulang selalu mendarat di kemunculan pertama.
+- **`getTrackedChanges()` melapor kurang** — satu penggantian muncul sebagai satu
+  item bertipe `Added` saja, padahal di dokumen ada sisipan *dan* penghapusan.
+  Jangan dipakai sebagai bukti keberhasilan. (Sudah tidak dipakai sejak Track
+  Changes ditinggalkan.)
+- **Memberi warna selagi pelacakan menyala** membuat Word mencatat tiap
+  pewarnaan sebagai revisi `Formatted: Highlight` di margin. Matikan pelacakan
+  dulu, kembalikan sesudahnya.
+- **`font.allCaps` (WordApiDesktop 1.3)** tidak menolong mengenali judul yang
+  tampil kapital lewat gaya paragraf — belum jelas apakah requirement set-nya
+  tidak tersedia atau propertinya buta terhadap gaya. Aturan yang bergantung
+  padanya (F1-001) dimatikan. Kandidat penggantinya: `Range.getOoxml()`
+  (WordApi 1.1) lalu cari penanda `<w:caps/>` — **belum diuji.**
+- **Warna komentar Word tidak deterministik antar-komputer**, dan rentang yang
+  punya komentar diberi naungan warna penulisnya — bisa menutupi blok kuning.
+  Jangan mengandalkan warna komentar untuk menyampaikan apa pun.
+- **Deklarasikan di manifest versi minimum yang benar-benar dipakai.** Versi
   lebih tinggi tidak memberi keuntungan, justru memblokir Word versi lama.
-  Fitur di atas versi minimum dicek runtime dengan
-  `Office.context.requirements.isSetSupported("WordApi", "1.8")`.
-- Task pane adalah halaman web biasa yang dimuat Word lewat URL di manifest.
-- `isSetSupported("WordApi", "1.7"/"1.8")` bisa melaporkan `true` padahal
-  `insertAnnotations`/Critique tetap melempar `RichApi.Error: NotImplemented`
-  saat dipanggil — dikonfirmasi empiris di Word 2024 LTSC (lisensi beli-putus,
-  tanpa langganan Microsoft 365 aktif). Requirement set yang didukung ≠ fitur
-  yang diizinkan; Annotation mensyaratkan langganan, bukan cuma versi Word.
 
-## Status keputusan sorotan
+## Catatan historis — jangan diikuti
 
-> **Keputusan produk terbaru:** jangan memakai sorotan berdasarkan tingkat
-> keparahan atau sorotan seluruh paragraf sebagai mekanisme utama. Lihat
-> [`keputusan-ux-penelaahan-fase1.md`](keputusan-ux-penelaahan-fase1.md).
-> Pengguna tidak perlu mengatur Word: penggantian yang pasti memakai tampilan
-> revisi add-in pada rentang presisi. `font.color` dan `strikeThrough` boleh
-> dipakai hanya bersama snapshot/pemulihan format dan content control bertag.
-> Terima menyimpan tampilan tersebut di naskah kerja; Tolak memulihkannya;
-> pembersihan terjadi pada salinan Ekspor versi bersih. Detail:
-> [`rancangan-analisis-terima-ekspor.md`](rancangan-analisis-terima-ekspor.md).
+Dua rancangan penandaan sudah gugur di Word penelaah: `Critique` + popup
+(terkunci langganan Microsoft 365) dan Track Changes bawaan Word (warna revisi
+tidak bisa diatur, dan pewarnaan menghasilkan spam `Formatted: Highlight`).
+Pernah juga dipakai `font.highlightColor` berdasarkan tingkat keparahan
+tinggi/sedang/rendah; tingkat keparahan sudah dihapus dari seluruh rancangan.
 
-### Catatan historis - rancangan sebelumnya (jangan diikuti)
-
-`font.highlightColor` dipakai sebagai mekanisme UTAMA untuk mewarnai temuan
-sesuai tingkat keparahan (tinggi/sedang/rendah) di `tandaiSemuaTemuan()`
-(`frontend/src/lib/office.ts`) — bukan cuma cadangan darurat seperti rancangan
-awal. Alasannya: Critique (mekanisme yang semula direncanakan untuk ini)
-butuh langganan Microsoft 365 yang tidak tersedia di lingkungan penelaah, dan
-`Range.highlight()` — pengganti amannya yang tidak mengubah dokumen — sama
-sekali tidak punya parameter warna, jadi tidak pernah bisa membedakan tingkat
-keparahan dalam kondisi apa pun.
-
-Ini **satu-satunya bagian alat yang mengubah format dokumen** (bukan isi
-teksnya). Warna asli tiap paragraf dicatat sebelum ditimpa dan dipulihkan
-otomatis saat temuan diterima atau ditolak — lihat `hapusSorotan()` di berkas
-yang sama. Rasional produknya dan hubungannya dengan prinsip "tidak mengubah
-naskah" ada di `fase1 drafter.md` bagian 6.
+Riwayat lengkapnya beserta buktinya ada di `fase1 drafter.md` bagian 6.1–6.2.

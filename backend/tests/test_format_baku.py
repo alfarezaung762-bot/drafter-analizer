@@ -12,7 +12,12 @@ from app.models.temuan import (
     ParagrafInput,
 )
 from app.rules.format_baku import (
+    _cek_label_bagian,
+    cek_butir_menimbang,
     cek_ejaan,
+    cek_judul_menetapkan,
+    cek_judul_tanpa_tanda_baca,
+    cek_penomoran_dasar_hukum,
     cek_frasa_baku_menimbang,
     cek_judul_kapital,
     cek_judul_konsisten,
@@ -213,6 +218,26 @@ class TestPenandaanSetingkatKata:
         ])
         assert cek_judul_konsisten(doc, JenisDokumen.KMK) == []
 
+    def test_diktum_gabungan_ikut_menghentikan(self):
+        # KMK 527 sendiri punya diktum sampai KEDUAPULUHLIMA. Pola lama
+        # (`KEDUA\b`) tidak cocok dengan penomoran gabungan karena ada
+        # lanjutannya. Kata berawalan KE- yang bukan angka harus tetap lolos.
+        from app.rules.format_baku import _PENGHENTI_MENETAPKAN as P
+
+        for diktum in [
+            "KESATU", "KESEPULUH", "KESEBELAS", "KEDUABELAS",
+            "KEEMPATBELAS", "KESEMBILANBELAS", "KEDUAPULUH",
+            "KEDUAPULUHSATU", "KEDUAPULUHLIMA", "BAB I", "Pasal 1",
+        ]:
+            assert P.match(diktum), f"{diktum} seharusnya menghentikan"
+
+        for bukan in [
+            "KEUANGAN", "KEPUTUSAN MENTERI KEUANGAN TENTANG PEDOMAN",
+            "KEMENTERIAN KEUANGAN", "Ketentuan lebih lanjut",
+            "Kepala Biro Hukum", "Rancangan peraturan",
+        ]:
+            assert not P.match(bukan), f"{bukan} seharusnya TIDAK menghentikan"
+
     def test_judul_menetapkan_kebablasan_memilih_diam(self):
         # Tidak ada penghenti sama sekali sesudah Menetapkan. Daripada melapor
         # judul sepanjang dokumen sebagai "berbeda", aturannya diam.
@@ -228,6 +253,169 @@ class TestPenandaanSetingkatKata:
             *[f"Paragraf lanjutan tanpa penanda diktum nomor {i}" for i in range(20)],
         ])
         assert cek_judul_konsisten(doc, JenisDokumen.KMK) == []
+
+    def test_kata_menetapkan_di_batang_tubuh_bukan_klausul_menetapkan(self):
+        """Regresi bug RPMK DBH Sawit, 18 Sep 2026.
+
+        Pencarian lama memakai re.search tanpa jangkar, jadi "menetapkan:" di
+        tengah kalimat Pasal 4 dikira klausul Menetapkan. Isi Pasal 4 lalu
+        dituduh "judulnya berbeda dari judul pembuka" — padahal bukan judul.
+        """
+        doc = _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 5 TAHUN 2026",
+            "TENTANG",
+            "PENGELOLAAN DANA BAGI HASIL PERKEBUNAN SAWIT",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG PENGELOLAAN DANA "
+            "BAGI HASIL PERKEBUNAN SAWIT.",
+            "BAB I",
+            "Pasal 4",
+            "(1) Dalam rangka pengelolaan DBH Sawit, Menteri selaku PA BUN "
+            "Pengelola TKD menetapkan:",
+            "a. Direktur Jenderal Perimbangan Keuangan sebagai Pemimpin PPA "
+            "BUN Pengelola TKD;",
+        ])
+        assert cek_judul_konsisten(doc, JenisDokumen.PMK) == []
+
+    def test_klausul_menetapkan_bertabel_tetap_terbaca(self):
+        # Naskah yang menaruh klausul Menetapkan di dalam tabel: label dan
+        # isinya jatuh di paragraf yang berbeda, sehingga paragraf labelnya
+        # cuma berbunyi "Menetapkan" tanpa titik dua.
+        doc = _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 5 TAHUN 2026",
+            "TENTANG",
+            "STANDAR BIAYA MASUKAN",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "MEMUTUSKAN:",
+            "Menetapkan",
+            ": PERATURAN MENTERI KEUANGAN TENTANG STANDAR BIAYA KELUARAN.",
+            "Pasal 1",
+        ])
+        temuan = cek_judul_konsisten(doc, JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.teks_asli == "KELUARAN"
+
+    def test_tanpa_memutuskan_aturan_judul_konsisten_diam(self):
+        doc = _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 5 TAHUN 2026",
+            "TENTANG",
+            "STANDAR BIAYA MASUKAN",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "Pasal 1",
+            "Menetapkan : sesuatu yang bukan judul.",
+        ])
+        assert cek_judul_konsisten(doc, JenisDokumen.PMK) == []
+
+    def test_menimbang_tidak_mendarat_di_baris_kosong(self):
+        """Regresi bug PMK 119, 18 Sep 2026.
+
+        Lokasi temuan dulu diambil dari paragraf_akhir - 1 begitu saja, yaitu
+        paragraf tepat sebelum "Mengingat" — yang pada naskah nyata sering baris
+        kosong. Hasilnya kartu hampa di panel: tanpa cuplikan, tanpa warna,
+        tanpa komentar, tapi bertombol Terima/Tolak.
+        """
+        doc = _buat_dokumen([
+            "Menimbang :",
+            "a. bahwa untuk melaksanakan ketentuan Pasal 3;",
+            "b. bahwa berdasarkan hal tersebut di atas, perlu menetapkan "
+            "aturan mengenai uji coba penelaahan;",
+            "",
+            "",
+            "Mengingat :",
+        ])
+        temuan = cek_frasa_baku_menimbang(doc, JenisDokumen.PMK)
+        assert len(temuan) == 1
+        # Mendarat di paragraf butirnya (indeks 2), bukan di baris kosong.
+        assert temuan[0].lokasi.paragraf_index == 2
+        assert temuan[0].lokasi.teks_asli.strip() != ""
+
+    def test_temuan_tanpa_teks_dibuang_jalankan_semua(self):
+        # Jaring pengaman lapis terakhir: tidak boleh ada temuan berteks kosong
+        # yang lolos ke panel, kecuali F1-003 yang memang tidak punya lokasi.
+        doc = _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 5 TAHUN 2026",
+            "TENTANG",
+            "STANDAR BIAYA MASUKAN",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "Menimbang :",
+            "a. bahwa untuk melaksanakan ketentuan Pasal 3;",
+            "b. bahwa berdasarkan hal tersebut, perlu menetapkan aturan;",
+            "",
+            "Mengingat :",
+            "1. Undang-Undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG STANDAR BIAYA "
+            "MASUKAN.",
+            "Pasal 1",
+        ])
+        for t in jalankan_semua(doc, JenisDokumen.PMK):
+            if t.aturan_id != "F1-003":
+                assert t.lokasi.teks_asli.strip() != "", (
+                    f"{t.aturan_id} lolos dengan teks_asli kosong"
+                )
+
+    def test_butir_panjang_dipotong_agar_bisa_dicari_di_word(self):
+        """Regresi bug PMK 5 Tahun 2025, 18 Sep 2026.
+
+        Butir Menimbang di naskah nyata bisa 400-500 karakter. Word.search()
+        dibatasi sekitar 255 karakter, jadi temuan sepanjang itu tidak pernah
+        ketemu dan tidak pernah tertandai — penelaah melihat kartu di panel
+        tanpa ada apa pun di dokumen.
+        """
+        butir_panjang = (
+            "b. bahwa berdasarkan pertimbangan huruf a serta untuk "
+            "melaksanakan ketentuan Pasal 3 ayat (10) dan Pasal 27 ayat (5) "
+            "Peraturan Presiden Nomor 112 Tahun 2022 tentang Percepatan "
+            "Pengembangan Energi Terbarukan untuk Penyediaan Tenaga Listrik, "
+            "perlu menetapkan Peraturan Menteri Keuangan tentang Tata Cara "
+            "Pemberian dan Pelaksanaan Penjaminan Pemerintah serta "
+            "Penanggungan Risiko dalam rangka Percepatan Pengembangan Energi "
+            "Terbarukan untuk Penyediaan Tenaga Listrik;"
+        )
+        assert len(butir_panjang) > 400, "contohnya harus benar-benar panjang"
+
+        doc = _buat_dokumen([
+            "Menimbang :",
+            "a. bahwa berdasarkan ketentuan Pasal 23 ayat (3);",
+            butir_panjang,
+            "Mengingat :",
+        ])
+        temuan = cek_frasa_baku_menimbang(doc, JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.panjang <= 120
+        # Dipotong di batas kata, bukan di tengah kata.
+        assert not temuan[0].lokasi.teks_asli.endswith(" ")
+        # Dan tetap dimulai di tempat penyimpangannya: naskah menulis
+        # "berdasarkan pertimbangan huruf a", bunyi bakunya "berdasarkan
+        # pertimbangan sebagaimana dimaksud dalam huruf a".
+        assert temuan[0].lokasi.teks_asli.startswith(
+            "bahwa berdasarkan pertimbangan huruf a"
+        )
+
+    def test_aturan_aktif_menyaring_pemeriksaan(self):
+        doc = _buat_dokumen([
+            "Menimbang :",
+            "a. bahwa untuk melaksanakan ketentuan Pasal 3;",
+            "b. bahwa berdasarkan hal tersebut, perlu menetapkan aturan;",
+            "Mengingat :",
+            "1. Undang-undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+        ])
+        semua = {t.aturan_id for t in jalankan_semua(doc, JenisDokumen.PMK)}
+        assert "F1-004" in semua and "F1-005" in semua
+
+        hanya_ejaan = jalankan_semua(doc, JenisDokumen.PMK, ["F1-005"])
+        assert {t.aturan_id for t in hanya_ejaan} == {"F1-005"}
+
+        assert jalankan_semua(doc, JenisDokumen.PMK, []) == []
 
     def test_menimbang_kurang_titik_koma_saja_menandai_satu_karakter(self):
         doc = _buat_dokumen([
@@ -458,7 +646,9 @@ class TestCekFrasaBakuMenimbang:
 class TestCekEjaan:
     def test_ejaan_undang_undang_salah(self):
         doc = _buat_dokumen([
+            "Mengingat :",
             "1. Undang-undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+            "MEMUTUSKAN:",
         ])
         temuan = cek_ejaan(doc)
         assert len(temuan) == 1
@@ -468,10 +658,38 @@ class TestCekEjaan:
 
     def test_ejaan_undang_undang_sah(self):
         doc = _buat_dokumen([
+            "Mengingat :",
             "1. Undang-Undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+            "MEMUTUSKAN:",
         ])
         temuan = cek_ejaan(doc)
         assert len(temuan) == 0
+
+    def test_ejaan_hanya_berlaku_di_dasar_hukum(self):
+        """Regresi PMK Lampiran, 18 Sep 2026.
+
+        Butir 32 dan 33 dua-duanya berbicara tentang DASAR HUKUM, bukan
+        seluruh dokumen. Sebelum dipersempit, aturan ini menandai rujukan
+        generik di dalam Lampiran — "…atau undang-undang yang mengatur
+        mengenai pencegahan…" — yang sama sekali bukan dasar hukum.
+        """
+        doc = _buat_dokumen([
+            "Mengingat :",
+            "1. Undang-Undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+            "MEMUTUSKAN:",
+            "Pasal 1",
+            "Angka 14 : diisi dengan pasal yang disangkakan dalam "
+            "Undang-Undang Ketentuan Umum dan Tata Cara Perpajakan atau "
+            "undang-undang yang mengatur mengenai pencegahan dan "
+            "pemberantasan tindak pidana pencucian uang.",
+        ])
+        assert cek_ejaan(doc) == []
+
+    def test_ejaan_tanpa_mengingat_tidak_memeriksa_apa_pun(self):
+        doc = _buat_dokumen([
+            "1. Undang-undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+        ])
+        assert cek_ejaan(doc) == []
 
     def test_ejaan_tentang_kapital_di_mengingat_salah(self):
         # Butir 32: kata "tentang" tetap huruf kecil di dalam judul peraturan pada dasar hukum
@@ -554,24 +772,31 @@ class TestJalankanSemua:
             "1. Undang-Undang Nomor 17 Tahun 2003 tentang Keuangan Negara;", # 9
             # Pelanggaran 1 di indeks 10: "Tentang" dengan T kapital pada Mengingat
             "2. Undang-Undang Nomor 39 Tahun 2008 Tentang Kementerian Negara;", # 10
-            "MEMUTUSKAN:",                                           # 11
+            # Pelanggaran 2 di indeks 11: "Undang-undang" huruf u kecil, juga
+            # pada Mengingat — sejak 18 Sep 2026 aturan ejaan HANYA berlaku di
+            # dasar hukum (butir 32 dan 33).
+            "3. Undang-undang Nomor 1 Tahun 2004 tentang Perbendaharaan Negara;", # 11
+            "MEMUTUSKAN:",                                           # 12
             "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG STANDAR BIAYA KELUARAN TAHUN ANGGARAN 2025.", # 12
         ]
 
-        # Isi pasal-pasal dari indeks 13 hingga 179 (total 180 paragraf)
-        for i in range(13, 180):
+        # Isi pasal-pasal dari indeks 14 hingga 179 (total 180 paragraf).
+        #
+        # Dua baris berejaan salah sengaja ditaruh di BATANG TUBUH, dan
+        # sengaja TIDAK boleh terdeteksi: butir 32 dan 33 hanya berlaku pada
+        # dasar hukum. Sebelum dipersempit, keduanya ikut ditandai — dan pada
+        # PMK sungguhan hal itu menandai rujukan generik di dalam Lampiran.
+        for i in range(14, 180):
             if i == 95:
-                # Pelanggaran 2 di tengah dokumen (indeks 95): "Undang-undang" huruf u kecil
                 baris_list.append(
                     "Ketentuan lebih lanjut mengenai tata cara diatur dalam Undang-undang Perbendaharaan Negara."
                 )
             elif i == 175:
-                # Pelanggaran 3 di akhir dokumen (indeks 175): jenis peraturan ejaan salah
                 baris_list.append(
                     "Peraturan ini tunduk pada peraturan pemerintah pengganti undang-undang yang berlaku."
                 )
             elif i % 2 == 1:
-                pasal_no = (i - 13) // 2 + 1
+                pasal_no = (i - 14) // 2 + 1
                 baris_list.append(f"Pasal {pasal_no}")
             else:
                 baris_list.append(
@@ -582,8 +807,11 @@ class TestJalankanSemua:
         doc = _buat_dokumen(baris_list)
         temuan = jalankan_semua(doc, JenisDokumen.PMK)
 
-        # Pastikan tepat 3 pelanggaran yang kita sisipkan terdeteksi
-        assert len(temuan) == 3
+        # Dua pelanggaran pada Mengingat terdeteksi; dua yang di batang tubuh
+        # sengaja tidak — lihat komentar di atas.
+        assert len(temuan) == 2
+        assert [t.lokasi.teks_asli for t in temuan] == ["Tentang", "Undang-undang"]
+        assert all(t.lokasi.paragraf_index in (10, 11) for t in temuan)
 
         # Pelanggaran 1: Mengingat Butir 32 di indeks 10
         t1 = next(t for t in temuan if t.lokasi.paragraf_index == 10)
@@ -591,16 +819,15 @@ class TestJalankanSemua:
         assert t1.lokasi.teks_asli == "Tentang"
         assert t1.usulan_rumusan == "tentang"
 
-        # Pelanggaran 2: Ejaan Undang-undang di indeks 95
-        t2 = next(t for t in temuan if t.lokasi.paragraf_index == 95)
+        # Pelanggaran 2: Ejaan Undang-undang di indeks 11, masih di Mengingat
+        t2 = next(t for t in temuan if t.lokasi.paragraf_index == 11)
         assert t2.aturan_id == "F1-005"
         assert t2.lokasi.teks_asli == "Undang-undang"
         assert t2.usulan_rumusan == "Undang-Undang"
 
-        # Pelanggaran 3: Ejaan di indeks 175
-        t3 = next(t for t in temuan if t.lokasi.paragraf_index == 175)
-        assert t3.aturan_id == "F1-005"
-        assert t3.usulan_rumusan == "Peraturan Pemerintah Pengganti Undang-Undang"
+        # Dua baris berejaan salah di batang tubuh (indeks 95 dan 175) sengaja
+        # TIDAK terdeteksi — butir 32 dan 33 hanya berlaku pada dasar hukum.
+        assert not any(t.lokasi.paragraf_index in (95, 175) for t in temuan)
 
 
 # ---------------------------------------------------------------------------
@@ -709,3 +936,227 @@ class TestJudulBergayaAllCaps:
         # seperti sebelumnya — default False, bukan melewatkan pemeriksaan.
         p = ParagrafInput(index=0, teks="apa pun")
         assert p.tampil_kapital is False
+
+
+# ---------------------------------------------------------------------------
+# Tes aturan F1-006 s.d. F1-012 — butir terverifikasi visual 18 Sep 2026
+# ---------------------------------------------------------------------------
+#
+# Tiap aturan punya dua macam tes: satu membuktikan ia MENEMUKAN pelanggaran,
+# satu lagi membuktikan ia DIAM ketika tidak bisa membuktikan apa-apa. Yang
+# kedua yang lebih penting — naskah PMK/KMK sungguhan memakai tabel, dan aturan
+# yang tidak tahu diri di situ akan menuduh naskah yang benar.
+
+class TestAturanButirTerverifikasi:
+    def _pmk(self, *baris: str) -> list[ParagrafInput]:
+        return _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 5 TAHUN 2026",
+            "TENTANG",
+            *baris,
+        ])
+
+    # --- F1-006, butir 8: judul tidak diakhiri tanda baca ------------------
+
+    def test_f1_006_judul_berakhir_titik_ditandai(self):
+        doc = self._pmk(
+            "STANDAR BIAYA MASUKAN.",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+        )
+        temuan = cek_judul_tanpa_tanda_baca(doc, JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.teks_asli == "MASUKAN."
+        assert temuan[0].usulan_rumusan == "MASUKAN"
+
+    def test_f1_006_judul_bersih_tidak_ditandai(self):
+        doc = self._pmk(
+            "STANDAR BIAYA MASUKAN",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+        )
+        assert cek_judul_tanpa_tanda_baca(doc, JenisDokumen.PMK) == []
+
+    def test_f1_006_kurung_tutup_tidak_dituduh(self):
+        # Butir 8 mempersoalkan akronimnya, bukan tanda kurungnya.
+        doc = self._pmk(
+            "PENYAMPAIAN LAPORAN PAJAK-PAJAK PRIBADI (LP2P)",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+        )
+        assert cek_judul_tanpa_tanda_baca(doc, JenisDokumen.PMK) == []
+
+    def test_f1_006_baris_kosong_di_akhir_judul_dilewati(self):
+        doc = self._pmk(
+            "STANDAR BIAYA MASUKAN",
+            "",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+        )
+        assert cek_judul_tanpa_tanda_baca(doc, JenisDokumen.PMK) == []
+
+    # --- F1-007 / F1-009 / F1-011, butir 16 / 23 / 38 ----------------------
+
+    def test_label_huruf_besar_semua_diusulkan_dibetulkan(self):
+        doc = _buat_dokumen(["MENIMBANG : a. bahwa sesuatu;"])
+        temuan = _cek_label_bagian(doc, "Menimbang", "F1-007")
+        assert len(temuan) == 1
+        assert temuan[0].jenis_tanda == JenisTanda.PENGGANTIAN
+        assert temuan[0].lokasi.teks_asli == "MENIMBANG"
+        assert temuan[0].usulan_rumusan == "Menimbang"
+
+    def test_label_tanpa_titik_dua_ditandai(self):
+        doc = _buat_dokumen(["Menimbang a. bahwa sesuatu yang panjang sekali;"])
+        temuan = _cek_label_bagian(doc, "Menimbang", "F1-007")
+        assert len(temuan) == 1
+        assert "titik dua" in temuan[0].catatan
+
+    def test_label_berdiri_sendiri_MEMILIH_DIAM(self):
+        """Yang paling penting di kelas ini.
+
+        Pada naskah bertabel, label dan titik duanya ada di sel berbeda,
+        sehingga paragraf labelnya cuma berbunyi "Menimbang". Titik duanya
+        TIDAK BISA dibuktikan hilang dari sini, jadi tidak boleh dituduhkan.
+        """
+        doc = _buat_dokumen(["Menimbang", ":", "a. bahwa sesuatu;"])
+        assert _cek_label_bagian(doc, "Menimbang", "F1-007") == []
+
+    def test_label_sudah_benar_tidak_ditandai(self):
+        for label, aturan in [
+            ("Menimbang", "F1-007"),
+            ("Mengingat", "F1-009"),
+            ("Menetapkan", "F1-011"),
+        ]:
+            doc = _buat_dokumen([f"{label} : sesuatu yang cukup panjang;"])
+            assert _cek_label_bagian(doc, label, aturan) == [], label
+
+    def test_kata_berawalan_sama_tidak_dikira_label(self):
+        # "Menimbangkan" bukan label. Harus dilewati.
+        doc = _buat_dokumen(["Menimbangkan hal tersebut, maka berlaku hal ini."])
+        assert _cek_label_bagian(doc, "Menimbang", "F1-007") == []
+
+    # --- F1-008, butir 21: bentuk tiap butir Menimbang ---------------------
+
+    def test_f1_008_butir_tidak_diakhiri_titik_koma(self):
+        doc = _buat_dokumen([
+            "Menimbang :",
+            "a. bahwa untuk melaksanakan ketentuan Pasal 3 diperlukan aturan.",
+            "Mengingat :",
+        ])
+        temuan = cek_butir_menimbang(doc, JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert "titik koma" in temuan[0].catatan
+        assert temuan[0].lokasi.panjang == 1
+
+    def test_f1_008_butir_tidak_diawali_bahwa(self):
+        doc = _buat_dokumen([
+            "Menimbang :",
+            "a. untuk melaksanakan ketentuan Pasal 3 diperlukan aturan baru;",
+            "Mengingat :",
+        ])
+        temuan = cek_butir_menimbang(doc, JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert "bahwa" in temuan[0].catatan
+
+    def test_f1_008_butir_benar_tidak_ditandai(self):
+        doc = _buat_dokumen([
+            "Menimbang :",
+            "a. bahwa untuk melaksanakan ketentuan Pasal 3 diperlukan aturan;",
+            "b. bahwa berdasarkan pertimbangan huruf a perlu ditetapkan aturan;",
+            "Mengingat :",
+        ])
+        assert cek_butir_menimbang(doc, JenisDokumen.PMK) == []
+
+    # --- F1-010, butir 31: penomoran dan tanda baca dasar hukum ------------
+
+    def test_f1_010_dasar_hukum_tanpa_titik_koma(self):
+        doc = _buat_dokumen([
+            "Mengingat :",
+            "1. Undang-Undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+            "2. Undang-Undang Nomor 1 Tahun 2004 tentang Perbendaharaan Negara",
+            "MEMUTUSKAN:",
+        ])
+        temuan = cek_penomoran_dasar_hukum(doc)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.paragraf_index == 2
+
+    def test_f1_010_judul_panjang_berlanjut_tidak_dituduh(self):
+        """Regresi yang dicegah sejak awal.
+
+        Judul peraturan yang panjang memenuhi beberapa paragraf. Paragraf
+        lanjutannya memang tidak berangka dan tidak berakhir titik koma —
+        memeriksa per paragraf berarti menuduh tiap lanjutan.
+        """
+        doc = _buat_dokumen([
+            "Mengingat :",
+            "1. Undang-Undang Nomor 12 Tahun 2011 tentang Pembentukan",
+            "Peraturan Perundang-Undangan (Lembaran Negara Republik Indonesia",
+            "Tahun 2011 Nomor 82, Tambahan Lembaran Negara Nomor 5234);",
+            "2. Keputusan Presiden Nomor 113/P Tahun 2019;",
+            "MEMUTUSKAN:",
+        ])
+        assert cek_penomoran_dasar_hukum(doc) == []
+
+    def test_f1_010_tanpa_paragraf_berangka_MEMILIH_DIAM(self):
+        # Nomornya mungkin ada di sel tabel yang lain — tidak bisa dibedakan
+        # dari dasar hukum tunggal yang memang tidak bernomor.
+        doc = _buat_dokumen([
+            "Mengingat :",
+            "Undang-Undang Nomor 17 Tahun 2003 tentang Keuangan Negara",
+            "MEMUTUSKAN:",
+        ])
+        assert cek_penomoran_dasar_hukum(doc) == []
+
+    # --- F1-012, butir 39: bentuk judul pada Menetapkan --------------------
+
+    def _dengan_menetapkan(self, *baris: str) -> list[ParagrafInput]:
+        return _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 5 TAHUN 2026",
+            "TENTANG",
+            "STANDAR BIAYA MASUKAN",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "MEMUTUSKAN:",
+            *baris,
+            "Pasal 1",
+        ])
+
+    def test_f1_012_tanpa_titik_di_akhir(self):
+        doc = self._dengan_menetapkan(
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG STANDAR BIAYA MASUKAN"
+        )
+        temuan = cek_judul_menetapkan(doc)
+        assert len(temuan) == 1
+        assert temuan[0].usulan_rumusan == "MASUKAN."
+
+    def test_f1_012_republik_indonesia_harus_dibuang(self):
+        doc = self._dengan_menetapkan(
+            "Menetapkan : PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA "
+            "TENTANG STANDAR BIAYA MASUKAN."
+        )
+        temuan = cek_judul_menetapkan(doc)
+        assert len(temuan) == 1
+        assert temuan[0].jenis_tanda == JenisTanda.PENGGANTIAN
+        assert temuan[0].lokasi.teks_asli == "MENTERI KEUANGAN REPUBLIK INDONESIA"
+        # Penggantinya BUKAN teks kosong — Range.insertText tidak bisa
+        # menyisipkan teks kosong, usulannya akan diam-diam batal terpasang.
+        assert temuan[0].usulan_rumusan == "MENTERI KEUANGAN"
+
+    def test_f1_012_sudah_benar_tidak_ditandai(self):
+        doc = self._dengan_menetapkan(
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG STANDAR BIAYA MASUKAN."
+        )
+        assert cek_judul_menetapkan(doc) == []
+
+    # --- Rujukan ------------------------------------------------------------
+
+    def test_semua_aturan_punya_rujukan_terverifikasi(self):
+        from app.rules.rujukan_kmk527 import RUJUKAN
+
+        for aturan_id in [f"F1-{n:03d}" for n in range(1, 13)]:
+            assert aturan_id in RUJUKAN, f"{aturan_id} tidak punya rujukan"
+            entri = RUJUKAN[aturan_id]
+            assert entri["butir"] != "...", aturan_id
+            assert entri["kutipan"] != "...", aturan_id
+            assert entri["status"] == "visual", aturan_id

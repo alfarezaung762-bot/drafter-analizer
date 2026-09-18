@@ -30,6 +30,16 @@ export interface RujukanTemuan {
   butir: string;
   kutipan: string;
   pdf_url: string;
+  /**
+   * Keandalan rujukan: "placeholder" (belum diisi), "ekstraksi" (dari teks
+   * OCR, belum dibaca manusia), "visual" (sudah diketik ulang manusia dari
+   * naskah).
+   *
+   * Gate legal menyala untuk apa pun yang BUKAN "visual". Sebelum 18 Sep 2026
+   * gate itu menilai dari keterisian butir — begitu butirnya diisi dari OCR,
+   * gate-nya mati sendiri padahal tidak ada yang diverifikasi.
+   */
+  status?: "placeholder" | "ekstraksi" | "visual";
 }
 
 export interface Temuan {
@@ -64,6 +74,31 @@ export interface ParagrafInput {
 export interface AnalisisRequest {
   jenis_dokumen: JenisDokumen;
   paragraf: ParagrafInput[];
+  /**
+   * Daftar aturan_id yang dijalankan, dipilih penelaah lewat panel Pengaturan.
+   * Dihilangkan (undefined) berarti jalankan semua aturan bawaan.
+   */
+  aturan_aktif?: string[];
+}
+
+/** Satu baris di panel Pengaturan — apa yang diperiksa sebuah aturan. */
+export interface KeteranganAturan {
+  id: string;
+  judul: string;
+  /** Yang benar-benar diperiksa, dirinci supaya bisa dicek manual penelaah. */
+  diperiksa: string[];
+  /** Yang sengaja TIDAK diperiksa. Sama pentingnya untuk diketahui. */
+  tidakDiperiksa: string[];
+  /** Cara temuannya muncul di naskah. */
+  tanda: string;
+  /**
+   * Terisi bila dasar aturannya sendiri belum dipastikan. Wajib ditampilkan:
+   * penelaah berhak tahu aturan mana yang berdiri di atas rujukan yang belum
+   * diverifikasi, supaya bisa menimbangnya sendiri.
+   */
+  catatanSumber?: string;
+  /** Terisi bila aturannya dimatikan di kode — tidak bisa dinyalakan panel. */
+  dimatikan?: string;
 }
 
 export interface AnalisisResponse {

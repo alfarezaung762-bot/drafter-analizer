@@ -1,43 +1,54 @@
 # Drafter Analiser
 
-Word Add-in + backend untuk menganalisis draft peraturan (PMK/KMK) terhadap
-kaidah penyusunan dan regulasi terkait.
+Word Add-in (task pane) + backend FastAPI untuk memeriksa rancangan PMK/KMK
+terhadap kaidah penyusunan peraturan KMK 527/KMK.01/2022 Lampiran II.
 
-## Menjalankan Proyek
+Penelaah membuka rancangannya di Word, memilih PMK atau KMK, menekan Analisis —
+bagian yang perlu ditinjau langsung tertandai di dokumen itu juga, lengkap
+dengan komentar dan rujukan butirnya. Fase 1 seluruhnya deterministik, tanpa AI.
 
-Buka dua terminal terpisah:
+## Menjalankan
 
-### Backend (Terminal 1)
+Dua terminal terpisah.
+
+**Backend**
 
 ```bash
 cd backend
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-# source .venv/bin/activate
-
+.venv\Scripts\activate          # Windows
 pip install -r requirements.txt
-cp .env.example .env  # isi nilai yang sesuai
-
+cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
-### Frontend (Terminal 2)
+**Frontend**
 
 ```bash
 cd frontend
-cp .env.example .env.local  # sesuaikan jika perlu
-
+cp .env.example .env.local
 npm install
-npm run dev -- -p 3000
+npm run dev -- --experimental-https
 ```
 
-Backend berjalan di `http://localhost:8000`, frontend di `http://localhost:3000`.
+Backend di `http://localhost:8000`, task pane di `https://localhost:3000`.
 
-## Struktur Proyek
+Add-in dipasang ke Word lewat registry — jalankan `pasang-addin.reg`, lalu
+Word akan memuat `manifest.xml`.
 
-Mulai dari [indeks dokumentasi](docs/README.md). Untuk keputusan perilaku
-penelaahan Fase 1 yang terbaru, baca
-[Keputusan UX Penelaahan](docs/keputusan-ux-penelaahan-fase1.md) dan
-[Rancangan Analisis–Terima–Ekspor](docs/rancangan-analisis-terima-ekspor.md).
+## Tes dan diagnosa
+
+```bash
+cd backend
+python -m pytest tests/ -q
+
+# Menjalankan seluruh aturan terhadap sebuah .docx tanpa membuka Word
+python tools/cek_docx.py tools/contoh/contoh-rancangan-uji.docx --jenis PMK
+```
+
+## Dokumentasi
+
+Mulai dari [`docs/README.md`](docs/README.md).
+
+Acuan rancangannya satu berkas: [`docs/fase1 drafter.md`](docs/fase1%20drafter.md).
+Aturan kerja untuk agen coding ada di [`CLAUDE.md`](CLAUDE.md).

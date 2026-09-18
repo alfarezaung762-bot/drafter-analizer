@@ -124,11 +124,19 @@ def main() -> int:
         print(f"  Catatan : {t.catatan}")
         if t.usulan_rumusan:
             print(f"  Usulan  : {t.usulan_rumusan}")
+        # Yang menentukan status, BUKAN keterisian butirnya. Butir yang sudah
+        # terisi dari ekstraksi OCR tetap belum diverifikasi siapa pun.
         butir = t.rujukan.butir
-        if butir == "...":
-            print("  Rujukan : BELUM DIVERIFIKASI — butir dan kutipannya masih placeholder")
-        else:
+        status = t.rujukan.status
+        if status == "visual":
             print(f"  Rujukan : {t.rujukan.sumber} butir {butir}")
+        elif status == "ekstraksi":
+            print(
+                f"  Rujukan : {t.rujukan.sumber} butir {butir} "
+                "— BELUM DIVERIFIKASI VISUAL (isi dari ekstraksi OCR)"
+            )
+        else:
+            print("  Rujukan : BELUM DIISI — butir dan kutipannya masih placeholder")
     if not temuan:
         print()
         print("Tidak ada temuan. Periksa apakah itu memang benar, atau justru tanda")

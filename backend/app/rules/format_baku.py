@@ -31,6 +31,33 @@ from app.rules.rujukan_kmk527 import ambil_rujukan
 # Utilitas: buat Temuan
 # ---------------------------------------------------------------------------
 
+# Batas panjang teks yang ditandai, dalam karakter.
+#
+# BUKAN soal selera tampilan — ini batas teknis. Frontend menemukan letak temuan
+# di Word lewat Word.search(), yang panjang kata kuncinya dibatasi sekitar 255
+# karakter. Temuan yang teksnya lebih panjang dari itu TIDAK AKAN PERNAH
+# ketemu, jadi tidak pernah tertandai di naskah: penelaah cuma melihat kartu di
+# panel tanpa ada apa pun di dokumen.
+#
+# Terjadi pada PMK 5 Tahun 2025 (18 Sep 2026): butir Menimbang terakhirnya
+# sepanjang ~500 karakter, jauh di atas batas, sehingga F1-004 tidak pernah
+# sampai ke naskah.
+#
+# Angkanya sengaja jauh di bawah batas Word: 120 karakter kira-kira satu setengah
+# baris — cukup untuk menunjukkan tempatnya, tidak sampai memblok satu paragraf.
+# Alasan lengkapnya tetap di komentar, bukan di sorotan.
+_BATAS_PANJANG_TANDA = 120
+
+
+def _potong_di_batas_kata(teks: str, batas: int) -> int:
+    """Panjang potongan teks yang <= batas dan berakhir di batas kata."""
+    if len(teks) <= batas:
+        return len(teks)
+    potong = teks[:batas]
+    spasi = potong.rfind(" ")
+    return spasi if spasi > 0 else batas
+
+
 def _buat_temuan(
     aturan_id: str,
     jenis_tanda: JenisTanda,
@@ -45,7 +72,18 @@ def _buat_temuan(
     `nomor` sengaja dibiarkan 0 di sini — nomor urut baru bisa ditetapkan
     sesudah SELURUH aturan selesai dan temuannya diurutkan menurut posisi di
     dokumen. Itu tugas jalankan_semua().
+
+    Rentang yang kepanjangan DIPOTONG di batas kata. Lihat _BATAS_PANJANG_TANDA:
+    temuan yang tidak bisa dicari di Word sama saja dengan temuan yang tidak
+    ada. Pemotongan dilakukan di sini, di satu tempat, supaya aturan yang
+    ditambahkan nanti ikut terlindungi tanpa perlu mengingat batas ini.
     """
+    if jenis_tanda == JenisTanda.CATATAN and panjang > _BATAS_PANJANG_TANDA:
+        panjang = _potong_di_batas_kata(
+            paragraf.teks[offset_mulai : offset_mulai + panjang],
+            _BATAS_PANJANG_TANDA,
+        )
+
     rujukan_dict = ambil_rujukan(aturan_id)
     return Temuan(
         id=f"f-{uuid.uuid4().hex[:8]}",
@@ -230,9 +268,18 @@ def _ekstrak_judul_pembuka(
 # Penanda bahwa klausul Menetapkan sudah lewat. Memuat penomoran diktum KMK
 # (KESATU, KEDUA, ...) DAN penomoran PMK (BAB, Pasal), karena satu fungsi ini
 # melayani keduanya.
+#
+# Diperluas 18 Sep 2026. Daftar lama berhenti di KESEPULUH. KMK 527 sendiri
+# punya diktum sampai KEDUAPULUHLIMA, dan penomoran gabungan seperti
+# KEDUAPULUHLIMA tidak cocok dengan pola `KEDUA\b` karena ada lanjutannya.
+# Sekarang lanjutannya diizinkan: KE + angka + huruf apa pun.
+#
+# Kata lain yang berawalan KE- tidak ikut kena karena harus diikuti nama angka:
+# KEUANGAN, KEPUTUSAN, KEMENTERIAN, KETENTUAN semuanya lolos.
 _PENGHENTI_MENETAPKAN = re.compile(
-    r"^(BAB\b|Pasal\b|KESATU\b|PERTAMA\b|KEDUA\b|KETIGA\b|KEEMPAT\b|KELIMA\b"
-    r"|KEENAM\b|KETUJUH\b|KEDELAPAN\b|KESEMBILAN\b|KESEPULUH\b)",
+    r"^(BAB\b|Pasal\b|PERTAMA\b"
+    r"|KE(SATU|DUA|TIGA|EMPAT|LIMA|ENAM|TUJUH|DELAPAN|SEMBILAN|SEPULUH"
+    r"|SEBELAS)[A-Z]*\b)",
     re.IGNORECASE,
 )
 
@@ -242,6 +289,16 @@ _PENGHENTI_MENETAPKAN = re.compile(
 # KESATU di atas. Dalam keadaan itu aturan MEMILIH DIAM, bukan melapor:
 # temuan yang ditandai wajib benar-benar salah.
 _BATAS_KATA_JUDUL_MENETAPKAN = 60
+
+# Awal klausul Menetapkan. DIJANGKAR di awal paragraf — tanpa jangkar, kata
+# "menetapkan:" di tengah kalimat batang tubuh ikut tertangkap.
+#
+# Titik dua sengaja OPSIONAL: pada naskah yang menaruh klausul ini di dalam
+# tabel, label "Menetapkan" dan isinya berada di sel — dan karenanya di paragraf
+# — yang berbeda, sehingga paragraf labelnya cuma berbunyi "Menetapkan" tanpa
+# tanda apa pun. Kalau titik dua diwajibkan, klausul yang sah justru terlewat,
+# lalu pencarian berlanjut sampai menemukan "menetapkan:" di batang tubuh.
+_AWAL_MENETAPKAN = re.compile(r"^Menetapkan\b\s*:?", re.IGNORECASE)
 
 
 def _ekstrak_judul_menetapkan(paragraf: list[ParagrafInput]) -> Optional[dict]:
@@ -262,11 +319,39 @@ def _ekstrak_judul_menetapkan(paragraf: list[ParagrafInput]) -> Optional[dict]:
         - 'judul': teks judul yang sudah dinormalisasi
         - 'paragraf_indeks': list indeks paragraf
     """
-    # Cari paragraf yang mengandung "Menetapkan"
-    menetapkan_idx = None
+    # --- Cari klausul Menetapkan, DI DALAM JENDELA YANG BENAR ------------------
+    #
+    # BUG YANG DIPERBAIKI 18 Sep 2026 — ditemukan pada RPMK DBH Sawit sungguhan.
+    # Pencarian lama memakai re.search tanpa jangkar, sehingga kata "menetapkan:"
+    # DI TENGAH KALIMAT ikut cocok. Pada Pasal 4 ayat (1) berbunyi "…Menteri
+    # selaku PA BUN Pengelola TKD menetapkan:" — dan itulah yang dikira klausul
+    # Menetapkan. Akibatnya isi Pasal 4 dituduh "judulnya berbeda dari judul
+    # pembuka", padahal itu bukan judul sama sekali.
+    #
+    # Klausul Menetapkan yang sah punya letak yang pasti menurut KMK 527: SETELAH
+    # "MEMUTUSKAN:" dan SEBELUM batang tubuh (BAB/Pasal/diktum). Jendela itulah
+    # yang dipakai sekarang, ditambah jangkar di awal paragraf. Menetapkan di
+    # luar jendela itu bukan klausul Menetapkan, titik.
+    memutuskan_idx = None
     for i, p in enumerate(paragraf):
-        teks = _trim(p.teks)
-        if re.search(r"Menetapkan\s*:", teks, re.IGNORECASE):
+        if _trim(p.teks).upper().rstrip(":").strip() == "MEMUTUSKAN":
+            memutuskan_idx = i
+            break
+
+    if memutuskan_idx is None:
+        # Tanpa MEMUTUSKAN, tidak ada cara memastikan mana klausul Menetapkan.
+        # Aturan memilih diam.
+        return None
+
+    menetapkan_idx = None
+    for i in range(memutuskan_idx + 1, len(paragraf)):
+        teks = _trim(paragraf[i].teks)
+        if not teks:
+            continue
+        if _PENGHENTI_MENETAPKAN.match(teks):
+            # Sudah masuk batang tubuh tanpa melewati klausul Menetapkan.
+            break
+        if _AWAL_MENETAPKAN.match(teks):
             menetapkan_idx = i
             break
 
@@ -765,11 +850,32 @@ def cek_frasa_baku_menimbang(
     if not kekurangan:
         return []
 
-    # Cari paragraf terdekat untuk lokasi temuan
-    # Butir terakhir kemungkinan ada di paragraf menjelang akhir bagian Menimbang
-    idx_temuan = bagian["paragraf_akhir"] - 1
-    if idx_temuan < 0 or idx_temuan >= len(paragraf):
-        idx_temuan = bagian["paragraf_mulai"]
+    # --- Cari paragraf yang BENAR-BENAR memuat butir terakhir -----------------
+    #
+    # BUG YANG DIPERBAIKI 18 Sep 2026 — ditemukan pada PMK 119 sungguhan.
+    # Dulu lokasinya diambil begitu saja dari paragraf_akhir - 1, yaitu paragraf
+    # tepat sebelum "Mengingat". Pada naskah nyata paragraf itu sering BARIS
+    # KOSONG. Akibatnya teks_asli kosong, panjangnya nol, tidak ada yang bisa
+    # ditandai di Word — dan penelaah melihat kartu tanpa cuplikan, tanpa warna,
+    # tanpa komentar, tapi dengan tombol Terima/Tolak yang tidak mengerjakan
+    # apa pun.
+    #
+    # Sekarang paragrafnya dicari dari isi butirnya sendiri. Penanda hurufnya
+    # dibuang lebih dulu: pada naskah bertabel, huruf "c." dan isi butirnya
+    # berada di sel — dan karenanya di paragraf — yang berbeda.
+    isi_butir = re.sub(r"^[a-z]\.\s*", "", _trim(butir_terakhir_asli))
+    petunjuk = " ".join(isi_butir.split()[:8])
+
+    idx_temuan = None
+    for i in range(bagian["paragraf_mulai"], bagian["paragraf_akhir"]):
+        if _cari_frasa(paragraf[i].teks, petunjuk) is not None:
+            idx_temuan = i
+            break
+
+    if idx_temuan is None:
+        # Tidak tahu di mana butirnya berada. Menandai paragraf asal-asalan
+        # melanggar kaidah "yang ditandai wajib benar-benar salah" — diam saja.
+        return []
 
     p = paragraf[idx_temuan]
 
@@ -788,12 +894,10 @@ def cek_frasa_baku_menimbang(
         if akhir_isi > 0:
             mulai, panjang = akhir_isi - 1, 1
     else:
-        posisi = _cari_frasa(p.teks, _trim(butir_terakhir_asli))
-        if posisi is None:
-            # Butirnya mungkin terpotong antarparagraf. Coba pembukanya saja —
-            # cukup untuk mengarahkan mata penelaah ke butir yang benar.
-            pembuka_butir = " ".join(_trim(butir_terakhir_asli).split()[:8])
-            posisi = _cari_frasa(p.teks, pembuka_butir)
+        # Butir utuh dulu; kalau terpotong antarparagraf, pakai pembukanya saja —
+        # itu sudah pasti ada, karena paragrafnya memang dipilih berdasarkan
+        # petunjuk ini.
+        posisi = _cari_frasa(p.teks, isi_butir) or _cari_frasa(p.teks, petunjuk)
         if posisi is not None:
             mulai, panjang = posisi[0], posisi[1] - posisi[0]
 
@@ -804,10 +908,19 @@ def cek_frasa_baku_menimbang(
             paragraf=p,
             offset_mulai=mulai,
             panjang=panjang,
+            # DIUBAH 18 Sep 2026 sesudah butir 22 dibaca. Butir itu berbunyi
+            # "rumusan butir pertimbangan terakhir PADA UMUMNYA berbunyi
+            # sebagai berikut" — bukan "wajib". Menyimpang darinya belum tentu
+            # kesalahan, jadi kalimatnya tidak boleh terdengar seperti vonis.
+            # Kalimat lama, "belum memakai bunyi baku", menuduh lebih jauh
+            # daripada yang didukung sumbernya.
             catatan=(
-                "Butir Menimbang terakhir belum memakai bunyi baku. Belum ada: "
+                "Butir Menimbang terakhir berbeda dari rumusan yang lazim. "
+                "Tidak ada: "
                 + "; ".join(kekurangan)
-                + "."
+                + ". Butir 22 menyebut rumusan ini \"pada umumnya\", bukan "
+                "keharusan — penelaah yang menimbang apakah perbedaan ini "
+                "perlu dibetulkan."
             ),
         )
     ]
@@ -877,8 +990,30 @@ def cek_ejaan(paragraf: list[ParagrafInput]) -> list[Temuan]:
     """
     temuan: list[Temuan] = []
 
-    # 1. Pola umum di seluruh dokumen (Undang-Undang, dsb.)
-    for p in paragraf:
+    # SELURUH pemeriksaan di sini dibatasi pada bagian Mengingat.
+    #
+    # DIPERSEMPIT 18 Sep 2026, setelah naskah Lampiran II dibaca. Kedua butir
+    # yang mendasari aturan ini berbicara tentang DASAR HUKUM, bukan seluruh
+    # dokumen:
+    #   butir 32 — "Penulisan judul peraturan perundang-undangan yang
+    #               DIJADIKAN DASAR HUKUM, diawali dengan huruf kapital,
+    #               kecuali kata 'tentang' dan kata penghubung/konjungsi."
+    #   butir 33 — "Jika terdapat DASAR HUKUM berupa Undang-Undang, kedua
+    #               huruf u ditulis dengan huruf kapital."
+    #
+    # Sebelumnya pola "Undang-Undang" berlaku di seluruh dokumen, dan pada PMK
+    # sungguhan ia menandai rujukan generik di dalam Lampiran — "…atau
+    # undang-undang yang mengatur mengenai pencegahan…" — yang sama sekali
+    # bukan dasar hukum. Penelaah melaporkannya sebagai janggal, dan memang
+    # janggal.
+    mulai_mengingat, akhir_mengingat = _ekstrak_rentang_mengingat(paragraf)
+    if mulai_mengingat == -1:
+        return []
+
+    dalam_mengingat = paragraf[mulai_mengingat:akhir_mengingat]
+
+    # 1. Nama jenis peraturan (Undang-Undang, Perppu)
+    for p in dalam_mengingat:
         teks = p.teks
         spans_tercatat: list[tuple[int, int]] = []
         for pola in _POLA_EJAAN:
@@ -901,28 +1036,358 @@ def cek_ejaan(paragraf: list[ParagrafInput]) -> list[Temuan]:
                         )
                     )
 
-    # 2. Pola butir 32: kata "tentang" tetap huruf kecil di dalam judul peraturan pada dasar hukum.
-    # Berlaku HANYA di dalam bagian Mengingat, bukan di seluruh dokumen.
-    mulai_mengingat, akhir_mengingat = _ekstrak_rentang_mengingat(paragraf)
-    if mulai_mengingat != -1:
-        for i in range(mulai_mengingat, akhir_mengingat):
-            p = paragraf[i]
-            for match in re.finditer(r"\btentang\b", p.teks, re.IGNORECASE):
-                if match.group(0) != "tentang":
-                    temuan.append(
-                        _buat_temuan(
-                            aturan_id="F1-005",
-                            jenis_tanda=JenisTanda.PENGGANTIAN,
-                            paragraf=p,
-                            offset_mulai=match.start(),
-                            panjang=match.end() - match.start(),
-                            catatan=(
-                                "Kata \"tentang\" dalam judul peraturan pada "
-                                "dasar hukum tetap ditulis dengan huruf kecil."
-                            ),
-                            usulan_rumusan="tentang",
-                        )
+    # 2. Butir 32: kata "tentang" tetap huruf kecil di dalam judul peraturan
+    #    pada dasar hukum.
+    for p in dalam_mengingat:
+        for match in re.finditer(r"\btentang\b", p.teks, re.IGNORECASE):
+            if match.group(0) != "tentang":
+                temuan.append(
+                    _buat_temuan(
+                        aturan_id="F1-005",
+                        jenis_tanda=JenisTanda.PENGGANTIAN,
+                        paragraf=p,
+                        offset_mulai=match.start(),
+                        panjang=match.end() - match.start(),
+                        catatan=(
+                            "Kata \"tentang\" dalam judul peraturan pada "
+                            "dasar hukum tetap ditulis dengan huruf kecil."
+                        ),
+                        usulan_rumusan="tentang",
                     )
+                )
+
+    return temuan
+
+
+# ---------------------------------------------------------------------------
+# Aturan 6-12: butir yang terverifikasi visual 18 Sep 2026
+# ---------------------------------------------------------------------------
+#
+# Ketujuh aturan di bawah dikutip dari pindaian KMK 527 Lampiran II halaman 30,
+# 35, 36, dan 37 — bukan dari ekstraksi teks, bukan dari dugaan. Semuanya
+# IMPERATIF di naskahnya, berbeda dari F1-004 yang bersandar pada butir 22 yang
+# cuma menyebut "pada umumnya".
+#
+# SATU BAHAYA YANG MEMBAYANGI SEMUANYA: naskah PMK/KMK sungguhan menaruh label
+# "Menimbang", "Mengingat", dan "Menetapkan" di dalam TABEL, sehingga labelnya
+# dan titik duanya jatuh di sel — dan karenanya di paragraf — yang berbeda.
+# Paragraf labelnya lalu cuma berbunyi "Menimbang", tanpa tanda apa pun.
+#
+# Aturan yang menuntut titik dua akan salah tandai di naskah seperti itu. Karena
+# itu semuanya MEMILIH DIAM ketika paragraf labelnya berdiri sendiri: kita tidak
+# bisa membuktikan titik duanya hilang, jadi kita tidak menuduh.
+
+
+def _cek_label_bagian(
+    paragraf: list[ParagrafInput],
+    label: str,
+    aturan_id: str,
+) -> list[Temuan]:
+    """Periksa penulisan label bagian: huruf awal kapital, diakhiri titik dua.
+
+    Dipakai bersama oleh F1-007 (Menimbang, butir 16), F1-009 (Mengingat,
+    butir 23), dan F1-011 (Menetapkan, butir 38) — ketiganya berbunyi sama.
+    """
+    temuan: list[Temuan] = []
+
+    for p in paragraf:
+        teks = p.teks.strip()
+        if not teks or not teks.upper().startswith(label.upper()):
+            continue
+
+        # Pastikan ini benar-benar labelnya, bukan kata lain yang kebetulan
+        # berawalan sama. Sesudah labelnya harus ada batas kata.
+        sisa = teks[len(label) :]
+        if sisa and sisa[0].isalnum():
+            continue
+
+        tertulis = teks[: len(label)]
+        mulai = p.teks.index(tertulis)
+
+        # 1. Huruf awal kapital, sisanya kecil. "MENIMBANG" dan "menimbang"
+        #    dua-duanya menyimpang dari butir 16/23/38.
+        if tertulis != label:
+            temuan.append(
+                _buat_temuan(
+                    aturan_id=aturan_id,
+                    jenis_tanda=JenisTanda.PENGGANTIAN,
+                    paragraf=p,
+                    offset_mulai=mulai,
+                    panjang=len(tertulis),
+                    catatan=(
+                        f"Kata \"{label}\" ditulis dengan huruf awal kapital, "
+                        "selebihnya huruf kecil."
+                    ),
+                    usulan_rumusan=label,
+                )
+            )
+
+        # 2. Diakhiri titik dua.
+        sisa_bersih = sisa.strip()
+        if not sisa_bersih:
+            # Label berdiri sendiri di paragrafnya. Pada naskah bertabel,
+            # titik duanya ada di sel sebelah dan tidak terbaca dari sini.
+            # Tidak bisa dibuktikan hilang -> tidak dituduhkan.
+            continue
+        if sisa_bersih.startswith(":"):
+            continue
+
+        # Ada isi sesudah label tapi bukan titik dua -> titik duanya memang
+        # tidak ada. Yang ditandai labelnya saja, bukan seluruh baris.
+        temuan.append(
+            _buat_temuan(
+                aturan_id=aturan_id,
+                jenis_tanda=JenisTanda.CATATAN,
+                paragraf=p,
+                offset_mulai=mulai,
+                panjang=len(tertulis),
+                catatan=(
+                    f"Kata \"{label}\" diakhiri tanda baca titik dua (:)."
+                ),
+                usulan_rumusan=f"{label} :",
+            )
+        )
+        break  # satu label, satu kali periksa
+
+    return temuan
+
+
+def cek_judul_tanpa_tanda_baca(
+    paragraf: list[ParagrafInput], jenis: JenisDokumen
+) -> list[Temuan]:
+    """F1-006 — butir 8: judul tidak diakhiri tanda baca."""
+    info = _ekstrak_judul_pembuka(paragraf, jenis)
+    if info is None:
+        return []
+
+    # Paragraf judul TERAKHIR yang ada isinya. Blok judul kerap diikuti baris
+    # kosong sebelum penutupnya; memeriksa baris kosong tidak ada gunanya.
+    idx_terakhir = None
+    for idx in info["paragraf_indeks"]:
+        if paragraf[idx].teks.strip():
+            idx_terakhir = idx
+    if idx_terakhir is None:
+        return []
+
+    p = paragraf[idx_terakhir]
+    teks = p.teks.rstrip()
+
+    # Kurung tutup sengaja TIDAK ikut dilarang: judul yang memuat akronim
+    # berkurung memang dicontohkan butir 8 sebagai bentuk yang salah, tetapi
+    # yang dipersoalkan di situ akronimnya, bukan tanda kurungnya. Menuduh
+    # tanda kurung berarti menuduh hal yang tidak diatur butir ini.
+    if not teks.endswith((".", ",", ";", ":")):
+        return []
+
+    # Yang ditandai kata terakhirnya beserta tanda bacanya, dan penggantinya
+    # kata itu tanpa tanda baca — bukan menyisipkan teks kosong, yang tidak
+    # bisa dilakukan Range.insertText.
+    m = list(_POLA_KATA.finditer(teks))
+    mulai = m[-1].start() if m else len(teks) - 1
+    cuplikan = teks[mulai:]
+
+    return [
+        _buat_temuan(
+            aturan_id="F1-006",
+            jenis_tanda=JenisTanda.PENGGANTIAN,
+            paragraf=p,
+            offset_mulai=mulai,
+            panjang=len(cuplikan),
+            catatan="Judul peraturan tidak diakhiri tanda baca.",
+            usulan_rumusan=cuplikan.rstrip(".,;:"),
+        )
+    ]
+
+
+def cek_butir_menimbang(
+    paragraf: list[ParagrafInput], jenis: JenisDokumen
+) -> list[Temuan]:
+    """F1-008 — butir 21: tiap butir Menimbang diawali "bahwa", diakhiri ";"."""
+    bagian = _ekstrak_bagian(paragraf, "Menimbang", "Mengingat")
+    if bagian is None:
+        return []
+
+    butir_list = _pecah_butir_menimbang(bagian["teks_gabungan"])
+    if not butir_list:
+        return []
+
+    temuan: list[Temuan] = []
+    for butir in butir_list:
+        isi = re.sub(r"^[a-z]\.\s*", "", _trim(butir)).strip()
+
+        # Potongan yang terlalu pendek hampir pasti hasil pemecahan yang
+        # gagal — pada naskah bertabel, huruf penanda dan isinya ada di
+        # paragraf berbeda. Tidak diperiksa daripada salah tuduh.
+        if len(isi) < 15:
+            continue
+
+        # Cari paragraf yang memuatnya, supaya tandanya mendarat di tempat
+        # yang benar. Kalau tidak ketemu, aturannya diam untuk butir ini.
+        petunjuk = " ".join(isi.split()[:8])
+        idx = None
+        for i in range(bagian["paragraf_mulai"], bagian["paragraf_akhir"]):
+            if _cari_frasa(paragraf[i].teks, petunjuk) is not None:
+                idx = i
+                break
+        if idx is None:
+            continue
+
+        p = paragraf[idx]
+        posisi = _cari_frasa(p.teks, petunjuk)
+        if posisi is None:
+            continue
+        mulai, akhir = posisi
+
+        if not isi.lower().startswith("bahwa"):
+            temuan.append(
+                _buat_temuan(
+                    aturan_id="F1-008",
+                    jenis_tanda=JenisTanda.CATATAN,
+                    paragraf=p,
+                    offset_mulai=mulai,
+                    panjang=akhir - mulai,
+                    catatan=(
+                        "Tiap pokok pikiran pada Menimbang dirumuskan dalam "
+                        "satu kalimat yang diawali kata \"bahwa\"."
+                    ),
+                )
+            )
+
+        if not isi.endswith(";"):
+            akhir_isi = len(p.teks.rstrip())
+            if akhir_isi > 0:
+                temuan.append(
+                    _buat_temuan(
+                        aturan_id="F1-008",
+                        jenis_tanda=JenisTanda.CATATAN,
+                        paragraf=p,
+                        offset_mulai=akhir_isi - 1,
+                        panjang=1,
+                        catatan=(
+                            "Tiap pokok pikiran pada Menimbang diakhiri tanda "
+                            "baca titik koma (;)."
+                        ),
+                    )
+                )
+
+    return temuan
+
+
+def cek_penomoran_dasar_hukum(paragraf: list[ParagrafInput]) -> list[Temuan]:
+    """F1-010 — butir 31: tiap dasar hukum diawali angka Arab, diakhiri ";"."""
+    mulai_idx, akhir_idx = _ekstrak_rentang_mengingat(paragraf)
+    if mulai_idx == -1:
+        return []
+
+    # Kelompokkan paragraf jadi butir: sebuah butir dimulai di paragraf yang
+    # diawali "1.", "2.", dan seterusnya, lalu berlanjut sampai butir berikutnya.
+    #
+    # Pengelompokan ini yang membuat aturannya aman. Judul peraturan yang
+    # panjang memenuhi beberapa paragraf, dan paragraf lanjutannya memang tidak
+    # berangka dan tidak berakhir titik koma. Memeriksa per paragraf berarti
+    # menuduh tiap lanjutan sebagai pelanggaran.
+    kelompok: list[list[int]] = []
+    for i in range(mulai_idx, akhir_idx):
+        teks = _trim(paragraf[i].teks)
+        if not teks:
+            continue
+        if re.match(r"^\d+\.", teks):
+            kelompok.append([i])
+        elif kelompok:
+            kelompok[-1].append(i)
+
+    # Tidak satu pun paragraf berangka. Dua kemungkinan: dasar hukumnya
+    # memang tunggal tanpa nomor (sah menurut butir 31, yang hanya berlaku
+    # bila lebih dari satu), atau nomornya ada di sel tabel yang lain.
+    # Keduanya tidak bisa dibedakan dari sini, jadi aturannya diam.
+    if len(kelompok) < 2:
+        return []
+
+    temuan: list[Temuan] = []
+    for anggota in kelompok:
+        idx_akhir = anggota[-1]
+        p = paragraf[idx_akhir]
+        teks = p.teks.rstrip()
+        if not teks or teks.endswith(";"):
+            continue
+        temuan.append(
+            _buat_temuan(
+                aturan_id="F1-010",
+                jenis_tanda=JenisTanda.CATATAN,
+                paragraf=p,
+                offset_mulai=len(teks) - 1,
+                panjang=1,
+                catatan=(
+                    "Tiap dasar hukum diakhiri tanda baca titik koma (;)."
+                ),
+            )
+        )
+
+    return temuan
+
+
+def cek_judul_menetapkan(paragraf: list[ParagrafInput]) -> list[Temuan]:
+    """F1-012 — butir 39: judul pada Menetapkan diakhiri titik, tanpa "Republik
+    Indonesia"."""
+    info = _ekstrak_judul_menetapkan(paragraf)
+    if info is None or not info["paragraf_indeks"]:
+        return []
+
+    temuan: list[Temuan] = []
+
+    # 1. Frasa "Republik Indonesia" sengaja dibuang di klausul Menetapkan.
+    #
+    # Rentangnya sengaja mencakup "MENTERI KEUANGAN" sekalian, dan
+    # penggantinya "MENTERI KEUANGAN" saja. Menandai frasa "REPUBLIK
+    # INDONESIA" sendirian akan memaksa penggantinya berupa teks kosong —
+    # dan Range.insertText tidak bisa menyisipkan teks kosong, sehingga
+    # usulannya diam-diam batal terpasang.
+    for idx in info["paragraf_indeks"]:
+        p = paragraf[idx]
+        for m in re.finditer(
+            r"MENTERI\s+KEUANGAN\s+REPUBLIK\s+INDONESIA", p.teks, re.IGNORECASE
+        ):
+            asli = m.group(0)
+            temuan.append(
+                _buat_temuan(
+                    aturan_id="F1-012",
+                    jenis_tanda=JenisTanda.PENGGANTIAN,
+                    paragraf=p,
+                    offset_mulai=m.start(),
+                    panjang=len(asli),
+                    catatan=(
+                        "Jenis peraturan pada Menetapkan ditulis tanpa frasa "
+                        "\"Republik Indonesia\"."
+                    ),
+                    usulan_rumusan=asli[: asli.upper().index("REPUBLIK")].rstrip(),
+                )
+            )
+
+    # 2. Diakhiri tanda baca titik.
+    idx_terakhir = None
+    for idx in info["paragraf_indeks"]:
+        if paragraf[idx].teks.strip():
+            idx_terakhir = idx
+    if idx_terakhir is not None:
+        p = paragraf[idx_terakhir]
+        teks = p.teks.rstrip()
+        if teks and not teks.endswith("."):
+            m = list(_POLA_KATA.finditer(teks))
+            mulai = m[-1].start() if m else len(teks) - 1
+            cuplikan = teks[mulai:]
+            temuan.append(
+                _buat_temuan(
+                    aturan_id="F1-012",
+                    jenis_tanda=JenisTanda.PENGGANTIAN,
+                    paragraf=p,
+                    offset_mulai=mulai,
+                    panjang=len(cuplikan),
+                    catatan=(
+                        "Judul pada Menetapkan diakhiri tanda baca titik (.)."
+                    ),
+                    usulan_rumusan=cuplikan.rstrip(",;:") + ".",
+                )
+            )
 
     return temuan
 
@@ -932,21 +1397,73 @@ def cek_ejaan(paragraf: list[ParagrafInput]) -> list[Temuan]:
 # ---------------------------------------------------------------------------
 
 def jalankan_semua(
-    paragraf: list[ParagrafInput], jenis: JenisDokumen
+    paragraf: list[ParagrafInput],
+    jenis: JenisDokumen,
+    aturan_aktif: Optional[list[str]] = None,
 ) -> list[Temuan]:
-    """Jalankan semua aturan Fase 1, lalu urutkan dan nomori temuannya.
+    """Jalankan aturan Fase 1, lalu urutkan dan nomori temuannya.
+
+    `aturan_aktif` berisi daftar aturan_id yang dijalankan. None berarti semua
+    aturan yang aktif secara bawaan — perilaku lama. Penelaah memilihnya lewat
+    panel Pengaturan di task pane, supaya aturan yang salah tandai bisa
+    dimatikan sendiri tanpa menunggu kode diperbaiki.
 
     Urutannya mengikuti posisi di dokumen — paragraf lebih dahulu, lalu offset
     di dalam paragraf. Nomor itulah yang dibaca penelaah sebagai (T1), (T2),
     dan yang dipakai kode untuk menemukan kembali komentarnya sendiri.
     """
+    dipakai = (
+        None if aturan_aktif is None else {a.strip().upper() for a in aturan_aktif}
+    )
+
+    def aktif(aturan_id: str) -> bool:
+        return dipakai is None or aturan_id in dipakai
+
     semua_temuan: list[Temuan] = []
-    if AKTIFKAN_F1_001:
+    if AKTIFKAN_F1_001 and aktif("F1-001"):
         semua_temuan.extend(cek_judul_kapital(paragraf, jenis))
-    semua_temuan.extend(cek_judul_konsisten(paragraf, jenis))
-    semua_temuan.extend(cek_kelengkapan_struktur(paragraf))
-    semua_temuan.extend(cek_frasa_baku_menimbang(paragraf, jenis))
-    semua_temuan.extend(cek_ejaan(paragraf))
+    if aktif("F1-002"):
+        semua_temuan.extend(cek_judul_konsisten(paragraf, jenis))
+    if aktif("F1-003"):
+        semua_temuan.extend(cek_kelengkapan_struktur(paragraf))
+    if aktif("F1-004"):
+        semua_temuan.extend(cek_frasa_baku_menimbang(paragraf, jenis))
+    if aktif("F1-005"):
+        semua_temuan.extend(cek_ejaan(paragraf))
+    if aktif("F1-006"):
+        semua_temuan.extend(cek_judul_tanpa_tanda_baca(paragraf, jenis))
+    if aktif("F1-007"):
+        semua_temuan.extend(_cek_label_bagian(paragraf, "Menimbang", "F1-007"))
+    if aktif("F1-008"):
+        semua_temuan.extend(cek_butir_menimbang(paragraf, jenis))
+    if aktif("F1-009"):
+        semua_temuan.extend(_cek_label_bagian(paragraf, "Mengingat", "F1-009"))
+    if aktif("F1-010"):
+        semua_temuan.extend(cek_penomoran_dasar_hukum(paragraf))
+    if aktif("F1-011"):
+        semua_temuan.extend(_cek_label_bagian(paragraf, "Menetapkan", "F1-011"))
+    if aktif("F1-012"):
+        semua_temuan.extend(cek_judul_menetapkan(paragraf))
+
+    # --- Buang temuan yang tidak punya teks untuk ditunjuk ---------------------
+    #
+    # Ditambahkan 18 Sep 2026. Temuan bertext_asli kosong tidak bisa ditandai di
+    # Word sama sekali, dan di panel muncul sebagai kartu hampa: tanpa cuplikan,
+    # tanpa warna, tanpa komentar, tapi dengan tombol Terima/Tolak yang tidak
+    # mengerjakan apa-apa. Penelaah menemukannya pada PMK 119.
+    #
+    # Ini jaring pengaman lapis terakhir, bukan pengganti perbaikan di aturannya
+    # masing-masing: aturan yang menghasilkan lokasi kosong tetap dianggap cacat
+    # dan sudah dibetulkan sendiri-sendiri.
+    #
+    # F1-003 DIKECUALIKAN. Ketiadaan sebuah bagian memang tidak punya lokasi di
+    # naskah — tidak ada teks yang bisa ditunjuk kalau teksnya justru tidak ada.
+    # Panel menampilkannya sebagai peringatan dokumen, bukan kartu temuan.
+    semua_temuan = [
+        t
+        for t in semua_temuan
+        if t.aturan_id == "F1-003" or t.lokasi.teks_asli.strip()
+    ]
 
     semua_temuan.sort(
         key=lambda t: (t.lokasi.paragraf_index, t.lokasi.offset_mulai)

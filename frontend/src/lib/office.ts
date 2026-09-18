@@ -25,9 +25,20 @@
  *    komentar yang justru perlu dibaca.
  *
  * Gantinya: alat menggambar tandanya sendiri dengan pelacakan DIMATIKAN.
- *   - Teks yang salah  : merah (+ dicoret bila ada usulan penggantinya)
- *   - Usulan penggantinya: hijau, disisipkan di sebelahnya
- *   - Satu komentar per temuan, tidak lebih
+ * Tiga warna, tiga arti yang berbeda:
+ *
+ *   MERAH + DICORET — teks yang salah DAN ada rumusan penggantinya
+ *   HIJAU           — usulan penggantinya, disisipkan di sebelahnya
+ *   BLOK KUNING     — catatan: ada yang perlu ditinjau, tetapi alat tidak tahu
+ *                     rumusan benarnya. Peringatan, bukan usul penghapusan.
+ *
+ * Pembedaan kuning itu diminta penelaah 17 Sep 2026, dan alasannya benar:
+ * memberi warna merah pada temuan yang tidak punya pengganti membuat alat
+ * seolah mengusulkan teks itu dibuang, padahal yang dimaksud cuma "periksa
+ * bagian ini". Merah dipakai hanya bila ada jawabannya.
+ *
+ * Satu komentar per temuan, tidak lebih.
+ *
  * Font.color, Font.strikeThrough, dan Font.highlightColor semuanya WordApi 1.1
  * — himpunan paling dasar, tersedia di Word desktop mana pun.
  *
@@ -118,11 +129,24 @@ export async function readParagraphs(
 // Warna dan penanda
 // ---------------------------------------------------------------------------
 
-/** Merah tua — teks yang kurang tepat. Sama dengan "Dark Red" bawaan Word. */
+/**
+ * Merah tua — teks salah yang SUDAH ADA penggantinya. Dipakai bersama coretan.
+ * Sama dengan "Dark Red" bawaan Word.
+ */
 const WARNA_SALAH = "#C00000";
 
 /** Hijau tua — usulan rumusan pengganti. */
 const WARNA_USULAN = "#00802B";
+
+/**
+ * Blok kuning — temuan yang perlu ditinjau tetapi tidak punya rumusan pengganti
+ * tunggal. Warna latar, bukan warna huruf: huruf kuning tidak terbaca.
+ *
+ * Office untuk Windows Desktop hanya menerima warna bawaan bernama pada
+ * highlightColor; dipakai namanya langsung supaya hasil di layar persis seperti
+ * yang dimaksud.
+ */
+const WARNA_CATATAN = "Yellow";
 
 /** Hitam, dipakai memulihkan warna bila warna asli tidak terbaca. */
 const WARNA_NETRAL = "#000000";
@@ -208,11 +232,16 @@ function ordinalKemunculan(
  * sudah cukup jadi penanda.
  */
 function susunIsiKomentar(temuan: Temuan): string {
+  // Keandalan dibaca dari `status`, BUKAN dari keterisian butirnya. Butir yang
+  // sudah terisi dari ekstraksi OCR tetap belum diverifikasi siapa pun, dan
+  // komentar di naskah orang tidak boleh menampilkannya seolah final.
   const butir = temuan.rujukan.butir;
+  const terverifikasi = temuan.rujukan.status === "visual";
   const rujukanStr =
     butir && butir !== "..."
-      ? `${temuan.rujukan.sumber} butir ${butir}`
-      : `${temuan.rujukan.sumber} (butir belum diverifikasi)`;
+      ? `${temuan.rujukan.sumber} butir ${butir}` +
+        (terverifikasi ? "" : " (belum diverifikasi visual)")
+      : `${temuan.rujukan.sumber} (butir belum diisi)`;
 
   return (
     `${temuan.catatan}\n` +
@@ -295,26 +324,33 @@ async function kembalikanPelacakan(
 
 /** Hasil satu kali penandaan, untuk ditampilkan di panel. */
 export type HasilPenandaan = {
-  /** Jumlah temuan yang tandanya benar-benar terpasang di naskah. */
-  ditandai: number;
+  /** Temuan bercoretan merah — yang salah DAN ada penggantinya. */
+  dicoretMerah: number;
+  /** Temuan berblok kuning — perlu ditinjau, tanpa rumusan pengganti. */
+  diblokKuning: number;
   /** Jumlah usulan hijau yang ikut tersisip. */
   diusulkan: number;
   /** Jumlah komentar yang terpasang. */
   dikomentari: number;
   /**
-   * Jumlah temuan yang letak persisnya TIDAK ketemu, jadi tidak ditandai sama
-   * sekali. Wajib disampaikan: ada temuan yang tidak kelihatan di naskah.
+   * Id temuan yang TIDAK tertandai di naskah — letak persisnya tidak ketemu,
+   * atau pemasangannya gagal. Wajib disampaikan per temuan, bukan cuma
+   * jumlahnya: kartunya di panel harus memuat alasannya sendiri, karena bagi
+   * temuan ini tidak ada komentar di naskah yang bisa dibaca. Sebelum ini,
+   * penelaah melihat kartu hampa bertombol Terima/Tolak yang tidak mengerjakan
+   * apa pun (PMK 119, 18 Sep 2026).
    */
-  tidakKetemu: number;
+  idTidakDitandai: string[];
   /** Pelacakan perubahan berhasil dimatikan selama penandaan. */
   pelacakanMati: boolean;
 };
 
 const HASIL_KOSONG: HasilPenandaan = {
-  ditandai: 0,
+  dicoretMerah: 0,
+  diblokKuning: 0,
   diusulkan: 0,
   dikomentari: 0,
-  tidakKetemu: 0,
+  idTidakDitandai: [],
   pelacakanMati: false,
 };
 
@@ -332,6 +368,10 @@ const HASIL_KOSONG: HasilPenandaan = {
  * Temuan yang rentang presisinya tidak ketemu TIDAK ditandai sama sekali.
  * Menandai satu paragraf penuh karena pencarian meleset pernah terjadi di
  * proyek ini dan berakhir menutupi naskah yang tidak bersalah.
+ *
+ * Dua kelas tanda, sesuai ada-tidaknya rumusan pengganti:
+ *   punya usulan  -> teks lama MERAH + DICORET, usulannya HIJAU di sebelahnya
+ *   tanpa usulan  -> BLOK KUNING, warna huruf tidak disentuh
  */
 export async function tandaiSemuaTemuan(
   daftar: Temuan[]
@@ -341,7 +381,7 @@ export async function tandaiSemuaTemuan(
   }
 
   const bisaKomentar = checkApiSupport("1.4");
-  const hasil: HasilPenandaan = { ...HASIL_KOSONG };
+  const hasil: HasilPenandaan = { ...HASIL_KOSONG, idTidakDitandai: [] };
 
   try {
     await Word.run(async (context) => {
@@ -395,7 +435,10 @@ export async function tandaiSemuaTemuan(
             b.t.lokasi.offset_mulai - a.t.lokasi.offset_mulai
         );
 
-      hasil.tidakKetemu = daftar.length - antrean.length;
+      const ketemu = new Set(antrean.map((x) => x.t.id));
+      hasil.idTidakDitandai = daftar
+        .filter((t) => !ketemu.has(t.id))
+        .map((t) => t.id);
 
       for (const { t, i } of antrean) {
         const r = rentang[i] as Word.Range;
@@ -414,23 +457,27 @@ export async function tandaiSemuaTemuan(
           // Urutannya penting. Warna dulu, lalu sisipkan usulan di sebelahnya,
           // baru dibungkus content control. Kalau dibungkus lebih dulu,
           // penyisipan "After" bisa mendarat DI DALAM bungkusnya.
-          r.font.color = WARNA_SALAH;
-          // Dicoret HANYA kalau memang ada penggantinya. Temuan tanpa usulan
-          // bukan usul penghapusan — mencoretnya berarti berbohong soal apa
-          // yang dimaksud alat.
-          if (punyaUsulan) r.font.strikeThrough = true;
-
           if (punyaUsulan) {
+            // Ada jawabannya: teks lama merah dan dicoret, penggantinya hijau.
+            r.font.color = WARNA_SALAH;
+            r.font.strikeThrough = true;
+
             const usulan = r.insertText(` ${t.usulan_rumusan}`, "After");
             usulan.font.color = WARNA_USULAN;
             usulan.font.strikeThrough = false;
             usulan.font.highlightColor = null as unknown as string;
             bungkusContentControl(usulan, `${TAG_USUL}${t.nomor}`, t.nomor);
             hasil.diusulkan++;
+            hasil.dicoretMerah++;
+          } else {
+            // Tidak ada rumusan pengganti tunggal — ini peringatan, bukan usul
+            // penghapusan. Blok kuning, warna hurufnya TIDAK disentuh: merah
+            // membuat alat seolah menyuruh membuang teks itu.
+            r.font.highlightColor = WARNA_CATATAN;
+            hasil.diblokKuning++;
           }
 
           bungkusContentControl(r, `${TAG_ASLI}${t.nomor}`, t.nomor);
-          hasil.ditandai++;
 
           // Satu komentar per temuan. Tidak lebih.
           if (bisaKomentar) {
@@ -439,6 +486,7 @@ export async function tandaiSemuaTemuan(
           }
         } catch (err) {
           console.warn(`Tanda T${t.nomor} gagal dipasang:`, err);
+          hasil.idTidakDitandai.push(t.id);
         }
       }
       await context.sync();

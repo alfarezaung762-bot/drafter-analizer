@@ -84,6 +84,16 @@ class RujukanTemuan(BaseModel):
     pdf_url: str = Field(
         ..., description="URL PDF di JDIH"
     )
+    status: str = Field(
+        default="placeholder",
+        description=(
+            "Keandalan rujukan: 'placeholder' (belum diisi), 'ekstraksi' "
+            "(dari teks OCR, belum dibaca manusia), atau 'visual' (sudah "
+            "diketik ulang manusia dari naskah). Antarmuka menyalakan gate "
+            "legal untuk apa pun yang BUKAN 'visual' — keterisian butir "
+            "bukan bukti keandalan."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +181,15 @@ class AnalisisRequest(BaseModel):
     )
     paragraf: list[ParagrafInput] = Field(
         ..., description="Daftar paragraf dari dokumen"
+    )
+    aturan_aktif: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Daftar aturan_id yang dijalankan, mis. [\"F1-002\", \"F1-005\"]. "
+            "Dipilih penelaah lewat panel Pengaturan di task pane. None berarti "
+            "jalankan semua aturan yang aktif secara bawaan — perilaku lama, "
+            "supaya pemanggil yang belum tahu field ini tidak berubah artinya."
+        ),
     )
 
 

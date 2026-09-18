@@ -123,7 +123,7 @@ Word (dokumen terbuka)
 | Lapisan | Teknologi | Catatan |
 |---|---|---|
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind v4 | Sudah terpasang di kerangka — jangan diganti, jangan tambah Bootstrap |
-| Integrasi Word | Office.js | Lihat `docs/panduan-officejs.md` di repo — API-nya sudah diverifikasi di sana |
+| Integrasi Word | Office.js | Lihat `docs/panduan-officejs.md` — API yang sudah diverifikasi ke `index.d.ts` |
 | Backend | FastAPI (Python) | Aturan ditulis sebagai fungsi murni bebas framework |
 | Model AI | **Tidak dipakai sama sekali di Fase 1** | Semua pemeriksaan di bagian 3 berjawaban pasti. Fase 2 nanti memakai **Azure OpenAI** (deployment `gpt-4.1`, sesuai env Law Analyzer), bukan ChatGPT konsumen |
 | Pencarian peraturan | OpenSearch | **Tidak dipakai di Fase 1.** Baru relevan di Fase 3 |
@@ -328,6 +328,13 @@ Pemetaan aturan Fase 1 — diverifikasi terhadap `rules/format_baku.py`:
 | F1-003 kelengkapan struktur | `catatan` | ya | Yang salah adalah ketiadaan bagian; tidak ada teks untuk diganti |
 | F1-004 frasa baku butir Menimbang terakhir | `catatan` | ya | Bunyi bakunya perlu menyebut huruf mana saja yang dirujuk |
 | F1-005 ejaan | `penggantian` | ya | Substitusi kata, mis. `Undang-undang` → `Undang-Undang` |
+| F1-006 judul diakhiri tanda baca | `penggantian` | ya | butir 8 — imperatif |
+| F1-007 penulisan "Menimbang" | `penggantian` / `catatan` | ya | butir 16 — imperatif |
+| F1-008 bentuk tiap butir Menimbang | `catatan` | ya | butir 21 — imperatif |
+| F1-009 penulisan "Mengingat" | `penggantian` / `catatan` | ya | butir 23 — imperatif |
+| F1-010 penomoran dasar hukum | `catatan` | ya | butir 31 — imperatif |
+| F1-011 penulisan "Menetapkan" | `penggantian` / `catatan` | ya | butir 38 — imperatif |
+| F1-012 bentuk judul pada Menetapkan | `penggantian` | ya | butir 39 — imperatif |
 
 Pada `backend/tools/contoh/contoh-rancangan-uji.docx` dengan F1-001 mati:
 2 temuan `penggantian`, 2 temuan `catatan`.
@@ -497,6 +504,77 @@ dan paragraf lanjutannya. Tanpa perbaikan, keduanya gagal.
 Butir 3 adalah bentuk umum kaidah ini di dalam kode: **tiap aturan yang bisa
 kebablasan wajib punya batas kewajaran, dan di luar batas itu memilih diam.**
 
+**Kasus 3 — F1-002, kata "menetapkan:" di batang tubuh. Bug, sudah diperbaiki.**
+
+Pada RPMK DBH Sawit, Pasal 4 ayat (1) berbunyi *"Dalam rangka pengelolaan DBH
+Sawit, Menteri selaku PA BUN Pengelola TKD **menetapkan:**"*. Pencarian klausul
+Menetapkan memakai `re.search` tanpa jangkar, jadi kata itu ikut cocok — dan
+isi Pasal 4 dituduh "judulnya berbeda dari judul pembuka", padahal itu bukan
+judul sama sekali.
+
+Ada sebab kedua yang memperparah: pada naskah yang menaruh klausul Menetapkan di
+dalam **tabel**, label "Menetapkan" dan isinya jatuh di sel — dan karenanya di
+paragraf — yang berbeda, sehingga paragraf labelnya cuma berbunyi "Menetapkan"
+tanpa titik dua. Pola lama mewajibkan titik dua, jadi klausul yang sah justru
+terlewat, lalu pencarian berjalan terus sampai menemukan "menetapkan:" di batang
+tubuh.
+
+Tiga perbaikan:
+
+1. **Jendela pencarian.** Klausul Menetapkan yang sah punya letak yang pasti
+   menurut KMK 527: sesudah `MEMUTUSKAN:` dan sebelum batang tubuh
+   (BAB/Pasal/diktum). Pencarian hanya berlaku di jendela itu. Menetapkan di
+   luar jendela itu bukan klausul Menetapkan.
+2. **Jangkar di awal paragraf** (`^Menetapkan\b\s*:?`), dengan titik dua
+   opsional supaya bentuk bertabel tetap terbaca.
+3. Tanpa `MEMUTUSKAN` di dokumen, aturannya **diam** — tidak ada cara memastikan
+   mana klausul Menetapkan.
+
+**Kasus 4 — F1-004 mendarat di baris kosong. Bug, sudah diperbaiki.**
+
+Pada PMK 119, penelaah melihat kartu hampa di panel: `#34 ""` — tanpa cuplikan,
+tanpa warna, tanpa komentar, tapi bertombol Terima/Tolak yang tidak mengerjakan
+apa pun.
+
+Sebabnya, lokasi temuan diambil begitu saja dari `paragraf_akhir - 1`, yaitu
+paragraf tepat sebelum "Mengingat" — yang pada naskah nyata sering **baris
+kosong**. Teks aslinya kosong, panjangnya nol, tidak ada yang bisa ditandai.
+
+Perbaikannya, paragrafnya dicari dari isi butirnya sendiri, dengan penanda
+hurufnya dibuang lebih dulu (pada naskah bertabel, huruf "c." dan isi butirnya
+ada di paragraf berbeda). Kalau butirnya tidak ketemu di mana pun, aturannya
+diam.
+
+Ditambah **jaring pengaman lapis terakhir di `jalankan_semua()`**: temuan
+ber-`teks_asli` kosong dibuang sebelum dinomori. F1-003 dikecualikan — ketiadaan
+sebuah bagian memang tidak punya lokasi di naskah, dan panel menampilkannya
+sebagai kartu beralasan tanpa tombol keputusan (6.13).
+
+**Kasus 5 — temuan terlalu panjang untuk bisa dicari. Bug, sudah diperbaiki.**
+
+Pada PMK 5 Tahun 2025, F1-004 muncul di panel tetapi tidak ada tandanya di
+naskah. Sebabnya bukan lokasi yang salah, melainkan **panjang**: butir Menimbang
+terakhir di naskah itu 463 karakter, sedangkan `Word.search()` dibatasi sekitar
+255 karakter. Temuan sepanjang itu tidak akan pernah ketemu, jadi tidak akan
+pernah tertandai.
+
+Perbaikannya di `_buat_temuan()`, satu tempat untuk semua aturan: rentang temuan
+berjenis `catatan` dipotong di batas kata pada 120 karakter
+(`_BATAS_PANJANG_TANDA`). Angkanya jauh di bawah batas Word — 120 karakter
+kira-kira satu setengah baris, cukup menunjukkan tempatnya tanpa memblok satu
+paragraf. Alasannya tetap di komentar, bukan di sorotan.
+
+Pada butir PMK 5 itu, potongannya kebetulan mendarat tepat di penyimpangannya:
+naskah menulis *"bahwa berdasarkan pertimbangan **huruf a**"*, bunyi bakunya
+*"bahwa berdasarkan pertimbangan **sebagaimana dimaksud dalam** huruf a"*.
+
+Pemotongan sengaja TIDAK berlaku untuk temuan `penggantian`: `teks_asli` di situ
+harus sama persis dengan yang akan diganti `usulan_rumusan`. Rentang penggantian
+memang selalu pendek — substitusi kata.
+
+Bentuk umum kaidahnya, sejajar dengan butir 3 di Kasus 2: **temuan yang tidak
+bisa ditemukan kembali di naskah sama saja dengan temuan yang tidak ada.**
+
 ### 6.11 Batas yang sudah diketahui
 
 - **Warna asli disimpan di memori panel, bukan di dokumen.** Kalau Word ditutup
@@ -561,6 +639,64 @@ Peringatan otomatis bila pilihan penelaah bertentangan dengan bunyi baris judul
 
 ---
 
+### 6.13 Temuan yang tidak punya lokasi
+
+F1-003 memeriksa ketiadaan sebuah bagian wajib. Temuan seperti itu tidak punya
+teks untuk ditunjuk — tidak ada yang bisa disorot kalau yang salah justru
+teksnya tidak ada.
+
+Sempat dicoba menampilkannya sebagai kartu biasa dengan alasannya dicetak di
+dalam kartu dan tombol Terima/Tolak disembunyikan. Penelaah langsung menolaknya,
+dan alasannya benar: panel tidak boleh memuat uraian panjang (itu tugas
+komentar, bagian 6.9), dan kartu yang bentuknya berubah-ubah membuat daftar
+sulit dibaca sekilas.
+
+Ketentuannya sekarang:
+
+- Temuan tanpa lokasi **tidak menjadi kartu**. Ditampilkan sebagai peringatan
+  dokumen sebaris di atas daftar, dengan latar merah muda.
+- Kartu temuan bentuknya **selalu sama**: nomor, penanda jenis, cuplikan,
+  Lompat ke Teks, Terima, Tolak. Tidak ada yang disembunyikan, tidak ada uraian
+  panjang.
+- Temuan tanpa lokasi tidak ikut dihitung dalam pengaman analisis berulang —
+  kalau ikut, tombol Analisis terkunci selamanya.
+- `tandaiSemuaTemuan()` tetap mengembalikan daftar id temuan yang gagal
+  ditandai, dan jumlahnya disebut di baris info. Sesudah pemotongan panjang di
+  Kasus 5, keadaan itu semestinya jadi tanda cacat — bukan kejadian biasa.
+
+### 6.14 Panel Pengaturan — pemeriksaan bisa dipilih dan diperiksa sendiri
+
+Diminta penelaah 18 Sep 2026, dengan alasan yang tepat: **supaya bisa mengecek
+manual.** Selama daftar pemeriksaan cuma hidup di kode Python, satu-satunya cara
+tahu apa yang sebenarnya diperiksa adalah membaca kodenya — dan itu bukan
+pekerjaan penelaah.
+
+Tombol gerigi di header membuka panel berisi seluruh aturan Fase 1. Tiap aturan
+punya:
+
+- **Kotak centang** — mematikan aturan yang salah tandai tanpa menunggu kodenya
+  diperbaiki. Daftar yang dicentang dikirim ke backend sebagai `aturan_aktif`;
+  dihilangkan berarti semua aturan bawaan, supaya pemanggil lama tidak berubah
+  artinya.
+- **Rincian yang bisa dibuka**, memuat tiga hal: apa yang diperiksa, apa yang
+  **TIDAK** diperiksa, dan bentuk tandanya di naskah. Bagian "tidak diperiksa"
+  sama pentingnya — itulah yang memberi tahu penelaah apa yang masih harus dia
+  periksa sendiri.
+- Aturan yang dimatikan di kode (F1-001) tetap **ditampilkan**, dengan kotak
+  centang nonaktif dan keterangan kenapa dimatikan. Menyembunyikannya berarti
+  penelaah mengira judul kapital ikut diperiksa.
+
+Keterangannya ada di `frontend/src/lib/aturan-fase1.ts`, dan **wajib sama
+dengan** `backend/app/rules/format_baku.py`. Kalau aturannya berubah,
+keterangannya ikut diubah di commit yang sama: keterangan yang bohong lebih
+buruk daripada tidak ada keterangan sama sekali, karena penelaah memakainya
+untuk memutuskan apa yang perlu diperiksa manual.
+
+Menekan Analisis dengan nol pemeriksaan tidak dijalankan — panel Pengaturan
+dibuka dan penelaah diberi tahu.
+
+---
+
 ## 7. Susunan file
 
 ```
@@ -583,9 +719,10 @@ drafter-analiser/
 │       └── contoh/
 │           └── contoh-rancangan-uji.docx
 ├── docs/
-│   ├── kontrak-data.md
-│   ├── panduan-officejs.md
-│   └── fase1 drafter.md         ← dokumen ini
+│   ├── README.md                ← indeks, urutan baca
+│   ├── fase1 drafter.md         ← dokumen ini: SATU-SATUNYA acuan rancangan
+│   └── panduan-officejs.md      ← API Word yang sudah diverifikasi
+├── CLAUDE.md                    ← aturan kerja untuk agen coding
 └── frontend/
     └── src/
         ├── app/
@@ -593,6 +730,7 @@ drafter-analiser/
         │   └── taskpane/page.tsx
         └── lib/
             ├── office.ts        ← SEMUA panggilan Office.js
+            ├── aturan-fase1.ts  ← keterangan aturan untuk panel Pengaturan
             └── types.ts
 ```
 
@@ -725,21 +863,26 @@ temuan wajib ditandai "rujukan belum diverifikasi" di antarmuka.
 
 ## 11. Bentuk data Temuan — KONTRAK
 
+> Bagian ini **satu-satunya** sumber kontrak data. Berkas `docs/kontrak-data.md`
+> yang dulu memuat salinannya sudah dihapus 18 Sep 2026: dua berkas yang harus
+> disamakan manual setiap kali berubah adalah pabrik cacat, dan sempat benar-
+> benar berbeda isi.
+
 ```json
 {
-  "id": "f-001",
+  "id": "f-a1b2c3d4",
   "nomor": 1,
-  "aturan_id": "F1-001",
+  "aturan_id": "F1-005",
   "fase": 1,
   "jenis_tanda": "penggantian",
   "lokasi": {
-    "paragraf_index": 3,
-    "offset_mulai": 0,
-    "panjang": 48,
-    "teks_asli": "Tata Cara Uji Coba Penelaahan Rancangan Peraturan"
+    "paragraf_index": 15,
+    "offset_mulai": 5,
+    "panjang": 13,
+    "teks_asli": "Undang-undang"
   },
-  "catatan": "Judul peraturan ditulis kapital seluruhnya.",
-  "usulan_rumusan": "TATA CARA UJI COBA PENELAAHAN RANCANGAN PERATURAN",
+  "catatan": "Nama jenis peraturan ditulis dengan huruf kapital pada kedua unsurnya.",
+  "usulan_rumusan": "Undang-Undang",
   "rujukan": {
     "sumber": "KMK 527/KMK.01/2022 Lampiran II",
     "butir": "...",
@@ -750,50 +893,146 @@ temuan wajib ditandai "rujukan belum diverifikasi" di antarmuka.
 }
 ```
 
-Dua perubahan dari versi sebelumnya:
+### Penjelasan field
 
-**`tingkat_keparahan` DIHAPUS.** Dulu dipakai memilih warna sorotan dan
-menyaring daftar panel; keduanya sudah tidak ada. Menyimpan field yang tidak
-dibaca siapa pun hanya menyisakan pertanyaan bagi orang berikutnya yang membaca
-kode.
+| Field | Tipe | Keterangan |
+|---|---|---|
+| `id` | string | Identifier unik temuan dalam satu sesi analisis |
+| `nomor` | integer | Nomor urut menurut posisi di dokumen, mulai dari 1 |
+| `aturan_id` | string | Kunci ke tabel rujukan (`F1-001`, dst.). **INTERNAL** — tidak pernah ditampilkan ke penelaah |
+| `fase` | integer | Selalu `1` untuk Fase 1 |
+| `jenis_tanda` | enum | `"penggantian"` \| `"catatan"` |
+| `lokasi.paragraf_index` | integer | Indeks paragraf dalam daftar yang dikirim |
+| `lokasi.offset_mulai` | integer | Posisi karakter awal di dalam paragraf |
+| `lokasi.panjang` | integer | Panjang karakter yang ditandai |
+| `lokasi.teks_asli` | string | Teks asli yang bermasalah — dipakai frontend sebagai kata kunci `Word.search()` |
+| `catatan` | string | **Alasan** temuan, bukan pengulangan apa yang sudah terlihat di naskah |
+| `usulan_rumusan` | string \| null | Rumusan pengganti — lihat aturan yang mengikat di bawah |
+| `rujukan.sumber` | string | Nama peraturan sumber |
+| `rujukan.butir` | string | Nomor butir spesifik |
+| `rujukan.kutipan` | string | Kutipan isi butir |
+| `rujukan.pdf_url` | string | URL PDF di JDIH |
+| `status` | enum | `"belum_ditinjau"` \| `"diterima"` \| `"ditolak"` |
 
-**`nomor` DITAMBAHKAN** — nomor urut temuan menurut posisinya di dokumen,
-dimulai dari 1. Inilah yang ditampilkan sebagai `(T1)`, `(T2)` di komentar dan
-sebagai nomor di daftar panel. Backend yang menetapkannya, sesudah seluruh
-aturan selesai dijalankan dan temuannya diurutkan menurut `paragraf_index` lalu
-`offset_mulai`.
+### `nomor` — penomoran temuan
 
-**`jenis_tanda`** — `"penggantian"` | `"catatan"`. Menentukan cara temuan
-dipasang di dokumen (bagian 6.3). Aturan yang menghasilkan temuan wajib
-menetapkannya eksplisit, **bukan** disimpulkan dari ada-tidaknya
-`usulan_rumusan`.
+Nomor urut menurut posisi di dokumen: temuan paling atas `1`, berikutnya `2`.
+Ditetapkan **backend**, sesudah seluruh aturan dijalankan dan temuannya
+diurutkan menurut `paragraf_index` lalu `offset_mulai`.
 
-Bila `jenis_tanda` = `"penggantian"`, maka `usulan_rumusan` **wajib terisi** dan
-harus berupa teks pengganti harfiah untuk `lokasi.teks_asli` — bukan contoh
-bunyi, bukan penjelasan. Isi field inilah yang disisipkan ke naskah orang.
+Nomor inilah yang tampil sebagai `(T1)`, `(T2)` di ujung komentar dan sebagai
+nomor di daftar panel, supaya penelaah bisa melompat bolak-balik antara naskah
+dan panel tanpa menerjemahkan apa pun. `aturan_id` tidak pernah muncul di
+antarmuka.
 
-Bila `jenis_tanda` = `"catatan"`, `usulan_rumusan` boleh `null` atau berisi
-contoh bunyi yang hanya ditampilkan, tidak pernah disisipkan.
+### `jenis_tanda` — cara temuan dipasang di dokumen
 
-`catatan` ditulis sebagai **alasan**, bukan pengulangan apa yang sudah terlihat
-di naskah — lihat bagian 6.5.
+| Nilai | Dipakai bila | Cara dipasang |
+|---|---|---|
+| `penggantian` | Ada satu rumusan pengganti yang deterministik untuk `lokasi.teks_asli` | Teks lama MERAH `#C00000` + dicoret; `usulan_rumusan` disisipkan di sebelahnya, HIJAU `#00802B` |
+| `catatan` | Tidak ada pengganti tunggal — yang salah adalah ketiadaan sesuatu, atau alat tidak tahu mana dari dua kemungkinan yang benar | BLOK KUNING (`font.highlightColor = "Yellow"`); warna huruf TIDAK disentuh |
+
+Keduanya diberi tepat satu komentar dan diputuskan dari task pane. Seluruh
+penandaan berjalan dengan `changeTrackingMode = "Off"`, lalu mode semula
+dikembalikan. Tiap tanda dibungkus content control bertag `DA-ASLI-{nomor}` atau
+`DA-USUL-{nomor}`. Lihat bagian 6.3 dan 6.4.
+
+**Aturan yang mengikat:**
+
+- Bila `jenis_tanda` = `"penggantian"`, `usulan_rumusan` **wajib terisi** dan
+  harus berupa teks pengganti harfiah untuk `lokasi.teks_asli` — bukan contoh
+  bunyi, bukan penjelasan. Isi field inilah yang benar-benar disisipkan ke
+  naskah orang.
+- Bila `jenis_tanda` = `"catatan"`, `usulan_rumusan` boleh `null` atau berisi
+  contoh bunyi yang hanya ditampilkan, tidak pernah disisipkan.
+- Fungsi aturan **wajib menetapkan `jenis_tanda` secara eksplisit.** Jangan
+  menyimpulkannya dari ada-tidaknya `usulan_rumusan` — suatu saat ada aturan
+  yang usulannya cuma contoh, dan menebak di situ berarti salah menyunting
+  naskah orang.
+- Temuan `penggantian` **tidak** diberi blok kuning, dan temuan `catatan`
+  **tidak** diberi warna merah. Merah berarti "ada penggantinya".
+
+### Pemetaan aturan Fase 1
+
+| Aturan | `jenis_tanda` | Aktif | Alasan |
+|---|---|---|---|
+| F1-001 judul kapital | `catatan` | **tidak** | Dimatikan — bagian 6.10 |
+| F1-002 judul pembuka ≠ judul Menetapkan | `catatan` | ya | Alat tidak tahu mana dari dua judul itu yang benar |
+| F1-003 kelengkapan struktur | `catatan` | ya | Yang salah adalah ketiadaan bagian |
+| F1-004 frasa baku butir Menimbang terakhir | `catatan` | ya | Bunyi bakunya perlu menyebut huruf mana saja yang dirujuk |
+| F1-005 ejaan | `penggantian` | ya | Substitusi kata |
+| F1-006 judul diakhiri tanda baca | `penggantian` | ya | butir 8 — imperatif |
+| F1-007 penulisan "Menimbang" | `penggantian` / `catatan` | ya | butir 16 — imperatif |
+| F1-008 bentuk tiap butir Menimbang | `catatan` | ya | butir 21 — imperatif |
+| F1-009 penulisan "Mengingat" | `penggantian` / `catatan` | ya | butir 23 — imperatif |
+| F1-010 penomoran dasar hukum | `catatan` | ya | butir 31 — imperatif |
+| F1-011 penulisan "Menetapkan" | `penggantian` / `catatan` | ya | butir 38 — imperatif |
+| F1-012 bentuk judul pada Menetapkan | `penggantian` | ya | butir 39 — imperatif |
+
+Pada `backend/tools/contoh/contoh-rancangan-uji.docx`: 2 `penggantian`,
+2 `catatan`.
+
+### Bentuk `catatan`
+
+Ditulis sebagai alasan, dua baris, tanpa nama produk dan tanpa tingkat
+keparahan. Apa yang berubah sudah terlihat dari coretan di naskah, jadi tidak
+diulang:
+
+```
+Nama jenis peraturan ditulis dengan huruf kapital pada kedua unsurnya.
+KMK 527/KMK.01/2022 Lamp. II butir 33 — jdih.kemenkeu.go.id/... (T4)
+```
+
+Temuan `catatan` tidak menghasilkan coretan, jadi harus menyebut sendiri apa
+yang bermasalah:
+
+```
+Judul pada Menetapkan harus sama persis dengan judul pembuka — di sini berbeda.
+Mana yang benar ditentukan penelaah.
+KMK 527/KMK.01/2022 Lamp. II butir ... — jdih.kemenkeu.go.id/... (T2)
+```
 
 ### Bentuk AnalisisRequest
 
 ```json
 {
   "jenis_dokumen": "PMK",
+  "aturan_aktif": ["F1-002", "F1-003", "F1-004", "F1-005"],
   "paragraf": [
     { "index": 0, "teks": "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA" }
   ]
 }
 ```
 
-`jenis_dokumen` — `"PMK"` | `"KMK"`, **wajib terisi**, dipilih penelaah di task
-pane (bagian 6.7). Backend tidak menebaknya sendiri.
+| Field | Tipe | Keterangan |
+|---|---|---|
+| `jenis_dokumen` | enum | `"PMK"` \| `"KMK"` — **wajib**, dipilih penelaah sebelum menekan Analisis (bagian 6.12). Backend tidak menebaknya |
+| `aturan_aktif` | array \| null | Daftar `aturan_id` yang dijalankan, dipilih di panel Pengaturan (bagian 6.14). `null`/dihilangkan berarti seluruh aturan bawaan |
+| `paragraf[].index` | integer | Indeks paragraf di dokumen |
+| `paragraf[].teks` | string | Isi teks paragraf |
+| `paragraf[].tampil_kapital` | boolean | Opsional, default `false`. **Tidak lagi dikirim frontend** — satu-satunya pemakainya F1-001 yang sudah dimatikan. Dibiarkan ada supaya kontrak lama tidak pecah |
 
-Salin bentuk ini ke `docs/kontrak-data.md` setiap kali berubah; dua berkas itu
-harus selalu sama.
+### Batas yang wajib dipatuhi aturan
+
+- **Rentang temuan `catatan` dipotong di 120 karakter**, di batas kata
+  (`_BATAS_PANJANG_TANDA`). Bukan soal tampilan: `Word.search()` dibatasi
+  sekitar 255 karakter, jadi temuan yang lebih panjang tidak pernah ketemu dan
+  tidak pernah tertandai di naskah. Temuan `penggantian` TIDAK dipotong —
+  `teks_asli`-nya harus sama persis dengan yang diganti `usulan_rumusan`.
+- **Temuan ber-`teks_asli` kosong dibuang `jalankan_semua()`**, kecuali F1-003.
+  Temuan tanpa teks tidak bisa ditandai di Word dan muncul di panel sebagai
+  kartu hampa. F1-003 dikecualikan karena ketiadaan sebuah bagian memang tidak
+  punya lokasi; panel menampilkannya sebagai peringatan dokumen (bagian 6.13).
+- **`offset_mulai` dan `panjang` menandai rentang presisi**, bukan satu paragraf
+  penuh (bagian 6.5). Temuan yang rentangnya tidak ketemu di Word **tidak
+  ditandai sama sekali**, bukan diperlebar.
+- Selama `rujukan.butir` atau `rujukan.kutipan` masih `"..."`, panel wajib
+  menampilkan penanda "rujukan belum diverifikasi". Tidak boleh ditampilkan
+  seolah punya dasar hukum final.
+- Nomor `(T1)`, `(T2)` juga dipakai kode untuk menemukan kembali komentarnya
+  sendiri. Karena nomornya melekat pada urutan dokumen, menjalankan analisis dua
+  kali menghasilkan komentar bernomor sama — panel wajib menolak menganalisis
+  ulang selama masih ada temuan yang belum diputuskan (bagian 6.8).
 
 ---
 
@@ -834,8 +1073,8 @@ Diperbarui 17 Sep 2026. Yang bertanda **selesai** sudah dikerjakan dan lolos
 tesnya; yang bertanda **belum diuji di Word** sudah ditulis dan lolos typecheck
 tetapi belum sekali pun dijalankan di dalam Word.
 
-1. ~~Salin skema Temuan ke `docs/kontrak-data.md`.~~ **Selesai** — perlu
-   diperbarui dengan `jenis_tanda`.
+1. ~~Tetapkan skema Temuan.~~ **Selesai** — hidup di bagian 11 saja.
+   `docs/kontrak-data.md` dihapus 18 Sep 2026 karena menduplikasinya.
 2. ~~Satu alur utuh dengan satu aturan paling sederhana.~~ **Selesai.**
 3. ~~Tiga aturan struktur sisanya.~~ **Selesai** — kelimanya jalan, diverifikasi
    lewat `backend/tools/cek_docx.py` terhadap dokumen contoh dan satu RPMK nyata.
@@ -874,14 +1113,47 @@ tetapi belum sekali pun dijalankan di dalam Word.
     - tidak ada lagi baris `Formatted: Highlight` di margin.
 12. **Ekspor versi bersih** (bagian 6.7) — jalurnya belum ditetapkan, perlu
     keputusan penelaah lebih dulu.
-13. **Tambah aturan.** Dengan F1-001 mati, tersisa empat aturan dan pada RKMK
+13. ~~Tambah aturan.~~ **Tujuh selesai 18 Sep 2026** (F1-006 s.d. F1-012).
+    Tiga sisanya di tabel bawah belum. Dengan F1-001 mati, dulu tersisa empat aturan dan pada RKMK
     yang rapi hasilnya bisa nol temuan. Itu benar, tapi belum cukup untuk
-    peragaan. Daftar kemungkinan pemeriksaan ada di brief bagian 8.11 dan
-    **masih dugaan** — konfirmasikan ke penelaah dulu, jangan dibangun dari
-    tebakan.
-14. **Terakhir**, lengkapi tabel rujukan KMK 527 (bagian 10) dengan kutipan yang
-    sudah dibaca visual. Selama masih placeholder, panel wajib menampilkan
-    penanda "rujukan belum diverifikasi".
+    peragaan.
+
+    Sejak 18 Sep 2026 sumbernya tidak perlu lagi tebakan. Penelaah mengirim
+    pindaian Lampiran II halaman 30, 35, 36, dan 37, dan di situ ada
+    butir-butir yang **imperatif, deterministik, dan sudah terverifikasi
+    visual** tetapi belum dibangun:
+
+    | Butir | Bunyi ringkasnya | Sifat | Kesulitan |
+    |---|---|---|---|
+    | 8 | Judul tidak diakhiri tanda baca | imperatif | mudah |
+    | 16 | "Menimbang" diakhiri titik dua (:) | imperatif | mudah |
+    | 21 | Tiap butir Menimbang diawali "bahwa", diakhiri titik koma (;) | imperatif | mudah |
+    | 23 | "Mengingat" diakhiri titik dua (:) | imperatif | mudah |
+    | 31 | Tiap dasar hukum diawali angka Arab 1, 2, 3 dan diakhiri titik koma (;) | imperatif | mudah |
+    | 32 | Kata penghubung/konjungsi di judul dasar hukum tetap huruf kecil | imperatif | sedang — perlu daftar konjungsi |
+    | 34 | UU/PP/Perpres di dasar hukum wajib disertai (Lembaran Negara ..., Tambahan Lembaran Negara ...) | imperatif | sedang |
+    | 38 | "Menetapkan" huruf awal kapital, diakhiri titik dua (:) | imperatif | mudah |
+    | 39 | Judul pada Menetapkan diakhiri titik (.) | imperatif | mudah |
+    | 30 | Urutan dasar hukum mengikuti hierarki, lalu kronologis | imperatif | sulit — perlu tahu hierarki tiap jenis |
+
+    Perhatikan bedanya dengan daftar di brief bagian 8.11: yang di sana disusun
+    dari logika dokumen dan **belum dikonfirmasi siapa pun**; yang di sini
+    dikutip dari naskah KMK 527 yang sudah dibaca halamannya. Kerjakan yang
+    ini dulu.
+
+    Sembilan dari sepuluh bersifat imperatif — berbeda dari F1-004 yang
+    bersandar pada butir 22 yang cuma menyebut "pada umumnya". Artinya
+    temuannya lebih kuat, dan lebih pantas jadi `penggantian` ketimbang
+    `catatan`.
+
+    Konfirmasi ke penelaah tetap berguna, tapi bukan lagi penghalang: yang
+    ditanyakan sekarang "mana yang paling sering salah", bukan "apakah ini
+    memang aturan".
+14. ~~Lengkapi tabel rujukan KMK 527.~~ **Selesai 18 Sep 2026.** Kelima entri
+    terisi dan berstatus `"visual"` — dicocokkan kata per kata terhadap
+    pindaian halaman 30, 35, 36, dan 37 yang dikirim penelaah. Gate legal di
+    panel padam untuk kelimanya. Riwayat verifikasinya di
+    `rules/rujukan_kmk527.py`.
 
 ---
 
@@ -943,7 +1215,7 @@ Build ini berhasil kalau:
 
 **Sudah tercapai:**
 
-- [x] `docs/kontrak-data.md` berisi skema Temuan yang sama dengan bagian 11
+- [x] Kontrak data hidup di satu tempat saja (bagian 11)
 - [x] Task pane terbuka di Word dan membaca paragraf dokumen aktif
 - [x] Tombol "Analisis" memanggil backend; backend menjalankan seluruh
       pemeriksaan di bagian 3

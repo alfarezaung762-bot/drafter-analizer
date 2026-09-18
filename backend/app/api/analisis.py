@@ -14,7 +14,9 @@ router = APIRouter(prefix="/analisis", tags=["analisis"])
 @router.post("/jalankan", response_model=AnalisisResponse)
 async def jalankan_analisis(request: AnalisisRequest) -> AnalisisResponse:
     """Jalankan seluruh pemeriksaan format baku pada daftar paragraf."""
-    temuan = jalankan_semua(request.paragraf, request.jenis_dokumen)
+    temuan = jalankan_semua(
+        request.paragraf, request.jenis_dokumen, request.aturan_aktif
+    )
     return AnalisisResponse(
         temuan=temuan,
         jumlah_paragraf=len(request.paragraf),
