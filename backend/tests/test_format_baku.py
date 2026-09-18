@@ -997,8 +997,21 @@ class TestAturanButirTerverifikasi:
 
     # --- F1-007 / F1-009 / F1-011, butir 16 / 23 / 38 ----------------------
 
+    def _dok_label(self, label: str, *baris: str) -> list[ParagrafInput]:
+        """Naskah minimal yang memuat penanda MEMUTUSKAN.
+
+        Sejak 18 Sep 2026 `_cek_label_bagian()` hanya memeriksa label di dalam
+        jendelanya masing-masing — Menimbang dan Mengingat sebelum MEMUTUSKAN,
+        Menetapkan sesudahnya. Tanpa penanda itu jendelanya tidak bisa
+        ditetapkan dan aturannya memilih diam, jadi naskah uji wajib
+        memuatnya persis seperti naskah sungguhan.
+        """
+        if label.upper() == "MENETAPKAN":
+            return _buat_dokumen(["MEMUTUSKAN:", *baris, "Pasal 1"])
+        return _buat_dokumen([*baris, "MEMUTUSKAN:"])
+
     def test_label_huruf_besar_semua_diusulkan_dibetulkan(self):
-        doc = _buat_dokumen(["MENIMBANG : a. bahwa sesuatu;"])
+        doc = self._dok_label("Menimbang", "MENIMBANG : a. bahwa sesuatu;")
         temuan = _cek_label_bagian(doc, "Menimbang", "F1-007")
         assert len(temuan) == 1
         assert temuan[0].jenis_tanda == JenisTanda.PENGGANTIAN
@@ -1006,7 +1019,9 @@ class TestAturanButirTerverifikasi:
         assert temuan[0].usulan_rumusan == "Menimbang"
 
     def test_label_tanpa_titik_dua_ditandai(self):
-        doc = _buat_dokumen(["Menimbang a. bahwa sesuatu yang panjang sekali;"])
+        doc = self._dok_label(
+            "Menimbang", "Menimbang a. bahwa sesuatu yang panjang sekali;"
+        )
         temuan = _cek_label_bagian(doc, "Menimbang", "F1-007")
         assert len(temuan) == 1
         assert "titik dua" in temuan[0].catatan
@@ -1018,7 +1033,7 @@ class TestAturanButirTerverifikasi:
         sehingga paragraf labelnya cuma berbunyi "Menimbang". Titik duanya
         TIDAK BISA dibuktikan hilang dari sini, jadi tidak boleh dituduhkan.
         """
-        doc = _buat_dokumen(["Menimbang", ":", "a. bahwa sesuatu;"])
+        doc = self._dok_label("Menimbang", "Menimbang", ":", "a. bahwa sesuatu;")
         assert _cek_label_bagian(doc, "Menimbang", "F1-007") == []
 
     def test_label_sudah_benar_tidak_ditandai(self):
@@ -1027,12 +1042,63 @@ class TestAturanButirTerverifikasi:
             ("Mengingat", "F1-009"),
             ("Menetapkan", "F1-011"),
         ]:
-            doc = _buat_dokumen([f"{label} : sesuatu yang cukup panjang;"])
+            doc = self._dok_label(label, f"{label} : sesuatu yang cukup panjang;")
             assert _cek_label_bagian(doc, label, aturan) == [], label
 
     def test_kata_berawalan_sama_tidak_dikira_label(self):
         # "Menimbangkan" bukan label. Harus dilewati.
-        doc = _buat_dokumen(["Menimbangkan hal tersebut, maka berlaku hal ini."])
+        doc = self._dok_label(
+            "Menimbang", "Menimbangkan hal tersebut, maka berlaku hal ini."
+        )
+        assert _cek_label_bagian(doc, "Menimbang", "F1-007") == []
+
+    # --- Regresi 18 Sep 2026: jendela label dan pemindaian yang kebablasan --
+
+    def test_f1_011_TIDAK_menuduh_isi_diktum_kmk(self):
+        """Regresi. Isi diktum KMK yang diawali kata "Menetapkan".
+
+        Pada KMK bertabel, "KESATU" dan isi diktumnya jatuh di paragraf yang
+        berbeda, sehingga isi diktumnya berbunyi "Menetapkan Pedoman ...".
+        Sebelum jendela dipasang, F1-011 menuduh batang tubuh itu kurang
+        titik dua — padahal klausul Menetapkan yang sah ada di atasnya dan
+        sudah benar. Tanpa perbaikan, tes ini gagal.
+        """
+        doc = _buat_dokumen([
+            "MEMUTUSKAN:",
+            "Menetapkan : KEPUTUSAN MENTERI KEUANGAN TENTANG PEDOMAN PENYUSUNAN.",
+            "KESATU",
+            "Menetapkan Pedoman Penyusunan sebagaimana tercantum dalam Lampiran.",
+            "KEDUA",
+            "Keputusan Menteri ini mulai berlaku pada tanggal ditetapkan.",
+        ])
+        assert _cek_label_bagian(doc, "Menetapkan", "F1-011") == []
+
+    def test_label_muncul_dua_kali_hanya_diperiksa_sekali(self):
+        """Regresi. Cabang normal dulu memakai `continue`, bukan `break`.
+
+        Akibatnya pemindaian berlanjut setiap kali labelnya ternyata sudah
+        benar, dan kata yang sama di tempat lain menghasilkan temuan kedua —
+        kadang dengan rentang yang sama persis, yang di Word berarti dua tanda
+        di satu rentang.
+        """
+        doc = _buat_dokumen([
+            "MENIMBANG : a. bahwa sesuatu yang cukup panjang;",
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG SESUATU.",
+            "Pasal 1",
+            "MENIMBANG hal tersebut, ditetapkan tata cara sebagai berikut.",
+        ])
+        temuan = _cek_label_bagian(doc, "Menimbang", "F1-007")
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.paragraf_index == 0
+
+    def test_tanpa_memutuskan_label_MEMILIH_DIAM(self):
+        """Tanpa MEMUTUSKAN, batas pembukaan tidak bisa dipastikan sama sekali.
+
+        Sejalan dengan `_ekstrak_judul_menetapkan()` yang sudah lebih dulu
+        memilih diam dalam keadaan yang sama.
+        """
+        doc = _buat_dokumen(["MENIMBANG a. bahwa sesuatu yang cukup panjang;"])
         assert _cek_label_bagian(doc, "Menimbang", "F1-007") == []
 
     # --- F1-008, butir 21: bentuk tiap butir Menimbang ---------------------
@@ -1160,3 +1226,230 @@ class TestAturanButirTerverifikasi:
             assert entri["butir"] != "...", aturan_id
             assert entri["kutipan"] != "...", aturan_id
             assert entri["status"] == "visual", aturan_id
+
+
+# ---------------------------------------------------------------------------
+# Tes regresi 18 Sep 2026 — empat salah tandai dan satu lubang cakupan
+# ---------------------------------------------------------------------------
+#
+# Tiap tes di kelas ini GAGAL tanpa perbaikannya. Riwayatnya di
+# docs/fase1 drafter.md bagian 6.10, Kasus 6 sampai 10.
+
+class TestRegresi18September:
+    def _naskah_pmk(self, memutuskan: str, menetapkan: str) -> list[ParagrafInput]:
+        """Naskah PMK utuh yang bagian MEMUTUSKAN-nya bisa diganti-ganti."""
+        return _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 99/PMK.01/2024",
+            "TENTANG",
+            "TATA CARA PENGELOLAAN DANA",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "Menimbang :",
+            "a. bahwa untuk melaksanakan ketentuan peraturan perundang-undangan;",
+            "b. bahwa berdasarkan pertimbangan sebagaimana dimaksud dalam huruf a, "
+            "perlu menetapkan Peraturan Menteri Keuangan tentang Tata Cara "
+            "Pengelolaan Dana;",
+            "Mengingat :",
+            "1. Undang-Undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+            memutuskan,
+            menetapkan,
+            "Pasal 1",
+        ])
+
+    # --- Kasus 6: MEMUTUSKAN berspasi huruf --------------------------------
+
+    def test_memutuskan_berspasi_tetap_dikenali(self):
+        """Regresi. Bentuk berspasi huruf lazim dipakai naskah peraturan.
+
+        Pencocokan lama menuntut teksnya persis "MEMUTUSKAN", sehingga pada
+        naskah berspasi F1-002 dan F1-012 sama-sama memilih diam dan kesalahan
+        nyata di klausul Menetapkan lewat tanpa ada yang memberi tahu.
+        """
+        salah = (
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA "
+            "PENGELOLAAN DANA DAERAH"
+        )
+        hasil = {}
+        for label in ["MEMUTUSKAN:", "MEMUTUSKAN :", "M E M U T U S K A N :"]:
+            doc = self._naskah_pmk(label, salah)
+            temuan = jalankan_semua(doc, JenisDokumen.PMK, ["F1-002", "F1-012"])
+            hasil[label] = sorted(t.aturan_id for t in temuan)
+
+        assert hasil["M E M U T U S K A N :"] == hasil["MEMUTUSKAN:"]
+        assert hasil["MEMUTUSKAN:"] == ["F1-002", "F1-012"]
+
+    # --- Kasus 7: F1-012 mencopot nama resmi peraturan lain ----------------
+
+    def test_f1_012_TIDAK_menyentuh_judul_peraturan_yang_dirujuk(self):
+        """Regresi. Judul perubahan memuat nama resmi peraturan LAIN.
+
+        Butir 39 mengatur jenis dan nama peraturan INI, yang berhenti di kata
+        TENTANG. Sesudahnya yang ada judul, dan judul boleh mengutip nama resmi
+        peraturan lain berikut frasa Republik Indonesia-nya. Tanpa pembatasan
+        itu alat mengusulkan mengubah nama resmi dokumen orang.
+        """
+        doc = self._naskah_pmk(
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG PERUBAHAN ATAS "
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA NOMOR 5 TAHUN 2023 "
+            "TENTANG TATA CARA PENAGIHAN.",
+        )
+        temuan = [
+            t for t in cek_judul_menetapkan(doc) if "Republik Indonesia" in t.catatan
+        ]
+        assert temuan == []
+
+    def test_f1_012_jenis_sendiri_tetap_ditandai(self):
+        """Penjaga sisi lain: yang berada di posisi JENIS tetap harus ketemu."""
+        doc = self._naskah_pmk(
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA "
+            "TENTANG TATA CARA PENGELOLAAN DANA.",
+        )
+        temuan = [
+            t for t in cek_judul_menetapkan(doc) if "Republik Indonesia" in t.catatan
+        ]
+        assert len(temuan) == 1
+        assert temuan[0].usulan_rumusan == "MENTERI KEUANGAN"
+
+    # --- Kasus 8: F1-008 menandai ujung paragraf, bukan ujung butir --------
+
+    def test_f1_008_titik_koma_ditandai_di_ujung_butirnya_sendiri(self):
+        """Regresi. Satu paragraf memuat dua butir, keduanya kurang titik koma.
+
+        Dulu keduanya ditandai di karakter terakhir PARAGRAF: butir a mendarat
+        di tempat milik butir b, dan dua temuan berakhir dengan rentang yang
+        sama persis — dua content control dan dua komentar di satu karakter.
+        """
+        doc = _buat_dokumen([
+            "Menimbang : a. bahwa ketentuan Pasal 5 ayat (2) perlu dilaksanakan. "
+            "b. bahwa berdasarkan pertimbangan tersebut perlu ditetapkan aturan.",
+            "Mengingat :",
+        ])
+        temuan = [
+            t
+            for t in cek_butir_menimbang(doc, JenisDokumen.PMK)
+            if "titik koma" in t.catatan
+        ]
+        assert len(temuan) == 2
+        letak = sorted(t.lokasi.offset_mulai for t in temuan)
+        assert letak[0] != letak[1], "dua butir tidak boleh berbagi satu letak"
+        for t in temuan:
+            assert t.lokasi.teks_asli == "."
+
+    def test_f1_008_butir_terpotong_antarparagraf_MEMILIH_DIAM(self):
+        """Ujung butir yang tidak bisa dipastikan tidak boleh ditebak."""
+        doc = _buat_dokumen([
+            "Menimbang :",
+            "a. bahwa dalam rangka melaksanakan ketentuan Pasal 5 ayat (2)",
+            "peraturan perundang-undangan yang berlaku pada saat ini",
+            "Mengingat :",
+        ])
+        temuan = [
+            t
+            for t in cek_butir_menimbang(doc, JenisDokumen.PMK)
+            if "titik koma" in t.catatan
+        ]
+        assert temuan == []
+
+    # --- Kasus 9: F1-002 jalur cadangan menyorot satu paragraf penuh -------
+
+    def test_f1_002_kekurangan_kata_tidak_menyorot_paragraf(self):
+        """Regresi. Judul Menetapkan KEKURANGAN kata dari judul pembuka.
+
+        Tidak ada frasa beda yang bisa ditunjuk di naskah, karena yang salah
+        justru kata yang TIDAK ADA. Cadangan lama menyorot satu paragraf penuh
+        berikut label Menetapkan yang bukan bagian judul — melanggar bagian 6.5
+        dan CLAUDE.md butir 6. Sekarang temuannya tanpa lokasi, ditampilkan
+        panel sebagai peringatan dokumen.
+        """
+        doc = self._naskah_pmk(
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA.",
+        )
+        temuan = cek_judul_konsisten(doc, JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.teks_asli == ""
+        assert temuan[0].lokasi.panjang == 0
+        assert "PENGELOLAAN DANA" in temuan[0].catatan
+
+    def test_f1_002_tanpa_lokasi_lolos_saringan_jalankan_semua(self):
+        """Temuan tanpa lokasi F1-002 tidak boleh ikut terbuang.
+
+        Saringan di jalankan_semua() membuang temuan ber-teks_asli kosong
+        karena dulu itu selalu tanda cacat. F1-002 dan F1-003 dikecualikan.
+        """
+        doc = self._naskah_pmk(
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA.",
+        )
+        temuan = jalankan_semua(doc, JenisDokumen.PMK, ["F1-002"])
+        assert len(temuan) == 1
+        assert temuan[0].aturan_id == "F1-002"
+        assert temuan[0].lokasi.teks_asli == ""
+
+    # --- Kasus 10: temuan kembar dari aturan yang sama ---------------------
+
+    def test_aturan_sama_tidak_boleh_punya_dua_tanda_di_satu_rentang(self):
+        """Jaring pengaman lapis terakhir, berlaku untuk seluruh aturan."""
+        doc = self._naskah_pmk(
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA "
+            "PENGELOLAAN DANA.",
+        )
+        temuan = jalankan_semua(doc, JenisDokumen.PMK)
+        terlihat = set()
+        for t in temuan:
+            if not t.lokasi.teks_asli.strip():
+                continue
+            kunci = (
+                t.aturan_id,
+                t.lokasi.paragraf_index,
+                t.lokasi.offset_mulai,
+                t.lokasi.panjang,
+            )
+            assert kunci not in terlihat, f"tanda kembar: {kunci}"
+            terlihat.add(kunci)
+
+    # --- Kasus 11: normalisasi judul yang tidak simetris -------------------
+
+    def test_f1_002_tidak_menuduh_beda_kalau_yang_beda_cuma_titiknya(self):
+        """Regresi. Judul pembuka diakhiri titik, isinya sama persis.
+
+        Sisi Menetapkan membuang titik akhir, sisi pembuka tidak — sehingga
+        naskah yang judul pembukanya diakhiri titik (kesalahan yang SUDAH
+        dilaporkan F1-006) membuat F1-002 ikut melapor "judulnya berbeda",
+        padahal kata per katanya sama persis. Penelaah melihat dua tanda,
+        salah satunya menuduh perbedaan yang tidak ada.
+
+        Pembagian tugasnya: F1-006 mengurusi tanda bacanya, F1-002 isinya.
+        """
+        doc = _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 12 TAHUN 2026",
+            "TENTANG",
+            "TATA CARA PENYUSUNAN STANDAR BIAYA MASUKAN.",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "Menimbang :",
+            "a. bahwa sesuatu hal perlu diatur lebih lanjut dalam peraturan ini;",
+            "Mengingat :",
+            "1. Undang-Undang Nomor 17 Tahun 2003 tentang Keuangan Negara;",
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA "
+            "PENYUSUNAN STANDAR BIAYA MASUKAN.",
+            "Pasal 1",
+        ])
+        assert cek_judul_konsisten(doc, JenisDokumen.PMK) == []
+
+        # Penjaga sisi sebaliknya: perbedaan ISI tetap harus ketemu.
+        doc_beda = list(doc)
+        doc_beda[11] = ParagrafInput(
+            index=11,
+            teks="Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA "
+            "PENYUSUNAN STANDAR BIAYA KELUARAN.",
+        )
+        temuan = cek_judul_konsisten(doc_beda, JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.teks_asli == "KELUARAN"

@@ -1,6 +1,6 @@
 # Dokumentasi Drafter Analiser
 
-Tiga berkas di sini, plus `CLAUDE.md` di akar. Kalau ada yang bertentangan,
+Empat berkas di sini, plus `CLAUDE.md` di akar. Kalau ada yang bertentangan,
 **`fase1 drafter.md` yang berlaku** — dokumen itu disamakan dengan kode setiap
 kali kode berubah.
 
@@ -9,6 +9,7 @@ kali kode berubah.
 | [`project-brief.md`](project-brief.md) | **Kenapa** alat ini dibangun, untuk siapa, dan cara penelaah bekerja sebenarnya. Bukan spesifikasi | Sekali, untuk memahami konteksnya |
 | [`fase1 drafter.md`](fase1%20drafter.md) | Seluruh rancangan Fase 1: apa yang dibangun, cara temuan ditampilkan, kontrak data, aturan untuk agen coding, definisi selesai | Sebelum mengubah apa pun |
 | [`panduan-officejs.md`](panduan-officejs.md) | API Word yang sudah diverifikasi ke `index.d.ts`, dan jebakan yang sudah terbukti | Sebelum memakai API Word yang belum pernah dipakai |
+| [`panduan-vibe.md`](panduan-vibe.md) | Ringkasan konvensi kode. **Isinya sudah ada seluruhnya di `CLAUDE.md`** — kandidat dihapus, lihat catatan di bawah | Tidak perlu |
 | [`../CLAUDE.md`](../CLAUDE.md) | Aturan kerja repo yang tidak boleh dilanggar | Otomatis dibaca Claude Code |
 
 ## Urutan baca
@@ -18,9 +19,18 @@ kali kode berubah.
 1. `fase1 drafter.md` bagian 1–4 — apa yang dibangun dan apa yang **tidak**.
 2. Bagian 6 — cara temuan ditampilkan di dokumen. Bagian terpanjang dan
    terpenting; memuat riwayat tiga rancangan yang gugur beserta buktinya.
-3. Bagian 11 — kontrak data antara backend dan task pane.
-4. Bagian 14 — aturan yang mengikat agen coding.
-5. Bagian 13 dan 15 — apa yang sudah selesai dan apa yang belum.
+3. **Bagian 7 dan 8 — susunan berkas beranotasi dan alur lengkapnya**, dari
+   tombol Analisis ditekan sampai tanda muncul di naskah. Bagian 8 juga
+   menjelaskan **bagaimana** kesalahan ditemukan: jangkar yang dicari lebih
+   dulu, sebelas aturan yang berjalan, dan daftar keadaan ketika aturan
+   memilih diam. Baca ini kalau ingin menelusuri kode, bukan merancang.
+4. Bagian 11 — kontrak data antara backend dan task pane.
+5. Bagian 14 — aturan yang mengikat agen coding.
+6. Bagian 13 dan 15 — apa yang sudah selesai dan apa yang belum.
+7. **Bagian 16 — cara tahu Fase 1 aman dan selesai.** Daftar periksa yang bisa
+   dijalankan sendiri: empat perintah yang wajib hijau, cara menguji aturan
+   terhadap naskah nyata tanpa membuka Word, tiga belas hal yang wajib
+   dibuktikan di dalam Word, dan syarat sebelum Fase 2 boleh dimulai.
 
 ## Berkas yang sudah dihapus, dan kenapa
 
@@ -34,7 +44,7 @@ sewaktu-waktu diperlukan.
 | `rancangan-analisis-terima-ekspor.md` | Sama, dan rancangan ekspornya diringkas di bagian 6.7 sebagai dua pilihan yang belum diputuskan |
 | `konteks-hukum.md` | Seluruhnya kerangka kosong berisi `<!-- Isi akan ditambahkan kemudian -->`. Isinya ada di `pengetahuan-pmk-kmk.md` di ruang pengetahuan proyek |
 | `konteks-sistem-existing.md` | Sama, kerangka kosong. Isinya ada di `pemahaman-jdih-law-analyzer.md` |
-| `panduan-vibe.md` | Dipindahkan ke `CLAUDE.md`, supaya agen coding membacanya otomatis |
+| `panduan-vibe.md` | Isinya dipindahkan ke `CLAUDE.md` supaya agen coding membacanya otomatis — **tetapi berkasnya ternyata masih ada di disk.** Ketahuan 18 Sep 2026. Selama masih ada, ia salinan kedua dari konvensi yang sama, yaitu persis pabrik cacat yang jadi alasan `kontrak-data.md` dihapus. Hapus, atau buat isinya menunjuk ke `CLAUDE.md` saja |
 
 ## Cara memakai dokumentasi ini dengan agen coding
 

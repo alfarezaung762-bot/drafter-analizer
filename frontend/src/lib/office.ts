@@ -87,11 +87,33 @@ export function checkApiSupport(version: string, nama = "WordApi"): boolean {
  * backend/app/rules/format_baku.py. Membacanya berarti satu putaran sync
  * tambahan atas ratusan paragraf untuk data yang tidak dipakai siapa pun.
  */
+/**
+ * Apakah cakupan "Bagian Terpilih" bisa dipakai di Word ini.
+ *
+ * Mode itu bersandar pada `Range.intersectWithOrNullObject()`, yang sudah
+ * diverifikasi ke index.d.ts sebagai **WordApi 1.3** — sementara seluruh
+ * penandaan alat ini sengaja dijaga di 1.1 dan manifest mendeklarasikan 1.1.
+ * Tanpa pemeriksaan ini, menekan Analisis dalam mode terpilih di Word yang
+ * tidak punya 1.3 cuma menghasilkan "Gagal menjalankan analisis" tanpa
+ * penjelasan. Panel memakainya untuk menonaktifkan tombolnya lebih dulu —
+ * itulah jalur cadangan runtime yang diwajibkan CLAUDE.md butir 9.
+ */
+export function cakupanTerpilihTersedia(): boolean {
+  return checkApiSupport("1.3");
+}
+
 export async function readParagraphs(
   scope: "all" | "selection" = "all"
 ): Promise<ParagrafInput[]> {
   if (!isOfficeAvailable()) {
     throw new Error("Office.js tidak tersedia dalam lingkungan ini.");
+  }
+
+  if (scope === "selection" && !cakupanTerpilihTersedia()) {
+    throw new Error(
+      "Word ini belum mendukung cakupan Bagian Terpilih (butuh WordApi 1.3). " +
+        "Pakai Seluruh Naskah."
+    );
   }
 
   return Word.run(async (context) => {
@@ -157,20 +179,47 @@ const TAG_USUL = "DA-USUL-";
 
 /**
  * Format asli tiap rentang sebelum ditimpa, agar Tolak bisa memulihkannya.
- * Kunci = id temuan.
+ * Kunci = NOMOR temuan.
+ *
+ * Kuncinya nomor, bukan id — diubah 18 Sep 2026. Tag content control di naskah
+ * membawa nomor (`DA-ASLI-{nomor}`), jadi itulah satu-satunya jalan yang
+ * tersedia saat tanda ditemukan kembali dari dokumen. Selama kuncinya id,
+ * `bersihkanSemuaTanda()` tidak punya cara menemukan format aslinya dan
+ * terpaksa memaksa semua warna jadi hitam — termasuk warna milik penyusun
+ * pada temuan berblok kuning, yang warna hurufnya tidak pernah disentuh alat.
+ * Nomor unik dalam satu sesi analisis, sama seperti id.
  *
  * Peta ini hanya hidup di memori tab selama panel terbuka. Kalau Word ditutup
- * sebelum temuan diputuskan, warna merah/hijaunya ikut tersimpan di berkas dan
- * add-in tidak lagi tahu warna aslinya — yang bisa dilakukan tinggal
- * mengembalikannya ke hitam. Ini keterbatasan yang sudah disepakati, bukan
- * kelalaian; penelaah wajib memeriksa ulang naskahnya.
+ * sebelum temuan diputuskan, add-in tidak lagi tahu format aslinya — yang bisa
+ * dilakukan tinggal mencabut warna yang persis sama dengan warna milik alat.
+ * Ini keterbatasan yang sudah disepakati, bukan kelalaian; penelaah wajib
+ * memeriksa ulang naskahnya.
  */
 type FormatAsli = {
   color: string | null;
   strikeThrough: boolean | null;
   highlightColor: string | null;
 };
-const formatAsliTemuan = new Map<string, FormatAsli>();
+const formatAsliTemuan = new Map<number, FormatAsli>();
+
+/** Nomor temuan yang tersimpan di dalam sebuah tag `DA-ASLI-12` / `DA-USUL-3`. */
+function nomorDariTag(tag: string | undefined): number | null {
+  const m = /-(\d+)$/.exec(tag ?? "");
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Apakah sebuah warna sama dengan warna yang dipasang alat ini sendiri. */
+function samaDenganWarnaAlat(nilai: string | null, warna: string): boolean {
+  return (nilai ?? "").trim().toUpperCase() === warna.toUpperCase();
+}
+
+/**
+ * Kuning bawaan Word terbaca kembali sebagai `#FFFF00`, bukan sebagai nama
+ * warnanya. Keduanya diperiksa supaya pencabutan tetap mengenai sasaran.
+ */
+const KUNING_TERBACA = ["#FFFF00", "YELLOW"];
 
 /** Panjang aman untuk Word.search() — batas Word sendiri ada di sekitar 255. */
 const AMAN_UNTUK_SEARCH = 200;
@@ -345,6 +394,14 @@ export type HasilPenandaan = {
   pelacakanMati: boolean;
 };
 
+/** Hasil sekali Bersihkan Daftar, untuk dilaporkan ke penelaah. */
+export type HasilPembersihan = {
+  /** Jumlah content control bertag DA-* yang dicabut. */
+  tanda: number;
+  /** Jumlah komentar milik alat yang ikut dihapus. */
+  komentar: number;
+};
+
 const HASIL_KOSONG: HasilPenandaan = {
   dicoretMerah: 0,
   diblokKuning: 0,
@@ -440,11 +497,55 @@ export async function tandaiSemuaTemuan(
         .filter((t) => !ketemu.has(t.id))
         .map((t) => t.id);
 
+      // Dua tanda tidak boleh berbagi atau bersarang di satu rentang.
+      //
+      // Ditambahkan 18 Sep 2026. Dua aturan yang berbeda kadang berimpit —
+      // F1-002 mempersoalkan kata terakhir judul Menetapkan karena berbeda dari
+      // judul pembuka, F1-012 mempersoalkan kata yang sama karena titik
+      // penutupnya hilang; F1-004 mempersoalkan bunyi satu butir Menimbang,
+      // F1-008 mempersoalkan karakter terakhir butir yang sama. Semuanya benar.
+      // Tapi kalau dua-duanya digambar, Word menyarangkan content control yang
+      // satu di dalam yang lain, dua komentar menumpuk di satu tempat, dan
+      // menolak yang luar ikut menghapus tanda yang di dalam tanpa ada yang
+      // memberi tahu panel.
+      //
+      // Pemenangnya ditentukan menurut URUTAN DOKUMEN, bukan urutan
+      // penggambaran. Penggambaran sengaja berjalan dari bawah ke atas supaya
+      // penyisipan usulan tidak menggeser rentang di bawahnya; kalau pemenang
+      // ditentukan di situ juga, temuan yang lebih bawah dan lebih sempit selalu
+      // mengalahkan temuan yang lebih atas dan lebih luas — padahal yang luas
+      // justru yang alasannya lebih lengkap.
+      //
+      // Yang kalah TIDAK digambar dan dilaporkan lewat idTidakDitandai, supaya
+      // kartunya di panel memuat alasannya sendiri. Temuannya tidak dibuang —
+      // menyembunyikan temuan yang benar lebih buruk daripada satu tanda yang
+      // tidak tergambar.
+      const bolehDigambar = new Set<string>();
+      const terpakai = new Map<number, [number, number][]>();
+      for (const { t } of [...antrean].sort(
+        (a, b) =>
+          a.t.lokasi.paragraf_index - b.t.lokasi.paragraf_index ||
+          a.t.lokasi.offset_mulai - b.t.lokasi.offset_mulai
+      )) {
+        const mulai = t.lokasi.offset_mulai;
+        const akhir = mulai + t.lokasi.panjang;
+        const sudah = terpakai.get(t.lokasi.paragraf_index) ?? [];
+        if (sudah.some(([m, a]) => mulai < a && m < akhir)) continue;
+        sudah.push([mulai, akhir]);
+        terpakai.set(t.lokasi.paragraf_index, sudah);
+        bolehDigambar.add(t.id);
+      }
+
       for (const { t, i } of antrean) {
+        if (!bolehDigambar.has(t.id)) {
+          hasil.idTidakDitandai.push(t.id);
+          continue;
+        }
+
         const r = rentang[i] as Word.Range;
         const f = fonts[i] as Word.Font;
 
-        formatAsliTemuan.set(t.id, {
+        formatAsliTemuan.set(t.nomor, {
           color: f.color ?? null,
           strikeThrough: f.strikeThrough ?? null,
           highlightColor: f.highlightColor ?? null,
@@ -554,7 +655,7 @@ export async function tolakTemuan(temuan: Temuan): Promise<boolean> {
 
       // Teks asli: kembalikan formatnya, lalu bungkusnya saja yang dilepas —
       // keepContent = true, supaya naskahnya tidak ikut terhapus.
-      const asli = formatAsliTemuan.get(temuan.id);
+      const asli = formatAsliTemuan.get(temuan.nomor);
       ccAsli.items.forEach((cc) => {
         // ContentControl.font, bukan getRange().font: yang pertama WordApi 1.1,
         // yang kedua 1.3. Seluruh penandaan alat ini sengaja dijaga di 1.1.
@@ -568,7 +669,7 @@ export async function tolakTemuan(temuan: Temuan): Promise<boolean> {
       await context.sync();
 
       const adaTanda = ccUsul.items.length > 0 || ccAsli.items.length > 0;
-      formatAsliTemuan.delete(temuan.id);
+      formatAsliTemuan.delete(temuan.nomor);
 
       await hapusKomentarTemuanDi(context, temuan);
       await kembalikanPelacakan(context, modeAwal);
@@ -624,39 +725,120 @@ async function hapusKomentarTemuanDi(
  * Membersihkan SELURUH tanda milik alat dari naskah — jalan keluar darurat
  * ketika daftar panel terlanjur kacau.
  *
- * Yang dihapus hanya yang bertag DA-*. Sorotan dan warna milik penyusun
- * sendiri tidak disentuh: sebagian penyusun memakai warna untuk menandai
- * ketentuan baru, dan menghapusnya berarti membuang informasi milik mereka.
+ * Yang dihapus hanya yang bertag DA-* berikut komentar milik alat. Sorotan dan
+ * warna milik penyusun sendiri tidak disentuh: sebagian penyusun memakai warna
+ * untuk menandai ketentuan baru, dan menghapusnya berarti membuang informasi
+ * milik mereka.
  */
-export async function bersihkanSemuaTanda(): Promise<number> {
-  if (!isOfficeAvailable()) return 0;
+export async function bersihkanSemuaTanda(): Promise<HasilPembersihan> {
+  if (!isOfficeAvailable()) return { tanda: 0, komentar: 0 };
+
+  const hasil: HasilPembersihan = { tanda: 0, komentar: 0 };
 
   try {
-    return await Word.run(async (context) => {
+    await Word.run(async (context) => {
       const { modeAwal } = await matikanPelacakan(context);
       const kontrol = context.document.body.contentControls;
-      kontrol.load("items/tag");
+      // Format tiap rentang ikut dibaca. Tanpa itu pemulihan hanya bisa
+      // menebak, dan menebak di sini berarti menimpa warna milik penyusun.
+      kontrol.load(
+        "items/tag,items/font/color,items/font/strikeThrough," +
+          "items/font/highlightColor"
+      );
       await context.sync();
 
       const usul = kontrol.items.filter((cc) => cc.tag?.startsWith(TAG_USUL));
       const asli = kontrol.items.filter((cc) => cc.tag?.startsWith(TAG_ASLI));
 
       usul.forEach((cc) => cc.delete(false));
+
       asli.forEach((cc) => {
         const f = cc.font;
-        f.color = WARNA_NETRAL;
-        f.strikeThrough = false;
-        f.highlightColor = null as unknown as string;
+        const tersimpan = formatAsliTemuan.get(nomorDariTag(cc.tag) ?? -1);
+
+        if (tersimpan) {
+          // Jalur normal: sesi yang sama, formatnya masih diingat. Pulihkan
+          // persis seperti sebelum ditandai.
+          f.color = tersimpan.color ?? WARNA_NETRAL;
+          f.strikeThrough = tersimpan.strikeThrough ?? false;
+          f.highlightColor = (tersimpan.highlightColor ??
+            null) as unknown as string;
+        } else {
+          // Word sempat ditutup, formatnya tidak lagi diingat.
+          //
+          // DIPERBAIKI 18 Sep 2026. Dulu baris ini memaksa SEMUA warna jadi
+          // hitam. Pada temuan berblok kuning alat tidak pernah menyentuh
+          // warna hurufnya sama sekali, jadi memaksanya hitam berarti membuang
+          // warna milik penyusun — sebagian penyusun mewarnai teks untuk
+          // menandai ketentuan baru. Docstring fungsi ini menjanjikan
+          // kebalikannya, dan janji itu yang sekarang ditepati.
+          //
+          // Yang dicabut hanya yang PERSIS sama dengan warna milik alat.
+          // Warna lain dibiarkan apa adanya.
+          if (samaDenganWarnaAlat(cc.font.color, WARNA_SALAH)) {
+            f.color = WARNA_NETRAL;
+            f.strikeThrough = false;
+          }
+          if (
+            KUNING_TERBACA.includes(
+              (cc.font.highlightColor ?? "").trim().toUpperCase()
+            )
+          ) {
+            f.highlightColor = null as unknown as string;
+          }
+        }
+
         cc.delete(true);
       });
       await context.sync();
 
+      hasil.tanda = usul.length + asli.length;
       formatAsliTemuan.clear();
+
+      hasil.komentar = await hapusSemuaKomentarAlat(context);
+
       await kembalikanPelacakan(context, modeAwal);
-      return usul.length + asli.length;
     });
   } catch (err) {
     console.warn("Gagal membersihkan tanda:", err);
+  }
+
+  return hasil;
+}
+
+/**
+ * Menghapus SELURUH komentar milik alat dari naskah.
+ *
+ * Ditambahkan 18 Sep 2026. Sebelumnya Bersihkan Daftar hanya mencabut content
+ * control, komentarnya ditinggal. Itu membuat pengaman analisis-berulang bocor:
+ * sesudah Bersihkan Daftar penelaah boleh menganalisis lagi, komentar lama
+ * masih ada, dan komentar baru memakai nomor (T1), (T2) yang sama persis —
+ * yaitu keadaan "18 komentar untuk 5 temuan" yang justru jadi alasan pengaman
+ * itu dipasang.
+ *
+ * Yang dikenali sebagai milik alat: komentar yang isinya DIAKHIRI penanda
+ * `(T<angka>)`. Penanda itu memang selalu di ujung baris kedua, dan mengikatnya
+ * ke ujung membuat komentar penelaah yang kebetulan menyebut "(T3)" di tengah
+ * kalimat tidak ikut terhapus. Jumlahnya dikembalikan supaya panel bisa
+ * menyebutkannya — penelaah berhak tahu persis apa yang dihapus dari naskahnya.
+ */
+async function hapusSemuaKomentarAlat(
+  context: Word.RequestContext
+): Promise<number> {
+  if (!checkApiSupport("1.4")) return 0;
+  try {
+    const komentar = context.document.body.getComments();
+    komentar.load("items/content");
+    await context.sync();
+
+    const milikAlat = komentar.items.filter((k) =>
+      /\(T\d+\)$/.test((k.content ?? "").trim())
+    );
+    milikAlat.forEach((k) => k.delete());
+    if (milikAlat.length > 0) await context.sync();
+    return milikAlat.length;
+  } catch (err) {
+    console.warn("Gagal menghapus komentar alat:", err);
     return 0;
   }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Temuan,
   ParagrafInput,
@@ -15,6 +15,7 @@ import {
   tandaiSemuaTemuan,
   tolakTemuan,
   bersihkanSemuaTanda,
+  cakupanTerpilihTersedia,
 } from "@/lib/office";
 import {
   ATURAN_FASE1,
@@ -30,7 +31,12 @@ const API_BASE =
 // Range.insertContentControl, ContentControlCollection.getByTag. Hanya komentar
 // yang butuh 1.4. Tidak ada lagi ketergantungan pada WordApiDesktop, jadi
 // versinya tidak lagi ditampilkan di diagnostik.
-const API_VERSIONS = ["1.1", "1.4", "1.7", "1.8", "1.9"];
+//
+// 1.3 ditambahkan 18 Sep 2026: cakupan "Bagian Terpilih" memanggil
+// Range.intersectWithOrNullObject() yang ada di himpunan itu. Selama 1.3 tidak
+// ikut ditampilkan, satu-satunya gejala kalau ia tidak tersedia adalah pesan
+// "Gagal menjalankan analisis" tanpa sebab yang bisa ditelusuri penelaah.
+const API_VERSIONS = ["1.1", "1.3", "1.4", "1.7", "1.8", "1.9"];
 
 // Teks contoh untuk pengujian di luar Word (web mode)
 const CONTOH_DRAFT_PMK = `PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA
@@ -58,6 +64,10 @@ export default function TaskpanePage() {
   const [inWord, setInWord] = useState<boolean | null>(null);
   const [apiChecks, setApiChecks] = useState<{ version: string; supported: boolean }[]>([]);
   const [scope, setScope] = useState<"all" | "selection">("all");
+  // Cakupan "Bagian Terpilih" butuh WordApi 1.3 (intersectWithOrNullObject).
+  // Dimulai false dan baru dinyalakan kalau Word-nya benar-benar melaporkan
+  // dukungan — menolak lebih dulu lebih baik daripada gagal di tengah analisis.
+  const [bisaCakupanTerpilih, setBisaCakupanTerpilih] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [temuanList, setTemuanList] = useState<Temuan[]>([]);
   const [paragrafCount, setParagrafCount] = useState<number>(0);
@@ -107,6 +117,7 @@ export default function TaskpanePage() {
       if (!aktif) return;
       setInWord(diDalamWord);
       if (hasilCek.length > 0) setApiChecks(hasilCek);
+      if (diDalamWord) setBisaCakupanTerpilih(cakupanTerpilihTersedia());
     };
 
     if (typeof Office !== "undefined" && Office.onReady) {
@@ -156,8 +167,13 @@ export default function TaskpanePage() {
   // Temuan yang tidak punya tanda di naskah tidak bisa diputuskan — tidak ada
   // apa pun untuk diterima atau ditolak di sana. Memasukkannya ke hitungan ini
   // berarti mengunci tombol Analisis selamanya.
-  const tidakTertandai = (t: Temuan) =>
-    idTidakDitandai.has(t.id) || !t.lokasi.teks_asli.trim();
+  // useCallback supaya identitasnya stabil selama idTidakDitandai tidak
+  // berubah — tanpa itu useMemo di bawah kehilangan satu dependensinya dan
+  // lint melaporkannya.
+  const tidakTertandai = useCallback(
+    (t: Temuan) => idTidakDitandai.has(t.id) || !t.lokasi.teks_asli.trim(),
+    [idTidakDitandai]
+  );
 
   // Temuan yang punya teks untuk ditunjuk — inilah yang jadi kartu.
   const temuanBerlokasi = useMemo(
@@ -178,7 +194,7 @@ export default function TaskpanePage() {
       temuanBerlokasi.some(
         (t) => t.status === "belum_ditinjau" && !tidakTertandai(t)
       ),
-    [temuanBerlokasi, idTidakDitandai]
+    [temuanBerlokasi, tidakTertandai]
   );
 
   // Mengosongkan daftar panel SEKALIGUS mencabut seluruh tanda alat dari
@@ -187,18 +203,22 @@ export default function TaskpanePage() {
   // lagi yang bisa mencabutnya. Yang dicabut hanya yang bertag DA-* — warna
   // dan sorotan milik penyusun sendiri tidak disentuh.
   const handleBersihkanDaftar = async () => {
-    let dicabut = 0;
+    let hasil = { tanda: 0, komentar: 0 };
     if (inWord) {
-      dicabut = await bersihkanSemuaTanda();
+      hasil = await bersihkanSemuaTanda();
     }
     setTemuanList([]);
     setSelectedTemuanId(null);
     setInfoPenandaan(null);
+    // Ikut dikosongkan — tanpa ini, daftar id dari analisis sebelumnya
+    // bertahan dan bisa membuat kartu analisis berikutnya salah dilabeli
+    // "tidak ditandai di naskah".
+    setIdTidakDitandai(new Set());
     setStatusMessage(
       inWord
-        ? `Daftar dikosongkan dan ${dicabut} tanda dicabut dari naskah.` +
-          " Komentar yang sudah terpasang tidak ikut terhapus — hapus lewat" +
-          " panel komentar Word bila perlu."
+        ? `Daftar dikosongkan, ${hasil.tanda} tanda dan ${hasil.komentar}` +
+          " komentar dicabut dari naskah. Warna dan sorotan milik penyusun" +
+          " sendiri tidak disentuh."
         : "Daftar dikosongkan."
     );
   };
@@ -608,8 +628,9 @@ export default function TaskpanePage() {
               </span>
             </div>
             {inWord ? (
-              <div className="grid grid-cols-5 gap-1 text-center font-mono text-[10px]">
-                {/* v… = WordApi, D… = WordApiDesktop */}
+              <div className="grid grid-cols-3 gap-1 text-center font-mono text-[10px]">
+                {/* Seluruhnya WordApi. 1.1 = penandaan, 1.3 = cakupan
+                    terpilih, 1.4 = komentar dan changeTrackingMode. */}
                 {apiChecks.map(({ version, supported }) => (
                   <div
                     key={version}
@@ -723,11 +744,24 @@ export default function TaskpanePage() {
                 >
                   Seluruh Naskah
                 </button>
+                {/* Dinonaktifkan bila Word-nya tidak punya WordApi 1.3.
+                    Cakupan ini memanggil Range.intersectWithOrNullObject(),
+                    dan requirement set didukung tidak sama dengan fitur
+                    diizinkan — jalur cadangannya menolak lebih dulu, bukan
+                    gagal di tengah jalan. */}
                 <button
                   type="button"
+                  disabled={!bisaCakupanTerpilih}
                   onClick={() => setScope("selection")}
+                  title={
+                    bisaCakupanTerpilih
+                      ? undefined
+                      : "Word ini belum mendukung cakupan terpilih (butuh WordApi 1.3)"
+                  }
                   className={`px-2.5 py-1 text-[10px] font-medium rounded-r border-t border-b border-r ${
-                    scope === "selection"
+                    !bisaCakupanTerpilih
+                      ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                      : scope === "selection"
                       ? "bg-blue-600 text-white border-blue-600"
                       : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
                   }`}
@@ -864,7 +898,9 @@ export default function TaskpanePage() {
               cuplikan.length > 70 ? cuplikan.slice(0, 70) + "\u2026" : cuplikan;
             // Temuan tanpa tanda di naskah: tidak ada komentar yang bisa dibaca
             // di sana, jadi alasannya HARUS muncul di kartu ini. Tombol
-            // Terima/Tolak disembunyikan \u2014 tidak ada yang bisa diputuskan.
+            // Terima/Tolak TETAP ditampilkan \u2014 kartu yang bentuknya
+            // berubah-ubah membuat daftar sulit dibaca sekilas, dan itu sudah
+            // ditolak penelaah sekali (bagian 6.13).
             const tanpaTanda = tidakTertandai(temuan);
 
             return (
@@ -920,6 +956,18 @@ export default function TaskpanePage() {
                   </span>
                   &ldquo;{ringkas}&rdquo;
                 </div>
+
+                {/* Alasan HANYA muncul di kartu temuan yang tidak tertandai.
+                    Bagi temuan itu tidak ada komentar di naskah yang bisa
+                    dibaca, jadi kalau kartunya juga bisu penelaah cuma melihat
+                    cuplikan tanpa tahu apa yang dipersoalkan — persis kartu
+                    hampa yang dilaporkan pada PMK 119. Temuan yang tertandai
+                    tetap tidak mengulang penjelasan komentarnya (bagian 6.9). */}
+                {tanpaTanda && (
+                  <div className="text-[10px] text-slate-700 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 leading-snug">
+                    {temuan.catatan}
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between gap-1">
                   <button

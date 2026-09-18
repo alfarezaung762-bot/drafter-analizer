@@ -48,6 +48,20 @@ from app.rules.rujukan_kmk527 import ambil_rujukan
 # Alasan lengkapnya tetap di komentar, bukan di sorotan.
 _BATAS_PANJANG_TANDA = 120
 
+# Aturan yang BOLEH menghasilkan temuan tanpa lokasi di naskah.
+#
+# Temuan tanpa lokasi tidak ditandai, tidak diberi komentar, dan tidak bisa
+# diterima atau ditolak — panel menampilkannya sebagai peringatan dokumen
+# sebaris (bagian 6.13). Selain kedua aturan ini, temuan ber-`teks_asli` kosong
+# dianggap cacat dan dibuang `jalankan_semua()`.
+#
+#   F1-003 — ketiadaan sebuah bagian wajib; tidak ada teks untuk ditunjuk.
+#   F1-004 — (tidak termasuk) selalu punya butir untuk ditunjuk.
+#   F1-002 — judul Menetapkan yang KEKURANGAN kata. Yang salah justru kata yang
+#            tidak ada di sana. Ditambahkan 18 Sep 2026 menggantikan cadangan
+#            lama yang menyorot satu paragraf penuh.
+_BOLEH_TANPA_LOKASI = {"F1-002", "F1-003"}
+
 
 def _potong_di_batas_kata(teks: str, batas: int) -> int:
     """Panjang potongan teks yang <= batas dan berakhir di batas kata."""
@@ -300,6 +314,35 @@ _BATAS_KATA_JUDUL_MENETAPKAN = 60
 # lalu pencarian berlanjut sampai menemukan "menetapkan:" di batang tubuh.
 _AWAL_MENETAPKAN = re.compile(r"^Menetapkan\b\s*:?", re.IGNORECASE)
 
+# Penanda "MEMUTUSKAN:", termasuk bentuk BERSPASI HURUF.
+#
+# DIPERBAIKI 18 Sep 2026. Pencocokan lama menuntut teksnya persis "MEMUTUSKAN",
+# padahal naskah peraturan lazim menuliskannya renggang — "M E M U T U S K A N :"
+# — supaya tampak lapang di halaman. Pada naskah seperti itu penanda ini tidak
+# ketemu, dan SELURUH aturan yang bergantung padanya (F1-002, F1-011, F1-012)
+# memilih diam tanpa memberi tahu siapa pun: kesalahan yang nyata di klausul
+# Menetapkan lewat begitu saja.
+#
+# Yang dicocokkan tetap satu paragraf utuh berisi kata itu saja, jadi kata
+# "memutuskan" di tengah kalimat tidak ikut kena.
+_POLA_MEMUTUSKAN = re.compile(
+    r"^M\s*E\s*M\s*U\s*T\s*U\s*S\s*K\s*A\s*N\s*:?$", re.IGNORECASE
+)
+
+
+def _cari_index_memutuskan(paragraf: list[ParagrafInput]) -> Optional[int]:
+    """Indeks paragraf "MEMUTUSKAN:", atau None kalau tidak ada.
+
+    Satu-satunya tempat penanda ini dikenali. Aturan yang membutuhkannya wajib
+    lewat sini, supaya bentuk berspasi huruf tidak perlu diingat di banyak
+    tempat — dan supaya tidak ada aturan yang diam-diam memakai pencocokan
+    yang lebih sempit.
+    """
+    for i, p in enumerate(paragraf):
+        if _POLA_MEMUTUSKAN.match(_trim(p.teks)):
+            return i
+    return None
+
 
 def _ekstrak_judul_menetapkan(paragraf: list[ParagrafInput]) -> Optional[dict]:
     """Ekstrak judul dari bagian Menetapkan.
@@ -332,11 +375,7 @@ def _ekstrak_judul_menetapkan(paragraf: list[ParagrafInput]) -> Optional[dict]:
     # "MEMUTUSKAN:" dan SEBELUM batang tubuh (BAB/Pasal/diktum). Jendela itulah
     # yang dipakai sekarang, ditambah jangkar di awal paragraf. Menetapkan di
     # luar jendela itu bukan klausul Menetapkan, titik.
-    memutuskan_idx = None
-    for i, p in enumerate(paragraf):
-        if _trim(p.teks).upper().rstrip(":").strip() == "MEMUTUSKAN":
-            memutuskan_idx = i
-            break
+    memutuskan_idx = _cari_index_memutuskan(paragraf)
 
     if memutuskan_idx is None:
         # Tanpa MEMUTUSKAN, tidak ada cara memastikan mana klausul Menetapkan.
@@ -421,9 +460,35 @@ def _ekstrak_judul_menetapkan(paragraf: list[ParagrafInput]) -> Optional[dict]:
     }
 
 
+# Tanda baca penutup yang dibuang dari KEDUA judul sebelum dibandingkan.
+#
+# DITAMBAHKAN 18 Sep 2026 — memperbaiki salah tandai yang terbukti.
+#
+# Normalisasinya dulu tidak simetris: `_ekstrak_judul_menetapkan()` membuang
+# titik di akhir (`rstrip(".")`), sedangkan judul pembuka dibandingkan apa
+# adanya. Akibatnya naskah yang judul pembukanya diakhiri titik — kesalahan
+# yang SUDAH dilaporkan F1-006 — membuat F1-002 ikut melapor "judulnya
+# berbeda", padahal kata per katanya sama persis. Penelaah melihat dua tanda
+# di dua tempat, salah satunya menuduh perbedaan yang tidak ada.
+#
+# Pembagian tugasnya sekarang tegas: F1-006 dan F1-012 mengurusi TANDA BACA
+# penutupnya, F1-002 mengurusi ISI judulnya. Tidak saling menuduh.
+_TANDA_BACA_PENUTUP = ".,;:"
+
+
+def _samakan_untuk_banding(judul: str) -> str:
+    """Bentuk judul yang dipakai membandingkan dua sisi. Simetris untuk keduanya."""
+    return _trim(judul).upper().rstrip(_TANDA_BACA_PENUTUP).strip()
+
+
 def _normalisasi_judul_pembuka(judul: str) -> str:
-    """Normalisasi judul pembuka untuk perbandingan."""
-    return _trim(judul).upper()
+    """Normalisasi judul pembuka untuk perbandingan.
+
+    Dipertahankan sebagai nama tersendiri supaya jelas sisi mana yang sedang
+    dinormalkan, tetapi isinya kini sama persis dengan sisi Menetapkan —
+    lihat `_samakan_untuk_banding()`.
+    """
+    return _samakan_untuk_banding(judul)
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +702,7 @@ def cek_judul_konsisten(
         return []
 
     judul_pembuka = _normalisasi_judul_pembuka(info_pembuka["judul"])
-    judul_menetapkan = _trim(info_menetapkan["judul"]).upper()
+    judul_menetapkan = _samakan_untuk_banding(info_menetapkan["judul"])
 
     if judul_pembuka == judul_menetapkan:
         return []
@@ -704,24 +769,40 @@ def cek_judul_konsisten(
         return temuan
 
     # Cadangan: tidak ada satu pun frasa beda yang bisa ditemukan letaknya \u2014
-    # entah karena yang salah justru ada yang HILANG, entah karena frasanya
-    # terpotong antarparagraf. Tandai paragraf Menetapkan, seperti dulu, tapi
-    # sebut sebabnya di catatan supaya penelaah tahu kenapa sorotannya lebar.
-    idx = info_menetapkan["paragraf_indeks"][0]
-    p = paragraf[idx]
+    # entah karena yang salah justru ada yang HILANG dari Menetapkan, entah
+    # karena frasanya terpotong antarparagraf.
+    #
+    # DIPERBAIKI 18 Sep 2026. Cadangan lama menandai SATU PARAGRAF PENUH
+    # (`offset_mulai=0, panjang=len(p.teks.strip())`), termasuk label
+    # "Menetapkan : " yang bukan bagian judul sama sekali. Itu melanggar
+    # kaidah yang ditetapkan sendiri di bagian 6.5 dan CLAUDE.md butir 6:
+    # temuan yang rentang presisinya tidak ketemu TIDAK ditandai sama sekali,
+    # bukan diperlebar ke satu paragraf. Pelanggaran aturan itu pernah terjadi
+    # sekali di proyek ini dan berakhir menimpa naskah.
+    #
+    # Gantinya, temuannya dibuat TANPA LOKASI \u2014 sama seperti F1-003. Panel
+    # menampilkannya sebagai peringatan dokumen sebaris (bagian 6.13): tidak
+    # ada yang disorot di naskah, tidak ada komentar yang dipasang, dan tidak
+    # ada tombol keputusan. Informasinya utuh, naskahnya tidak disentuh.
     tambahan = (
         f" Bagian yang tidak ada di Menetapkan: \"{'; '.join(kata_hilang)}\"."
         if kata_hilang
         else ""
     )
+    idx = info_menetapkan["paragraf_indeks"][0]
     return [
         _buat_temuan(
             aturan_id="F1-002",
             jenis_tanda=JenisTanda.CATATAN,
-            paragraf=p,
+            paragraf=paragraf[idx],
             offset_mulai=0,
-            panjang=len(p.teks.strip()),
-            catatan=catatan_dasar + tambahan,
+            panjang=0,
+            catatan=(
+                catatan_dasar
+                + tambahan
+                + " Letak persisnya tidak bisa ditunjuk di naskah, jadi tidak"
+                " ada yang ditandai \u2014 periksa klausul Menetapkan sendiri."
+            ),
         )
     ]
 
@@ -975,7 +1056,13 @@ def _ekstrak_rentang_mengingat(paragraf: list[ParagrafInput]) -> tuple[int, int]
     akhir_idx = len(paragraf)
     for i in range(mulai_idx + 1, len(paragraf)):
         teks = _trim(paragraf[i].teks)
-        if re.match(r"^(MEMUTUSKAN|Menetapkan|BAB\s|Pasal\s)", teks, re.IGNORECASE):
+        # Bentuk berspasi "M E M U T U S K A N :" ikut menghentikan, lewat
+        # _POLA_MEMUTUSKAN. Tanpa itu, rentang Mengingat bisa membentang jauh
+        # ke batang tubuh dan cek_ejaan menandai rujukan generik yang bukan
+        # dasar hukum — kesalahan yang sudah pernah dilaporkan penelaah.
+        if _POLA_MEMUTUSKAN.match(teks) or re.match(
+            r"^(Menetapkan|BAB\s|Pasal\s)", teks, re.IGNORECASE
+        ):
             akhir_idx = i
             break
 
@@ -1078,6 +1165,49 @@ def cek_ejaan(paragraf: list[ParagrafInput]) -> list[Temuan]:
 # bisa membuktikan titik duanya hilang, jadi kita tidak menuduh.
 
 
+def _jendela_label(
+    paragraf: list[ParagrafInput], label: str
+) -> Optional[tuple[int, int]]:
+    """Rentang paragraf [mulai, akhir) tempat sebuah label bagian boleh dicari.
+
+    DITAMBAHKAN 18 Sep 2026 — memperbaiki salah tandai yang terbukti.
+
+    Tanpa jendela, `_cek_label_bagian()` menyapu SELURUH dokumen mencari
+    paragraf yang diawali labelnya. Pada KMK bertabel, "KESATU" dan isi
+    diktumnya jatuh di paragraf berbeda, sehingga isi diktum berbunyi
+    "Menetapkan Pedoman ... sebagaimana tercantum dalam Lampiran ..." —
+    diawali kata "Menetapkan" tanpa titik dua. Aturan lalu menuduh batang
+    tubuh yang sama sekali tidak bersalah.
+
+    Ini persis bug Kasus 3 (bagian 6.10) yang sudah ditutup untuk F1-002,
+    lahir kembali di aturan yang ditambahkan belakangan. Obatnya sama:
+    tiap label punya letak yang pasti menurut KMK 527, dan kata yang sama di
+    luar letak itu adalah kata biasa, bukan label bagian.
+
+        Menimbang (butir 16) — di pembukaan, sebelum MEMUTUSKAN
+        Mengingat (butir 23) — di pembukaan, sebelum MEMUTUSKAN
+        Menetapkan (butir 38) — sesudah MEMUTUSKAN, sebelum batang tubuh
+
+    Tanpa MEMUTUSKAN di dokumen, batas pembukaan tidak bisa dipastikan sama
+    sekali, jadi aturannya MEMILIH DIAM — sejalan dengan
+    `_ekstrak_judul_menetapkan()` yang sudah lebih dulu begitu.
+    """
+    memutuskan_idx = _cari_index_memutuskan(paragraf)
+    if memutuskan_idx is None:
+        return None
+
+    if label.upper() != "MENETAPKAN":
+        return (0, memutuskan_idx)
+
+    akhir = len(paragraf)
+    for i in range(memutuskan_idx + 1, len(paragraf)):
+        teks = _trim(paragraf[i].teks)
+        if teks and _PENGHENTI_MENETAPKAN.match(teks):
+            akhir = i
+            break
+    return (memutuskan_idx + 1, akhir)
+
+
 def _cek_label_bagian(
     paragraf: list[ParagrafInput],
     label: str,
@@ -1087,10 +1217,24 @@ def _cek_label_bagian(
 
     Dipakai bersama oleh F1-007 (Menimbang, butir 16), F1-009 (Mengingat,
     butir 23), dan F1-011 (Menetapkan, butir 38) — ketiganya berbunyi sama.
+
+    Hanya KEMUNCULAN PERTAMA di dalam jendelanya yang diperiksa, lalu fungsi
+    ini berhenti. Sebelum 18 Sep 2026 pemindaian justru BERLANJUT setiap kali
+    labelnya ternyata sudah benar — komentar `break` di bawah menjanjikan
+    "satu label, satu kali periksa" padahal cabang normalnya memakai
+    `continue`. Akibatnya naskah yang memuat kata itu lagi di tempat lain
+    menghasilkan temuan kedua, kadang dengan rentang yang sama persis dengan
+    temuan pertama — dua tanda di satu rentang tidak bisa digambar maupun
+    dicabut sendiri-sendiri di Word.
     """
     temuan: list[Temuan] = []
 
-    for p in paragraf:
+    jendela = _jendela_label(paragraf, label)
+    if jendela is None:
+        return []
+    mulai_jendela, akhir_jendela = jendela
+
+    for p in paragraf[mulai_jendela:akhir_jendela]:
         teks = p.teks.strip()
         if not teks or not teks.upper().startswith(label.upper()):
             continue
@@ -1123,14 +1267,17 @@ def _cek_label_bagian(
             )
 
         # 2. Diakhiri titik dua.
+        #
+        # Ketiga cabang di bawah sama-sama MENGAKHIRI pemeriksaan: labelnya
+        # sudah ketemu, dan kemunculan berikutnya di dokumen bukan label lagi.
         sisa_bersih = sisa.strip()
         if not sisa_bersih:
             # Label berdiri sendiri di paragrafnya. Pada naskah bertabel,
             # titik duanya ada di sel sebelah dan tidak terbaca dari sini.
             # Tidak bisa dibuktikan hilang -> tidak dituduhkan.
-            continue
+            break
         if sisa_bersih.startswith(":"):
-            continue
+            break
 
         # Ada isi sesudah label tapi bukan titik dua -> titik duanya memang
         # tidak ada. Yang ditandai labelnya saja, bukan seluruh baris.
@@ -1254,14 +1401,30 @@ def cek_butir_menimbang(
             )
 
         if not isi.endswith(";"):
-            akhir_isi = len(p.teks.rstrip())
-            if akhir_isi > 0:
+            # Tandanya ditaruh di ujung BUTIR, bukan ujung paragraf.
+            #
+            # DIPERBAIKI 18 Sep 2026. Dulu letaknya diambil dari
+            # `len(p.teks.rstrip()) - 1`, yaitu karakter terakhir PARAGRAF.
+            # Sebuah paragraf Menimbang kerap memuat beberapa butir sekaligus
+            # ("Menimbang : a. ... b. ..."), dan di naskah seperti itu:
+            #   - tanda untuk butir a mendarat di ujung butir b — tempat yang
+            #     sama sekali bukan miliknya;
+            #   - dua butir yang sama-sama kurang titik koma menghasilkan dua
+            #     temuan dengan rentang IDENTIK, yang di Word berarti dua
+            #     content control dan dua komentar di satu karakter.
+            #
+            # Sekarang ujungnya dicari dari isi butirnya sendiri. Kalau butirnya
+            # terpotong antarparagraf, ujungnya tidak bisa dipastikan dari sini
+            # dan aturannya MEMILIH DIAM untuk butir itu — sejalan dengan kaidah
+            # bahwa yang tidak bisa dibuktikan tidak dituduhkan.
+            letak_butir = _cari_frasa(p.teks, isi)
+            if letak_butir is not None and letak_butir[1] > 0:
                 temuan.append(
                     _buat_temuan(
                         aturan_id="F1-008",
                         jenis_tanda=JenisTanda.CATATAN,
                         paragraf=p,
-                        offset_mulai=akhir_isi - 1,
+                        offset_mulai=letak_butir[1] - 1,
                         panjang=1,
                         catatan=(
                             "Tiap pokok pikiran pada Menimbang diakhiri tanda "
@@ -1342,26 +1505,56 @@ def cek_judul_menetapkan(paragraf: list[ParagrafInput]) -> list[Temuan]:
     # INDONESIA" sendirian akan memaksa penggantinya berupa teks kosong —
     # dan Range.insertText tidak bisa menyisipkan teks kosong, sehingga
     # usulannya diam-diam batal terpasang.
+    #
+    # DIBATASI 18 Sep 2026 — memperbaiki salah tandai yang terbukti.
+    #
+    # Yang diatur butir 39 adalah JENIS DAN NAMA peraturan ini sendiri, yang
+    # dicantumkan kembali sesudah kata "Menetapkan". Jenis itu berhenti di kata
+    # "TENTANG"; sesudahnya yang ada JUDUL, dan judul boleh memuat nama resmi
+    # peraturan LAIN — "PERUBAHAN ATAS PERATURAN MENTERI KEUANGAN REPUBLIK
+    # INDONESIA NOMOR 5 TAHUN 2023 TENTANG ...". Sebelum pembatasan ini,
+    # pencarian mengenai seluruh kemunculan, sehingga alat mengusulkan
+    # MENGUBAH NAMA RESMI PERATURAN ORANG LAIN. Itu jenis usulan yang paling
+    # cepat merusak kepercayaan penelaah.
+    #
+    # Tanpa kata "TENTANG" di klausulnya, jenis tidak bisa dipisahkan dari
+    # judul sama sekali — dalam keadaan itu pemeriksaan ini MEMILIH DIAM.
+    batas: Optional[tuple[int, int]] = None  # (indeks paragraf, offset)
     for idx in info["paragraf_indeks"]:
-        p = paragraf[idx]
-        for m in re.finditer(
-            r"MENTERI\s+KEUANGAN\s+REPUBLIK\s+INDONESIA", p.teks, re.IGNORECASE
-        ):
-            asli = m.group(0)
-            temuan.append(
-                _buat_temuan(
-                    aturan_id="F1-012",
-                    jenis_tanda=JenisTanda.PENGGANTIAN,
-                    paragraf=p,
-                    offset_mulai=m.start(),
-                    panjang=len(asli),
-                    catatan=(
-                        "Jenis peraturan pada Menetapkan ditulis tanpa frasa "
-                        "\"Republik Indonesia\"."
-                    ),
-                    usulan_rumusan=asli[: asli.upper().index("REPUBLIK")].rstrip(),
+        m = re.search(r"\bTENTANG\b", paragraf[idx].teks, re.IGNORECASE)
+        if m:
+            batas = (idx, m.start())
+            break
+
+    if batas is not None:
+        idx_batas, off_batas = batas
+        for idx in info["paragraf_indeks"]:
+            if idx > idx_batas:
+                break
+            p = paragraf[idx]
+            akhir_jenis = off_batas if idx == idx_batas else len(p.teks)
+            for m in re.finditer(
+                r"MENTERI\s+KEUANGAN\s+REPUBLIK\s+INDONESIA", p.teks, re.IGNORECASE
+            ):
+                if m.end() > akhir_jenis:
+                    break
+                asli = m.group(0)
+                temuan.append(
+                    _buat_temuan(
+                        aturan_id="F1-012",
+                        jenis_tanda=JenisTanda.PENGGANTIAN,
+                        paragraf=p,
+                        offset_mulai=m.start(),
+                        panjang=len(asli),
+                        catatan=(
+                            "Jenis peraturan pada Menetapkan ditulis tanpa frasa "
+                            "\"Republik Indonesia\"."
+                        ),
+                        usulan_rumusan=asli[
+                            : asli.upper().index("REPUBLIK")
+                        ].rstrip(),
+                    )
                 )
-            )
 
     # 2. Diakhiri tanda baca titik.
     idx_terakhir = None
@@ -1456,18 +1649,57 @@ def jalankan_semua(
     # masing-masing: aturan yang menghasilkan lokasi kosong tetap dianggap cacat
     # dan sudah dibetulkan sendiri-sendiri.
     #
-    # F1-003 DIKECUALIKAN. Ketiadaan sebuah bagian memang tidak punya lokasi di
-    # naskah — tidak ada teks yang bisa ditunjuk kalau teksnya justru tidak ada.
-    # Panel menampilkannya sebagai peringatan dokumen, bukan kartu temuan.
+    # F1-003 dan F1-002 DIKECUALIKAN — keduanya bisa menghasilkan temuan yang
+    # memang tidak punya lokasi:
+    #   F1-003 — ketiadaan sebuah bagian; tidak ada teks yang bisa ditunjuk
+    #            kalau teksnya justru tidak ada.
+    #   F1-002 — judul Menetapkan yang KEKURANGAN kata; yang salah adalah kata
+    #            yang tidak ada di sana, dan menyorot paragrafnya melanggar
+    #            kaidah 6.5. Ditambahkan 18 Sep 2026.
+    # Panel menampilkan keduanya sebagai peringatan dokumen, bukan kartu temuan.
     semua_temuan = [
         t
         for t in semua_temuan
-        if t.aturan_id == "F1-003" or t.lokasi.teks_asli.strip()
+        if t.aturan_id in _BOLEH_TANPA_LOKASI or t.lokasi.teks_asli.strip()
     ]
 
     semua_temuan.sort(
         key=lambda t: (t.lokasi.paragraf_index, t.lokasi.offset_mulai)
     )
+
+    # --- Buang temuan kembar dari aturan yang SAMA ----------------------------
+    #
+    # Ditambahkan 18 Sep 2026, jaring pengaman lapis terakhir. Satu aturan yang
+    # mengeluarkan dua temuan dengan rentang SAMA PERSIS selalu cacat: itu satu
+    # kesalahan yang dilaporkan dua kali, dan di Word berarti dua content
+    # control bersarang, dua komentar di satu tempat, serta menolak yang satu
+    # ikut menghapus tanda yang lain tanpa ada yang memberi tahu panel.
+    #
+    # Ini bukan pengganti perbaikan di aturannya masing-masing — dua penyebab
+    # yang sudah terbukti (pemindaian label yang kebablasan dan letak titik koma
+    # butir Menimbang) sudah dibetulkan di tempatnya sendiri. Jaring ini untuk
+    # aturan yang ditambahkan nanti, supaya tidak perlu mengingat batas ini.
+    #
+    # Temuan dari aturan BERBEDA yang kebetulan berimpit sengaja TIDAK dibuang:
+    # keduanya persoalan yang berlainan, dan membuang salah satunya berarti
+    # menyembunyikan temuan yang benar. Yang menanganinya sisi Word — hanya satu
+    # yang digambar, sisanya dilaporkan sebagai "tidak ditandai di naskah"
+    # lengkap dengan alasannya di kartu panel.
+    unik: list[Temuan] = []
+    terpakai: set[tuple[str, int, int, int]] = set()
+    for t in semua_temuan:
+        kunci = (
+            t.aturan_id,
+            t.lokasi.paragraf_index,
+            t.lokasi.offset_mulai,
+            t.lokasi.panjang,
+        )
+        if t.lokasi.teks_asli.strip() and kunci in terpakai:
+            continue
+        terpakai.add(kunci)
+        unik.append(t)
+    semua_temuan = unik
+
     for urutan, t in enumerate(semua_temuan, start=1):
         t.nomor = urutan
 

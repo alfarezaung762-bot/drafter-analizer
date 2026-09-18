@@ -11,8 +11,11 @@ export type JenisDokumen = "PMK" | "KMK";
 
 /**
  * Cara temuan dipasang di dokumen.
- * - penggantian: perubahan terlacak (Track Changes)
- * - catatan: blok kuning + komentar
+ * - penggantian: teks lama merah dicoret, usulannya hijau di sebelahnya
+ * - catatan: blok kuning, warna huruf tidak disentuh
+ *
+ * Keterangan lama menyebut "perubahan terlacak (Track Changes)". Jalur itu
+ * ditinggalkan 17 Sep 2026 — alasannya di docs/fase1 drafter.md bagian 6.1.
  */
 export type JenisTanda = "penggantian" | "catatan";
 

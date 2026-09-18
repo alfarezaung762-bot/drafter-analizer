@@ -1,6 +1,9 @@
 """Skema data Temuan — kontrak antara backend dan frontend.
 
-Lihat docs/kontrak-data.md untuk penjelasan lengkap tiap field.
+Penjelasan lengkap tiap field ada di docs/fase1 drafter.md bagian 11, dan
+HANYA di sana. Berkas docs/kontrak-data.md yang dulu memuat salinannya sudah
+dihapus 18 Sep 2026: dua berkas yang harus disamakan manual setiap kali berubah
+adalah pabrik cacat, dan keduanya sempat benar-benar berbeda isi.
 
 Revisi 17 Sep 2026:
 - `tingkat_keparahan` DIHAPUS. Dulu dipakai memilih warna sorotan dan menyaring
@@ -33,9 +36,15 @@ class JenisDokumen(str, Enum):
 class JenisTanda(str, Enum):
     """Cara temuan dipasang di dokumen.
 
-    PENGGANTIAN — ada rumusan pengganti yang pasti untuk lokasi.teks_asli,
-                  dipasang sebagai perubahan terlacak (Track Changes).
+    PENGGANTIAN — ada rumusan pengganti yang pasti untuk lokasi.teks_asli.
+                  Teks lama diberi warna merah dan dicoret; usulannya
+                  disisipkan hijau di sebelahnya. Teks lama TIDAK dihapus.
     CATATAN     — tidak ada pengganti tunggal, cukup blok kuning + komentar.
+                  Warna huruf tidak disentuh sama sekali.
+
+    Keterangan lama menyebut PENGGANTIAN dipasang sebagai perubahan terlacak
+    (Track Changes). Jalur itu ditinggalkan 17 Sep 2026 karena warna revisinya
+    tidak bisa diatur add-in — lihat docs/fase1 drafter.md bagian 6.1.
     """
 
     PENGGANTIAN = "penggantian"
