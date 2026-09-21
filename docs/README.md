@@ -1,6 +1,6 @@
 # Dokumentasi Drafter Analiser
 
-Empat berkas di sini, plus `CLAUDE.md` di akar. Kalau ada yang bertentangan,
+Enam berkas di sini, plus `CLAUDE.md` di akar. Kalau ada yang bertentangan,
 **`fase1 drafter.md` yang berlaku** — dokumen itu disamakan dengan kode setiap
 kali kode berubah.
 
@@ -8,6 +8,8 @@ kali kode berubah.
 |---|---|---|
 | [`project-brief.md`](project-brief.md) | **Kenapa** alat ini dibangun, untuk siapa, dan cara penelaah bekerja sebenarnya. Bukan spesifikasi | Sekali, untuk memahami konteksnya |
 | [`fase1 drafter.md`](fase1%20drafter.md) | Seluruh rancangan Fase 1: apa yang dibangun, cara temuan ditampilkan, kontrak data, aturan untuk agen coding, definisi selesai | Sebelum mengubah apa pun |
+| [`cek list fase 1.md`](cek%20list%20fase%201.md) | **Apa yang benar-benar diperiksa, disusun per bagian naskah** (Judul, Menimbang, Mengingat, Menetapkan, batang tubuh, Lampiran) — untuk PMK dan KMK. Memuat juga yang TIDAK diperiksa dan kapan aturan memilih diam | Sambil membuka rancangan, untuk tahu mana yang masih harus diperiksa sendiri |
+| [`fase-2dan-3drafter.md`](fase-2dan-3drafter.md) | **Alur, batasan, dan teknologi** Fase 2 & 3: bagaimana model membaca PMK pasal per pasal tanpa ada yang terlewat, apa yang membatasi rancangannya, dan apa saja yang dibutuhkan. **Rancangan, belum dibangun** | Sebelum mulai mengerjakan Fase 2 |
 | [`panduan-officejs.md`](panduan-officejs.md) | API Word yang sudah diverifikasi ke `index.d.ts`, dan jebakan yang sudah terbukti | Sebelum memakai API Word yang belum pernah dipakai |
 | [`panduan-vibe.md`](panduan-vibe.md) | Ringkasan konvensi kode. **Isinya sudah ada seluruhnya di `CLAUDE.md`** — kandidat dihapus, lihat catatan di bawah | Tidak perlu |
 | [`../CLAUDE.md`](../CLAUDE.md) | Aturan kerja repo yang tidak boleh dilanggar | Otomatis dibaca Claude Code |
@@ -19,15 +21,17 @@ kali kode berubah.
 1. `fase1 drafter.md` bagian 1–4 — apa yang dibangun dan apa yang **tidak**.
 2. Bagian 6 — cara temuan ditampilkan di dokumen. Bagian terpanjang dan
    terpenting; memuat riwayat tiga rancangan yang gugur beserta buktinya.
-3. **Bagian 7 dan 8 — susunan berkas beranotasi dan alur lengkapnya**, dari
+3. `cek list fase 1.md` — apa yang diperiksa tiap bagian naskah. Paling cepat
+   untuk tahu cakupan Fase 1 tanpa membaca kode.
+4. **Bagian 7 dan 8 — susunan berkas beranotasi dan alur lengkapnya**, dari
    tombol Analisis ditekan sampai tanda muncul di naskah. Bagian 8 juga
    menjelaskan **bagaimana** kesalahan ditemukan: jangkar yang dicari lebih
    dulu, sebelas aturan yang berjalan, dan daftar keadaan ketika aturan
    memilih diam. Baca ini kalau ingin menelusuri kode, bukan merancang.
-4. Bagian 11 — kontrak data antara backend dan task pane.
-5. Bagian 14 — aturan yang mengikat agen coding.
-6. Bagian 13 dan 15 — apa yang sudah selesai dan apa yang belum.
-7. **Bagian 16 — cara tahu Fase 1 aman dan selesai.** Daftar periksa yang bisa
+5. Bagian 11 — kontrak data antara backend dan task pane.
+6. Bagian 14 — aturan yang mengikat agen coding.
+7. Bagian 13 dan 15 — apa yang sudah selesai dan apa yang belum.
+8. **Bagian 16 — cara tahu Fase 1 aman dan selesai.** Daftar periksa yang bisa
    dijalankan sendiri: empat perintah yang wajib hijau, cara menguji aturan
    terhadap naskah nyata tanpa membuka Word, tiga belas hal yang wajib
    dibuktikan di dalam Word, dan syarat sebelum Fase 2 boleh dimulai.
@@ -67,3 +71,18 @@ Tiga hal yang paling sering dilanggar:
 - **Bagian 14 butir 9** — Office.js jarang muncul di data latih model.
   Verifikasi tiap method ke `frontend/node_modules/@types/office-js/index.d.ts`
   sebelum menulis kode, jangan mengarang.
+
+## Kalau sudah sampai Fase 2
+
+[`fase-2dan-3drafter.md`](fase-2dan-3drafter.md) berdiri sendiri dan bisa dibaca
+sesudah `fase1 drafter.md`. Susunannya: ringkasan, struktur folder berikut
+teknologi dan env-nya, **alur tujuh langkah beserta enam cabangnya** (termasuk
+apa yang terjadi kalau dua pasal bertabrakan), daftar fitur dan batasannya, sisa
+pertanyaan, dan hal janggal yang perlu dipertimbangkan.
+
+Yang paling menentukan di sana: **parser struktur sebagai pondasi tunggal** yang
+dipakai bersama seluruh Fase 2 dan 3, dan **contoh isi peta untuk 20 pasal** —
+yang memperlihatkan apa sebenarnya yang dibaca model saat menalar.
+
+Dokumen itu **rancangan, bukan perintah kerja.** Penulisan kodenya menunggu
+persetujuan terpisah.

@@ -90,10 +90,16 @@ diverifikasi, dan jebakan yang sudah terbukti secara empiris.
 - Sebelum menambah dependency, periksa apakah kebutuhannya bisa dipenuhi yang
   sudah terpasang. Tailwind sudah ada — jangan tambah Bootstrap.
 - Jangan hardcode URL backend; pakai `NEXT_PUBLIC_API_BASE_URL`.
-- `frontend/src/lib/aturan-fase1.ts` **wajib sama** dengan
-  `backend/app/rules/format_baku.py`. Berkas itu yang dibaca penelaah di panel
-  Pengaturan untuk memutuskan apa yang perlu diperiksa manual — keterangan yang
-  bohong lebih berbahaya daripada tidak ada keterangan.
+- **Dua berkas keterangan wajib sama dengan
+  `backend/app/rules/format_baku.py`**, dan diubah di commit yang sama kalau
+  aturannya berubah:
+  - `frontend/src/lib/aturan-fase1.ts` — dibaca penelaah di panel Pengaturan;
+  - `docs/cek list fase 1.md` — daftar per bagian naskah, dibaca penelaah
+    sambil menelaah.
+
+  Keterangan yang bohong lebih berbahaya daripada tidak ada keterangan:
+  penelaah memakainya untuk memutuskan apa yang perlu diperiksa manual. Cara
+  membuktikan keduanya masih benar ada di bagian akhir `cek list fase 1.md`.
 
 ## Menjalankan
 
