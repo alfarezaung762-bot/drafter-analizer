@@ -5,13 +5,22 @@ membantu penelaah di Biro Hukum Kementerian Keuangan memeriksa rancangan PMK/KMK
 terhadap kaidah penyusunan peraturan (KMK 527/KMK.01/2022 Lampiran II).
 
 **Fase 1 tidak memakai AI sama sekali.** Seluruh pemeriksaannya deterministik —
-regex dan logika Python biasa. Azure OpenAI dan OpenSearch baru relevan di
-Fase 2/3 dan belum tersambung.
+regex dan logika Python biasa.
+
+**Fase 2 terbagi dua, dan pembagiannya menentukan.** F2-0xx deterministik
+seperti Fase 1; F2-1xx dan F3-001 memakai Azure OpenAI dan OpenSearch. Apa pun
+yang dihasilkan model tetap harus lewat Langkah 5
+(`backend/app/fase2/tahap5_verifikasi.py`) sebelum menyentuh naskah — itu
+satu-satunya tempat Temuan lahir, dan tidak punya jalan pintas.
 
 ## Baca ini dulu
 
+[`docs/fase-2dan-3drafter.md`](docs/fase-2dan-3drafter.md) — **acuan rancangan
+Fase 2 dan 3.** Alur tujuh langkah, cabang-cabangnya, dan alasan tiap
+keputusan. Baca sebelum menyentuh `app/fase2/` atau `app/fase3/`.
+
 [`docs/fase1 drafter.md`](docs/fase1%20drafter.md) — **satu-satunya acuan
-rancangan.** Memuat apa yang dibangun, cara temuan ditampilkan di dokumen,
+rancangan Fase 1.** Memuat apa yang dibangun, cara temuan ditampilkan di dokumen,
 kontrak data, dan definisi selesai. Baca sampai habis sebelum mengubah kode.
 
 [`docs/panduan-officejs.md`](docs/panduan-officejs.md) — API Word yang sudah
@@ -90,12 +99,14 @@ diverifikasi, dan jebakan yang sudah terbukti secara empiris.
 - Sebelum menambah dependency, periksa apakah kebutuhannya bisa dipenuhi yang
   sudah terpasang. Tailwind sudah ada — jangan tambah Bootstrap.
 - Jangan hardcode URL backend; pakai `NEXT_PUBLIC_API_BASE_URL`.
-- **Dua berkas keterangan wajib sama dengan
-  `backend/app/rules/format_baku.py`**, dan diubah di commit yang sama kalau
-  aturannya berubah:
-  - `frontend/src/lib/aturan-fase1.ts` — dibaca penelaah di panel Pengaturan;
-  - `docs/cek list fase 1.md` — daftar per bagian naskah, dibaca penelaah
-    sambil menelaah.
+- **Berkas keterangan wajib sama dengan kodenya**, dan diubah di commit yang
+  sama kalau aturannya berubah:
+  - `frontend/src/lib/aturan-fase1.ts` ←→ `backend/app/rules/format_baku.py`
+  - `frontend/src/lib/aturan-fase2.ts` ←→
+    `backend/app/fase2/mekanis_konsistensi.py` dan
+    `backend/app/fase2/tahap4_memastikan.py`
+  - `docs/cek list fase 1.md` ←→ ketiganya. Daftar per bagian naskah, dibaca
+    penelaah sambil menelaah.
 
   Keterangan yang bohong lebih berbahaya daripada tidak ada keterangan:
   penelaah memakainya untuk memutuskan apa yang perlu diperiksa manual. Cara
@@ -115,4 +126,7 @@ cd backend && python -m pytest tests/ -q
 
 # Diagnosa aturan terhadap sebuah .docx, tanpa Word
 cd backend && python tools/cek_docx.py <berkas.docx> --jenis PMK
+cd backend && python tools/cek_docx.py <berkas.docx> --struktur   # pohon satuan
+cd backend && python tools/cek_docx.py <berkas.docx> --fase2      # F2-0xx, gratis
+cd backend && python tools/cek_docx.py <berkas.docx> --lanjut     # + jalur AI, BERBIAYA
 ```

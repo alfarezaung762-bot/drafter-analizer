@@ -301,6 +301,179 @@ RUJUKAN: dict[str, dict[str, object]] = {
             "kendalanya sama dengan F1-001, yaitu gaya ALL CAPS."
         ),
     },
+
+    # -----------------------------------------------------------------------
+    # FASE 2 — ditambahkan 22 Sep 2026.
+    #
+    # SELURUHNYA BERSTATUS "placeholder", DAN ITU DISENGAJA. Nomor butir dan
+    # kutipannya belum dibaca manusia dari naskah KMK 527, jadi tidak boleh
+    # ditulis seolah sudah pasti — CLAUDE.md butir 3. Selama placeholder,
+    # panel menyalakan penanda "rujukan belum diverifikasi" pada tiap
+    # temuannya, dan itu perilaku yang benar.
+    #
+    # Sebagian aturan Fase 2 memang TIDAK bersumber dari KMK 527 melainkan
+    # dari logika dokumen (brief 8.11) — untuk yang begitu, `sumber` ditulis
+    # apa adanya dan `butir` dibiarkan kosong, bukan dikarang.
+    # -----------------------------------------------------------------------
+    "F2-001": {
+        "nama_aturan": "Rujukan antar-pasal menunjuk satuan yang ada",
+        "sumber": "Logika dokumen — belum dikonfirmasi penelaah (brief 8.11)",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "Brief 8.11 mencantumkan 'Rujukan sebagaimana dimaksud dalam "
+            "Pasal N menunjuk pasal yang ada' sebagai kemungkinan pemeriksaan "
+            "yang BELUM dikonfirmasi penelaah. Dibangun karena kesalahannya "
+            "bisa dibuktikan mutlak dari pohon satuan, tanpa penafsiran."
+        ),
+    },
+    "F2-003": {
+        "nama_aturan": "Definisi di Pasal 1 dipakai di batang tubuh",
+        "sumber": "Logika dokumen — belum dikonfirmasi penelaah (brief 8.11)",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": "Brief 8.11: 'Definisi yang tidak pernah dipakai'.",
+    },
+    "F2-004": {
+        "nama_aturan": "Penomoran bertingkat tidak melompat atau berulang",
+        "sumber": "KMK 527/KMK.01/2022 Lampiran II",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "Lampiran II mengatur penomoran Pasal, ayat, huruf, dan angka. "
+            "NOMOR BUTIRNYA BELUM DIBACA VISUAL — wajib diisi dari pindaian "
+            "halaman sebelum status dinaikkan ke 'visual'."
+        ),
+    },
+    "F2-007": {
+        "nama_aturan": "Bilangan ditulis angka dan huruf yang cocok",
+        "sumber": "KMK 527/KMK.01/2022 Lampiran II",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "Bilangan ditulis dua kali: angka Arab lalu hurufnya dalam "
+            "kurung — '30 (tiga puluh) hari'. Kalau keduanya tidak cocok, "
+            "batas waktunya jadi mendua dan berakibat hukum. NOMOR BUTIRNYA "
+            "BELUM DIBACA VISUAL."
+        ),
+    },
+
+    # -----------------------------------------------------------------------
+    # FASE 2 — JALUR PENALARAN (F2-1xx). Ditambahkan 22 Sep 2026.
+    #
+    # Nomornya sengaja melompat ke seratusan supaya terbaca sekali lihat:
+    # F2-0xx dibuktikan kode, F2-1xx dibuktikan model. Penelaah berhak tahu
+    # mana temuan yang kesalahannya pasti dan mana yang hasil penalaran.
+    #
+    # Seluruhnya bersumber pada prioritas mentor (brief bagian 4), BUKAN pada
+    # satu butir KMK 527 tertentu. Itu ditulis apa adanya di `sumber` — yang
+    # tidak ada butirnya tidak dikarang butirnya.
+    # -----------------------------------------------------------------------
+    "F2-101": {
+        "nama_aturan": "Rumusan tidak berpotensi ditafsirkan dua arah",
+        "sumber": "Prioritas penelaah — cara mendefinisikan ketentuan (brief bagian 4)",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "Temuan HASIL PENALARAN MODEL, bukan kesalahan yang bisa "
+            "dibuktikan kode. Sudah lewat Langkah 4 (dibaca pada teks utuh) "
+            "dan Langkah 5 (kutipannya dibuktikan ada di naskah), tetapi "
+            "penilaian 'bisa dibaca dua arah' tetap penilaian. Penelaah yang "
+            "memutuskan."
+        ),
+    },
+    "F2-102": {
+        "nama_aturan": "Kewajiban menyebut tegas siapa pemikulnya",
+        "sumber": "Prioritas penelaah — cara mendefinisikan ketentuan (brief bagian 4)",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "Ketentuan yang mewajibkan sesuatu tanpa menyebut subjek yang "
+            "memikulnya. Temuan hasil penalaran model."
+        ),
+    },
+    "F2-103": {
+        "nama_aturan": "Kata operasional tidak saling bertabrakan",
+        "sumber": "Prioritas penelaah — cara mendefinisikan ketentuan (brief bagian 4)",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "wajib / harus / dapat / dilarang dalam satu ketentuan yang sama, "
+            "sehingga tidak jelas apakah perbuatannya diwajibkan atau "
+            "dibolehkan. Temuan hasil penalaran model."
+        ),
+    },
+    "F2-104": {
+        "nama_aturan": "Dua ketentuan tidak saling meniadakan",
+        "sumber": "Prioritas penelaah — cara mendefinisikan ketentuan (brief bagian 4)",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "Dua satuan yang tidak bisa berlaku bersamaan. Keduanya WAJIB "
+            "dibaca utuh di Langkah 4 sebelum salah satunya ditandai — "
+            "pengecualian yang sah sering menyerupai tabrakan."
+        ),
+    },
+    "F2-105": {
+        "nama_aturan": "Tujuan di Menimbang tercakup batang tubuh",
+        "sumber": "Prioritas penelaah — cara mendefinisikan ketentuan (brief bagian 4)",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "Maksud yang dinyatakan di konsiderans tetapi tidak ada "
+            "ketentuannya di batang tubuh. Temuan hasil penalaran model."
+        ),
+    },
+
+    # -----------------------------------------------------------------------
+    # FASE 3 — pembanding dari korpus peraturan.
+    #
+    # Kutipan pembandingnya berasal dari indeks yang teksnya hasil pemindaian,
+    # jadi statusnya TIDAK PERNAH "visual" — penanda "belum diverifikasi" di
+    # panel memang harus menyala untuk tiap temuan Fase 3.
+    # -----------------------------------------------------------------------
+    "F3-001": {
+        "nama_aturan": "Berpotensi bertentangan dengan peraturan lain",
+        "sumber": "Korpus peraturan JDIH — kutipan dari pemindaian",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "Temuan ini KEMUNGKINAN, bukan kesimpulan — bahasanya wajib "
+            "'berpotensi bertentangan'. Nama peraturan pembandingnya disalin "
+            "dari hasil pencarian korpus dan diverifikasi kode di Langkah 5; "
+            "model tidak boleh menyebut peraturan dari ingatannya."
+        ),
+    },
 }
 
 

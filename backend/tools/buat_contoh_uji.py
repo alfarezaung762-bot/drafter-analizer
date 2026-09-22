@@ -1,4 +1,4 @@
-"""Membangkitkan dua naskah uji beserta kunci jawabannya.
+"""Membangkitkan tiga naskah uji beserta kunci jawabannya.
 
 Gunanya satu: memberi penelaah naskah yang kesalahannya SUDAH DIKETAHUI, supaya
 bisa dibuka di Word lalu dicocokkan — mana yang benar-benar tertangkap Fase 1,
@@ -6,11 +6,12 @@ dan mana yang lolos.
 
     python tools/buat_contoh_uji.py
 
-Menghasilkan tiga berkas di tools/contoh/:
+Menghasilkan empat berkas di tools/contoh/:
 
     uji-pmk-lengkap.docx    naskah PMK, paragraf biasa
     uji-kmk-lengkap.docx    naskah KMK, pembukaannya di dalam TABEL
-    KUNCI-UJI.md            kunci jawaban
+    uji-fase2-batangtubuh.docx  naskah PMK berbatang tubuh penuh, untuk FASE 2
+    KUNCI-UJI.md            kunci jawaban (Fase 1)
 
 KENAPA DIBANGKITKAN, BUKAN DITULIS TANGAN
 -----------------------------------------
@@ -201,6 +202,93 @@ def _tulis(doc, teks: str, tengah: bool = False) -> None:
     p = doc.add_paragraph(teks)
     if tengah:
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
+
+# ---------------------------------------------------------------------------
+# Naskah 3 — PMK berbatang tubuh penuh, untuk menguji FASE 2
+# ---------------------------------------------------------------------------
+#
+# Fase 1 memeriksa pembukaan; Fase 2 memeriksa batang tubuh. Naskah 1 dan 2
+# batang tubuhnya sengaja tipis, jadi tidak cukup untuk menguji parser
+# bertingkat maupun aturan mekanis Fase 2.
+
+FASE2: list[Baris] = [
+    B("PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA"),
+    B("NOMOR 20 TAHUN 2026"),
+    B("TENTANG"),
+    B("TATA CARA PENETAPAN STATUS PENGGUNAAN BARANG MILIK NEGARA"),
+    B("DENGAN RAHMAT TUHAN YANG MAHA ESA"),
+    B("MENTERI KEUANGAN REPUBLIK INDONESIA,"),
+    B(""),
+    B("Menimbang :"),
+    B("a. bahwa untuk tertib pengelolaan barang milik negara perlu diatur "
+      "tata cara penetapan status penggunaannya;"),
+    B("b. bahwa berdasarkan pertimbangan sebagaimana dimaksud dalam huruf a, "
+      "perlu menetapkan Peraturan Menteri Keuangan tentang Tata Cara "
+      "Penetapan Status Penggunaan Barang Milik Negara;"),
+    B(""),
+    B("Mengingat :"),
+    B("1. Undang-Undang Nomor 1 Tahun 2004 tentang Perbendaharaan Negara;"),
+    B("2. Peraturan Pemerintah Nomor 27 Tahun 2014 tentang Pengelolaan "
+      "Barang Milik Negara;"),
+    B(""),
+    B("MEMUTUSKAN:"),
+    B("Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA PENETAPAN "
+      "STATUS PENGGUNAAN BARANG MILIK NEGARA."),
+    B(""),
+    B("BAB I"), B("KETENTUAN UMUM"),
+    B("Pasal 1"),
+    B("Dalam Peraturan Menteri ini yang dimaksud dengan:"),
+    B("1. Barang Milik Negara adalah semua barang yang dibeli atas beban "
+      "Anggaran Pendapatan dan Belanja Negara."),
+    B("2. Pengelola Barang adalah pejabat yang berwenang menetapkan status "
+      "penggunaan Barang Milik Negara."),
+    B("3. Hari adalah hari kerja."),
+    B("4. Sistem Informasi adalah aplikasi pencatatan barang milik negara.",
+      "F2-003", "istilah didefinisikan tetapi tidak pernah dipakai di batang tubuh"),
+    B(""),
+    B("BAB II"), B("TATA CARA PERMOHONAN"),
+    B("Bagian Kesatu"), B("Pengajuan"),
+    B("Pasal 2"),
+    B("(1) Pengguna Barang mengajukan permohonan penetapan status penggunaan "
+      "kepada Pengelola Barang."),
+    B("(2) Permohonan sebagaimana dimaksud pada ayat (1) dilengkapi dengan:"),
+    B("a. fotokopi dokumen kepemilikan;"),
+    B("b. surat pernyataan tanggung jawab."),
+    B("(3) Permohonan sebagaimana dimaksud pada ayat (1) diselesaikan paling "
+      "lambat 30 (tiga belas) Hari.",
+      "F2-007", "angka 30 tidak cocok dengan hurufnya, \"tiga belas\" berarti 13"),
+    B(""),
+    B("Bagian Kedua"), B("Penetapan"),
+    B("Pasal 3"),
+    B("Pengelola Barang menetapkan status penggunaan sebagaimana dimaksud "
+      "dalam Pasal 25 paling lambat 14 (empat belas) Hari.",
+      "F2-001", "merujuk Pasal 25 yang tidak ada di naskah ini"),
+    B(""),
+    B("Pasal 5",
+      "F2-004", "penomoran melompat: Pasal 4 tidak ada"),
+    B("Pengelola Barang menyampaikan laporan kepada Menteri sebagaimana "
+      "dimaksud dalam Pasal 3."),
+    B(""),
+    B("Pasal 6"),
+    B("Ketentuan sebagaimana dimaksud dalam Pasal 12 Undang-Undang Nomor 1 "
+      "Tahun 2004 berlaku juga terhadap Barang Milik Negara.",
+      None, "KONTROL — merujuk Pasal milik UNDANG-UNDANG, bukan pasal naskah "
+            "ini. Tidak boleh ditandai F2-001"),
+    B(""),
+    B("Pasal 7"),
+    B("Peraturan Menteri ini mulai berlaku pada tanggal diundangkan.",
+      None, "KONTROL — ketentuan penutup, harus DILEWATI penyaring Langkah 1"),
+]
+
+
+def buat_fase2(path: Path) -> list[Baris]:
+    doc = Document()
+    for i, b in enumerate(FASE2):
+        _tulis(doc, b.teks, tengah=i < 7)
+    doc.save(str(path))
+    return FASE2
 
 
 def buat_pmk(path: Path) -> list[Baris]:
@@ -402,14 +490,16 @@ def tulis_kunci(path: Path, pmk_path: Path, kmk_path: Path,
 def main() -> None:
     FOLDER.mkdir(parents=True, exist_ok=True)
     pmk_path = FOLDER / "uji-pmk-lengkap.docx"
+    fase2_path = FOLDER / "uji-fase2-batangtubuh.docx"
     kmk_path = FOLDER / "uji-kmk-lengkap.docx"
     kunci_path = FOLDER / "KUNCI-UJI.md"
 
     pmk_baris = buat_pmk(pmk_path)
+    buat_fase2(fase2_path)
     kmk_baris = buat_kmk(kmk_path)
     tulis_kunci(kunci_path, pmk_path, kmk_path, pmk_baris, kmk_baris)
 
-    for p in (pmk_path, kmk_path, kunci_path):
+    for p in (pmk_path, kmk_path, fase2_path, kunci_path):
         print(f"  dibuat: {p.relative_to(FOLDER.parent.parent)}")
 
 

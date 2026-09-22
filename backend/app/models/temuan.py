@@ -131,7 +131,31 @@ class Temuan(BaseModel):
         ),
     )
     fase: int = Field(
-        default=1, description="Fase pemeriksaan, selalu 1 untuk Fase 1"
+        default=1,
+        description=(
+            "Fase pemeriksaan: 1 format baku, 2 konsistensi dan kejelasan, "
+            "3 pertentangan dengan peraturan lain. Dipakai panel untuk "
+            "MENGELOMPOKKAN secara visual, tidak pernah untuk menomori ulang."
+        ),
+    )
+    satuan_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Alamat satuan asal temuan, mis. 'pasal-12-ayat-2'. Kosong untuk "
+            "Fase 1, yang bekerja di atas paragraf datar dan tidak mengenal "
+            "satuan. Dipakai panel untuk menyebut letaknya dengan bahasa "
+            "naskah, bukan nomor paragraf Word."
+        ),
+    )
+    skor: Optional[float] = Field(
+        default=None,
+        description=(
+            "Keyakinan model, 0.0–1.0. Kosong untuk temuan deterministik, dan "
+            "kekosongan itu BERARTI: temuan tanpa skor kesalahannya bisa "
+            "dibuktikan baris demi baris, temuan berskor hasil penalaran. "
+            "Yang di bawah ambang tidak pernah sampai ke sini — sudah gugur "
+            "di Langkah 5."
+        ),
     )
     jenis_tanda: JenisTanda = Field(
         ..., description="Cara temuan dipasang di dokumen"

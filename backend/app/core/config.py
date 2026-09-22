@@ -37,6 +37,15 @@ class Settings(BaseSettings):
             host = f"{host}:{self.OPENSEARCH_PORT}"
         return host
 
+    # Fase 2/3 — basis data hasil per satuan (Neon Postgres)
+    DATABASE_URL: str = ""
+
+    # Fase 2 — angka penyetelan. Nilainya ditetapkan setelah diukur pada
+    # dokumen nyata, dan ikut berubah kalau modelnya diganti.
+    FASE2_SATUAN_PER_PANGGILAN: int = 6
+    FASE2_PANGGILAN_BERBARENGAN: int = 4
+    FASE2_AMBANG_SKOR: float = 0.7
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

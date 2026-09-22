@@ -51,7 +51,23 @@ export interface Temuan {
   nomor: number;
   /** Kunci tabel rujukan. INTERNAL — jangan pernah ditampilkan ke penelaah. */
   aturan_id: string;
+  /**
+   * 1 format baku, 2 konsistensi dan kejelasan, 3 pertentangan dengan
+   * peraturan lain. Dipakai panel untuk MENGELOMPOKKAN secara visual, tidak
+   * pernah untuk menomori ulang — (T3) sudah tertulis di komentar Word.
+   */
   fase: number;
+  /**
+   * Alamat satuan asalnya, mis. "pasal-12-ayat-2". Kosong untuk Fase 1, yang
+   * bekerja di atas paragraf datar dan tidak mengenal satuan.
+   */
+  satuan_id?: string | null;
+  /**
+   * Keyakinan model, 0.0–1.0. Kosong untuk temuan deterministik, dan
+   * kekosongan itu BERARTI: temuan tanpa skor kesalahannya bisa dibuktikan
+   * baris demi baris, temuan berskor hasil penalaran.
+   */
+  skor?: number | null;
   jenis_tanda: JenisTanda;
   lokasi: LokasiTemuan;
   /** Alasan temuan, bukan pengulangan apa yang sudah terlihat di naskah. */
@@ -107,4 +123,57 @@ export interface KeteranganAturan {
 export interface AnalisisResponse {
   temuan: Temuan[];
   jumlah_paragraf: number;
+}
+
+// ---------------------------------------------------------------------------
+// Fase 2 dan 3 — analisis panjang
+// ---------------------------------------------------------------------------
+//
+// Bedanya dengan Fase 1 bukan cuma isi, melainkan BENTUK PERCAKAPANNYA. Fase 1
+// satu permintaan satu jawaban. Fase 2 berjalan menit, jadi permintaannya
+// dijawab segera dengan nomor pekerjaan dan hasilnya diambil berkala.
+//
+// Kenapa begitu: panel yang menunggu satu permintaan selama tiga menit
+// dianggap macet oleh Word, dan penelaah tidak bisa membaca temuan Fase 1
+// sementara Fase 2 berjalan.
+
+export type StatusPekerjaan = "menunggu" | "berjalan" | "selesai" | "gagal";
+
+export interface AnalisisLanjutRequest {
+  paragraf: ParagrafInput[];
+  dokumen?: string;
+  /** Kode aturan yang dicentang penelaah. Dihilangkan berarti semua. */
+  aturan_aktif?: string[];
+  /**
+   * Nomor temuan pertama Fase 2 — MELANJUTKAN nomor terakhir Fase 1.
+   * Nomor tidak pernah diurutkan ulang: (T3) sudah tertulis di komentar Word,
+   * dan menomori ulang membuat komentar itu menunjuk temuan yang berbeda.
+   */
+  mulai_nomor?: number;
+  /** Batas ATAS jumlah temuan, bukan target yang harus dipenuhi model. */
+  batas_temuan?: number;
+  ambang?: number;
+  /** Cari pembanding di korpus peraturan. Mati secara bawaan. */
+  fase3?: boolean;
+  /** Nomor pekerjaan lama yang petanya dipakai ulang, supaya tidak dibayar dua kali. */
+  lanjutkan?: number;
+}
+
+export interface MulaiResponse {
+  pekerjaan: number;
+  status: StatusPekerjaan;
+  pesan?: string;
+}
+
+export interface KemajuanResponse {
+  pekerjaan: number;
+  status: StatusPekerjaan;
+  satuan_total: number;
+  satuan_selesai: number;
+  panggilan: number;
+  token_masuk: number;
+  token_keluar: number;
+  /** Alasan gagal, atau keterangan kenapa Fase 2 tidak dijalankan (mis. naskah KMK). */
+  pesan: string;
+  temuan: Temuan[];
 }

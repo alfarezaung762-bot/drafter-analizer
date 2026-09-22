@@ -8,6 +8,9 @@ import {
   AnalisisResponse,
   JenisDokumen,
   StatusTemuan,
+  AnalisisLanjutRequest,
+  MulaiResponse,
+  KemajuanResponse,
 } from "@/lib/types";
 import {
   readParagraphs,
@@ -22,9 +25,28 @@ import {
   ATURAN_BISA_DIPILIH,
   SEMUA_ID_AKTIF,
 } from "@/lib/aturan-fase1";
+import {
+  ATURAN_FASE2,
+  ATURAN_FASE2_MEKANIS,
+  ATURAN_FASE2_MODEL,
+  ID_AKTIF_BAWAAN,
+} from "@/lib/aturan-fase2";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+
+// Berapa kartu yang digambar sekaligus.
+//
+// Brief 8.7: Law Analyzer berhenti merespons di 68/175 satuan, dan titik
+// berhentinya selalu sama — jadi sebabnya beban penggambaran, bukan kegagalan
+// acak. Batas ini yang menahannya. Sisanya tetap ada di daftar dan bisa
+// ditampilkan penelaah, cuma tidak digambar sekaligus.
+const BATAS_KARTU_AWAL = 40;
+const TAMBAH_KARTU = 40;
+
+// Jarak antar-pengambilan kemajuan Fase 2. Dua detik: cukup rapat supaya
+// angkanya terasa hidup, cukup renggang supaya panel tidak sibuk sendiri.
+const JEDA_TANYA_MS = 2000;
 
 // Sesudah Track Changes ditinggalkan (17 Sep 2026), seluruh penandaan berjalan
 // di atas WordApi 1.1 — Font.color, Font.strikeThrough, Range.insertText,
@@ -102,6 +124,25 @@ export default function TaskpanePage() {
   // Web mode fallback state
   const [webInputText, setWebInputText] = useState(CONTOH_DRAFT_PMK);
   const [useWebCustomText, setUseWebCustomText] = useState(false);
+
+  // --- Fase 2/3 -----------------------------------------------------------
+  //
+  // Dipisah dari state Fase 1, bukan digabung. Penelaah harus bisa membaca
+  // dan memutuskan temuan Fase 1 SEMENTARA Fase 2 masih berjalan — kalau
+  // keduanya berbagi satu bendera `analyzing`, seluruh panel terkunci selama
+  // beberapa menit dan itu persis keluhan terhadap Law Analyzer.
+  const [fase2Berjalan, setFase2Berjalan] = useState(false);
+  const [fase2Kemajuan, setFase2Kemajuan] = useState<{
+    selesai: number;
+    total: number;
+  } | null>(null);
+  const [fase2Pesan, setFase2Pesan] = useState<string | null>(null);
+  const [aturanFase2Aktif, setAturanFase2Aktif] = useState<Set<string>>(
+    () => new Set(ID_AKTIF_BAWAAN)
+  );
+  // Berapa kartu yang boleh digambar. Naik kalau penelaah menekan
+  // "Tampilkan lebih banyak".
+  const [batasTampil, setBatasTampil] = useState(BATAS_KARTU_AWAL);
 
   useEffect(() => {
     // Office.onReady bisa memanggil balik segera — termasuk sebelum komponen
@@ -210,6 +251,9 @@ export default function TaskpanePage() {
     setTemuanList([]);
     setSelectedTemuanId(null);
     setInfoPenandaan(null);
+    setFase2Pesan(null);
+    setFase2Kemajuan(null);
+    setBatasTampil(BATAS_KARTU_AWAL);
     // Ikut dikosongkan — tanpa ini, daftar id dari analisis sebelumnya
     // bertahan dan bisa membuat kartu analisis berikutnya salah dilabeli
     // "tidak ditandai di naskah".
@@ -348,6 +392,136 @@ export default function TaskpanePage() {
       setStatusMessage(`Gagal menjalankan analisis: ${errorMsg}`);
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  // Jalankan Fase 2 (dan 3 bila F3-001 dicentang).
+  //
+  // Berbeda dari Fase 1 dalam satu hal yang menentukan: permintaannya dijawab
+  // SEGERA dengan nomor pekerjaan, lalu kemajuannya ditanyakan berkala. Panel
+  // tidak pernah menunggu satu permintaan selama beberapa menit.
+  //
+  // TEMUAN BARU DITAMBAHKAN, BUKAN MENGGANTI DAFTAR. Temuan Fase 1 yang sudah
+  // diputuskan penelaah tetap di tempatnya dengan status dan nomornya utuh —
+  // nomor Fase 2 melanjutkan dari nomor terakhir Fase 1 dan tidak pernah
+  // diurutkan ulang, karena (T3) sudah tertulis di komentar Word.
+  const handleAnalisisLanjut = async () => {
+    if (!jenisDokumen) {
+      setGoyangJenis(true);
+      setTimeout(() => setGoyangJenis(false), 600);
+      return;
+    }
+
+    setFase2Berjalan(true);
+    setFase2Pesan(null);
+    setFase2Kemajuan(null);
+
+    try {
+      let paragraphs: ParagrafInput[] = [];
+      if (inWord) {
+        paragraphs = await readParagraphs(scope);
+      } else {
+        paragraphs = webInputText
+          .split("\n")
+          .map((line, idx) => ({ index: idx, teks: line }));
+      }
+      if (paragraphs.length === 0) {
+        setFase2Pesan("Tidak ada teks atau paragraf yang dapat dibaca.");
+        setFase2Berjalan(false);
+        return;
+      }
+
+      // Nomor Fase 2 melanjutkan nomor terbesar yang sudah terpakai.
+      const nomorTerakhir = temuanList.reduce(
+        (maks, t) => Math.max(maks, t.nomor),
+        0
+      );
+
+      const body: AnalisisLanjutRequest = {
+        paragraf: paragraphs,
+        aturan_aktif: [...aturanFase2Aktif],
+        mulai_nomor: nomorTerakhir + 1,
+        fase3: aturanFase2Aktif.has("F3-001"),
+      };
+
+      const mulai = await fetch(`${API_BASE}/analisis/lanjut`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!mulai.ok) {
+        throw new Error(`Server merespons status ${mulai.status}`);
+      }
+      const { pekerjaan }: MulaiResponse = await mulai.json();
+
+      // Tanya kemajuan sampai selesai atau gagal.
+      let kemajuan: KemajuanResponse | null = null;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, JEDA_TANYA_MS));
+        const res = await fetch(`${API_BASE}/analisis/lanjut/${pekerjaan}`);
+        if (!res.ok) throw new Error(`Gagal membaca kemajuan (${res.status})`);
+        kemajuan = await res.json();
+        if (!kemajuan) break;
+        setFase2Kemajuan({
+          selesai: kemajuan.satuan_selesai,
+          total: kemajuan.satuan_total,
+        });
+        if (kemajuan.status === "selesai" || kemajuan.status === "gagal") break;
+      }
+
+      if (!kemajuan) {
+        setFase2Pesan("Tidak ada jawaban dari backend.");
+        return;
+      }
+
+      if (kemajuan.status === "gagal") {
+        setFase2Pesan(`Fase 2 gagal: ${kemajuan.pesan}`);
+        return;
+      }
+
+      // Fase 2 memilih diam — naskah KMK, atau strukturnya tidak terbaca.
+      // Itu keadaan yang sah, bukan kesalahan, dan alasannya disampaikan apa
+      // adanya supaya penelaah tahu bagian mana yang tetap perlu dia periksa
+      // sendiri.
+      if (kemajuan.temuan.length === 0 && kemajuan.pesan) {
+        setFase2Pesan(kemajuan.pesan);
+        return;
+      }
+
+      // Tandai per kelompok, bukan sekaligus — syarat ke-4 dari brief 8.7.
+      if (inWord && kemajuan.temuan.length > 0) {
+        const tidakDitandai: string[] = [];
+        for (let i = 0; i < kemajuan.temuan.length; i += 10) {
+          const kelompok = kemajuan.temuan.slice(i, i + 10);
+          const hasil = await tandaiSemuaTemuan(kelompok);
+          tidakDitandai.push(...hasil.idTidakDitandai);
+          // Kartunya muncul sesudah tandanya terpasang, sehingga daftar dan
+          // naskah tidak pernah berbeda isi.
+          setTemuanList((prev) => [...prev, ...kelompok]);
+        }
+        if (tidakDitandai.length > 0) {
+          setIdTidakDitandai((prev) => new Set([...prev, ...tidakDitandai]));
+        }
+      } else {
+        setTemuanList((prev) => [...prev, ...kemajuan!.temuan]);
+      }
+
+      const biaya =
+        kemajuan.panggilan > 0
+          ? ` ${kemajuan.panggilan} panggilan model, ${kemajuan.token_masuk}` +
+            ` token masuk dan ${kemajuan.token_keluar} keluar.`
+          : "";
+      setFase2Pesan(
+        kemajuan.temuan.length === 0
+          ? `Fase 2 selesai, tidak ada temuan.${biaya}`
+          : `Fase 2 selesai: ${kemajuan.temuan.length} temuan ditambahkan.${biaya}`
+      );
+    } catch (err: unknown) {
+      setFase2Pesan(
+        `Gagal menjalankan Fase 2: ${err instanceof Error ? err.message : String(err)}`
+      );
+    } finally {
+      setFase2Berjalan(false);
     }
   };
 
@@ -615,6 +789,143 @@ export default function TaskpanePage() {
               dinyalakan.
               {aturanAktif.size === 0 && " Analisis tidak akan menemukan apa pun."}
             </p>
+
+            {/* Fase 2 dan 3 — dipisah dari Fase 1 dengan pembatas tebal.
+                Bukan kerapian: yang di bawah ini berbeda sifatnya. Sebagian
+                memanggil model, berjalan menit, dan berbiaya. */}
+            <div className="pt-2 mt-1 border-t-2 border-slate-300 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-700 text-[11px]">
+                  Fase 2 &amp; 3 — Pemeriksaan Isi
+                </span>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <button
+                    onClick={() => setAturanFase2Aktif(new Set(ID_AKTIF_BAWAAN))}
+                    className="text-blue-700 hover:underline"
+                  >
+                    Bawaan
+                  </button>
+                  <button
+                    onClick={() => setAturanFase2Aktif(new Set())}
+                    className="text-slate-500 hover:underline"
+                  >
+                    Kosongkan
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-slate-500 leading-snug">
+                Empat pemeriksaan pertama deterministik seperti Fase 1 — gratis
+                dan hasilnya pasti. Sisanya memakai AI: berjalan beberapa menit
+                dan berbiaya. Fase 3 mati secara bawaan karena bergantung pada
+                korpus peraturan yang isinya belum diverifikasi langsung.
+              </p>
+
+              {[
+                { judul: "Tanpa AI — gratis, hasilnya pasti", daftar: ATURAN_FASE2_MEKANIS },
+                { judul: "Dengan AI — berjalan menit, berbiaya", daftar: ATURAN_FASE2_MODEL },
+              ].map((kelompok) => (
+                <div key={kelompok.judul} className="space-y-1.5">
+                  <p className="text-[9px] uppercase tracking-wide text-slate-400 font-semibold">
+                    {kelompok.judul}
+                  </p>
+                  {kelompok.daftar.map((aturan) => {
+                    const dipilih = aturanFase2Aktif.has(aturan.id);
+                    const terbuka = aturanTerbuka === aturan.id;
+                    return (
+                      <div
+                        key={aturan.id}
+                        className="rounded border border-slate-300 bg-white"
+                      >
+                        <div className="flex items-start gap-1.5 px-1.5 py-1.5">
+                          <input
+                            type="checkbox"
+                            id={`aturan-${aturan.id}`}
+                            checked={dipilih}
+                            onChange={(e) =>
+                              setAturanFase2Aktif((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(aturan.id);
+                                else next.delete(aturan.id);
+                                return next;
+                              })
+                            }
+                            className="mt-0.5 accent-blue-700"
+                          />
+                          <button
+                            onClick={() =>
+                              setAturanTerbuka(terbuka ? null : aturan.id)
+                            }
+                            className="flex-1 text-left"
+                            aria-expanded={terbuka}
+                          >
+                            <span className="text-[11px] text-slate-800 leading-snug">
+                              {aturan.judul}
+                            </span>
+                            {aturan.fase === 3 && (
+                              <span className="ml-1 text-[8px] bg-violet-200 text-violet-900 px-1 rounded font-bold align-middle">
+                                Fase 3
+                              </span>
+                            )}
+                            <span className="block text-[9px] text-slate-400">
+                              {terbuka ? "sembunyikan rincian" : "lihat rincian"}
+                            </span>
+                          </button>
+                        </div>
+
+                        {terbuka && (
+                          <div className="px-2 pb-2 pt-0.5 space-y-1.5 text-[10px] leading-snug border-t border-slate-100">
+                            <div>
+                              <p className="font-semibold text-slate-700">
+                                Yang diperiksa
+                              </p>
+                              <ul className="list-disc ml-3.5 text-slate-600 space-y-0.5">
+                                {aturan.diperiksa.map((baris, i) => (
+                                  <li key={i}>{baris}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-slate-700">
+                                Yang TIDAK diperiksa
+                              </p>
+                              <ul className="list-disc ml-3.5 text-slate-500 space-y-0.5">
+                                {aturan.tidakDiperiksa.map((baris, i) => (
+                                  <li key={i}>{baris}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            <p className="text-slate-600">
+                              <span className="font-semibold text-slate-700">
+                                Tandanya di naskah:{" "}
+                              </span>
+                              {aturan.tanda}
+                            </p>
+                            {aturan.catatanSumber && (
+                              <p className="text-amber-900 bg-amber-50 border border-amber-200 rounded px-1.5 py-1">
+                                <span className="font-semibold">
+                                  {aturan.denganModel
+                                    ? "Perlu diperiksa sendiri: "
+                                    : "Dasar aturannya belum pasti: "}
+                                </span>
+                                {aturan.catatanSumber}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+
+              <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
+                {aturanFase2Aktif.size} dari {ATURAN_FASE2.length} pemeriksaan
+                Fase 2/3 dinyalakan.
+                {aturanFase2Aktif.size === 0 &&
+                  " Tombol Fase 2 akan mati selama tidak ada yang dicentang."}
+              </p>
+            </div>
           </div>
         )}
 
@@ -808,6 +1119,73 @@ export default function TaskpanePage() {
             )}
           </button>
 
+          {/* Fase 2 — pemeriksaan isi.
+              SENGAJA TOMBOL TERPISAH, bukan lanjutan otomatis dari Fase 1.
+              Fase 2 berjalan menit dan sebagian besarnya berbayar, jadi
+              memulainya keputusan sadar penelaah. Tombolnya juga TIDAK dikunci
+              oleh `adaYangBelumDiputuskan`: penelaah harus bisa membaca dan
+              memutuskan temuan Fase 1 sementara Fase 2 berjalan. */}
+          <button
+            onClick={handleAnalisisLanjut}
+            disabled={fase2Berjalan || aturanFase2Aktif.size === 0}
+            title={
+              aturanFase2Aktif.size === 0
+                ? "Tidak ada pemeriksaan Fase 2 yang dicentang di Pengaturan"
+                : undefined
+            }
+            className={`w-full py-2 px-3 rounded font-semibold transition flex items-center justify-center gap-1.5 shadow-xs border ${
+              fase2Berjalan || aturanFase2Aktif.size === 0
+                ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                : "bg-white text-blue-800 border-blue-300 hover:bg-blue-50 active:scale-[0.99]"
+            }`}
+          >
+            {fase2Berjalan ? (
+              <>
+                <svg className="animate-spin h-3.5 w-3.5 text-blue-700" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+                <span>
+                  {fase2Kemajuan && fase2Kemajuan.total > 0
+                    ? `Membaca ${fase2Kemajuan.selesai}/${fase2Kemajuan.total} satuan…`
+                    : "Membaca struktur naskah…"}
+                </span>
+              </>
+            ) : (
+              <span>Lanjutkan ke Fase 2 &mdash; Pemeriksaan Isi</span>
+            )}
+          </button>
+
+          {/* Angka kemajuan tetap terlihat sesudah selesai. Penelaah berhak
+              tahu berapa satuan yang benar-benar dibaca — bukan cuma berapa
+              temuan yang keluar. */}
+          {fase2Kemajuan && fase2Kemajuan.total > 0 && (
+            <div className="space-y-1">
+              <div className="h-1 w-full bg-slate-200 rounded overflow-hidden">
+                <div
+                  className="h-full bg-blue-600 transition-all"
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      Math.round(
+                        (fase2Kemajuan.selesai / fase2Kemajuan.total) * 100
+                      )
+                    )}%`,
+                  }}
+                />
+              </div>
+              <div className="text-[10px] text-slate-500">
+                {fase2Kemajuan.selesai} dari {fase2Kemajuan.total} satuan dibaca
+              </div>
+            </div>
+          )}
+
+          {fase2Pesan && (
+            <div className="text-[10px] text-blue-900 bg-blue-50 px-2 py-1.5 rounded border border-blue-200">
+              {fase2Pesan}
+            </div>
+          )}
+
           {adaYangBelumDiputuskan && (
             <div className="text-[10px] text-amber-900 bg-amber-50 px-2 py-1.5 rounded border border-amber-200 space-y-1">
               <div>
@@ -887,7 +1265,7 @@ export default function TaskpanePage() {
         )}
 
         <div className="space-y-1.5">
-          {temuanBerlokasi.map((temuan) => {
+          {temuanBerlokasi.slice(0, batasTampil).map((temuan) => {
             const isSelected = selectedTemuanId === temuan.id;
             const isPlaceholderRujukan =
               temuan.rujukan.status !== "visual";
@@ -928,6 +1306,26 @@ export default function TaskpanePage() {
                   >
                     {temuan.jenis_tanda === "penggantian" ? "usulan" : "catatan"}
                   </span>
+                  {/* Fase ditunjukkan, bukan dipakai menomori ulang. Penelaah
+                      berhak tahu temuan mana yang kesalahannya bisa dibuktikan
+                      baris demi baris (Fase 1) dan mana yang hasil penalaran
+                      model (Fase 2/3) — cara memeriksanya memang berbeda. */}
+                  {temuan.fase > 1 && (
+                    <span
+                      className={`text-[8px] px-1 rounded font-bold ${
+                        temuan.fase === 3
+                          ? "bg-violet-200 text-violet-900"
+                          : "bg-blue-100 text-blue-800"
+                      }`}
+                      title={
+                        temuan.fase === 3
+                          ? "Fase 3 — dibandingkan dengan peraturan lain dari korpus"
+                          : "Fase 2 — pemeriksaan isi"
+                      }
+                    >
+                      Fase {temuan.fase}
+                    </span>
+                  )}
                   {tanpaTanda && (
                     <span className="text-[8px] bg-slate-200 text-slate-700 px-1 rounded font-bold">
                       tidak ditandai di naskah
@@ -1015,6 +1413,21 @@ export default function TaskpanePage() {
             );
           })}
         </div>
+
+        {/* Sisanya tetap ADA di daftar, cuma belum digambar. Brief 8.7:
+            Law Analyzer berhenti merespons di 68/175, dan titik berhentinya
+            selalu sama — bebannya penggambaran. Yang dibatasi jumlah kartu
+            yang digambar, bukan jumlah temuan yang dilaporkan. */}
+        {temuanBerlokasi.length > batasTampil && (
+          <button
+            onClick={() => setBatasTampil((n) => n + TAMBAH_KARTU)}
+            className="w-full py-1.5 text-[10px] text-blue-700 bg-white border border-blue-200 rounded hover:bg-blue-50"
+          >
+            Tampilkan {Math.min(TAMBAH_KARTU, temuanBerlokasi.length - batasTampil)}{" "}
+            temuan lagi &mdash; {temuanBerlokasi.length - batasTampil} belum
+            ditampilkan
+          </button>
+        )}
 
         {/* Empty state when no findings yet */}
         {temuanList.length === 0 && !analyzing && (

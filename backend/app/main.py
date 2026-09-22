@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.analisis import router as analisis_router
+from app.api.analisis_lanjut import router as analisis_lanjut_router
 from app.api.cek_env import router as cek_env_router
 
 app = FastAPI(title="Drafter Analiser API")
@@ -15,6 +16,7 @@ app.add_middleware(
 )
 
 app.include_router(analisis_router)
+app.include_router(analisis_lanjut_router)
 app.include_router(cek_env_router)
 
 

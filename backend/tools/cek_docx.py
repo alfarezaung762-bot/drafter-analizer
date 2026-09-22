@@ -41,6 +41,10 @@ except ImportError:
 
 from app.models.temuan import JenisDokumen, ParagrafInput
 from app.rules.format_baku import jalankan_semua
+from app.fase2.tahap0_struktur import bangun_pohon
+from app.fase2.tahap0_definisi import ambil_definisi
+from app.fase2.tahap1_saring import saring
+from app.fase2.mekanis_konsistensi import jalankan_mekanis
 
 
 def baca_paragraf(path: Path) -> list[dict]:
@@ -64,11 +68,119 @@ def baca_paragraf(path: Path) -> list[dict]:
     return hasil
 
 
+def _cetak_temuan(temuan) -> None:
+    """Cetak daftar temuan berikut rentang persis yang akan ditandai di Word."""
+    print("=" * 78)
+    print(f"TEMUAN : {len(temuan)}")
+    print("=" * 78)
+    for t in temuan:
+        print()
+        print(f"T{t.nomor:<3} [{t.jenis_tanda.value:<12}] {t.aturan_id}  paragraf #{t.lokasi.paragraf_index}")
+        # Rentang yang benar-benar ditandai di Word. Dicetak supaya bisa dilihat
+        # apakah yang tersorot memang sesempit yang dimaksud, bukan satu
+        # paragraf penuh.
+        print(
+            f"  Ditandai: [{t.lokasi.offset_mulai}:"
+            f"{t.lokasi.offset_mulai + t.lokasi.panjang}] "
+            f"{t.lokasi.teks_asli!r}"
+        )
+        print(f"  Catatan : {t.catatan}")
+        if t.usulan_rumusan:
+            print(f"  Usulan  : {t.usulan_rumusan}")
+        # Yang menentukan status, BUKAN keterisian butirnya. Butir yang sudah
+        # terisi dari ekstraksi OCR tetap belum diverifikasi siapa pun.
+        butir = t.rujukan.butir
+        status = t.rujukan.status
+        if status == "visual":
+            print(f"  Rujukan : {t.rujukan.sumber} butir {butir}")
+        elif status == "ekstraksi":
+            print(
+                f"  Rujukan : {t.rujukan.sumber} butir {butir} "
+                "— BELUM DIVERIFIKASI VISUAL (isi dari ekstraksi OCR)"
+            )
+        else:
+            print("  Rujukan : BELUM DIISI — butir dan kutipannya masih placeholder")
+
+
+def _jalankan_lanjut(paragraf, args) -> int:
+    """Jalankan seluruh Fase 2 (dan 3) terhadap naskah ini. MEMANGGIL MODEL.
+
+    Ini satu-satunya cara menguji jalur penalaran tanpa membuka Word. Yang
+    dicetak bukan cuma temuannya melainkan juga YANG GUGUR di Langkah 5 dan
+    ongkosnya — dua angka yang menentukan apakah alat ini layak dipakai, dan
+    dua-duanya tidak kelihatan dari panel.
+    """
+    from app.bersama.llm import KlienAzure, PerapalAzure
+    from app.bersama.opensearch import KorpusOpenSearch
+    from app.core.config import settings
+    from app.fase2.alur import jalankan_lanjut
+
+    klien = KlienAzure()
+    if not klien.siap:
+        print("Azure OpenAI belum terkonfigurasi. Periksa lewat GET /cek-env.")
+        return 1
+
+    korpus = perapal = None
+    if args.fase3:
+        korpus, perapal = KorpusOpenSearch(), PerapalAzure()
+        if not (korpus.siap and perapal.siap):
+            print("Fase 3 diminta tetapi OpenSearch/embedding belum siap — dilewati.")
+            korpus = perapal = None
+
+    def lapor(selesai: int, total: int, _baru) -> None:
+        print(f"  Langkah 2: {selesai}/{total} satuan terbaca")
+
+    print("=" * 78)
+    print("FASE 2 — JALUR PENALARAN (memanggil model, berbiaya)")
+    print("=" * 78)
+
+    hasil = jalankan_lanjut(
+        paragraf,
+        klien=klien,
+        korpus=korpus,
+        perapal=perapal,
+        ambang=args.ambang if args.ambang is not None else settings.FASE2_AMBANG_SKOR,
+        per_panggilan=settings.FASE2_SATUAN_PER_PANGGILAN,
+        lapor=lapor,
+    )
+
+    if not hasil.berjalan:
+        print()
+        print("FASE 2 TIDAK DIJALANKAN")
+        print(f"  {hasil.tidak_dijalankan}")
+        return 0
+
+    print()
+    print(f"  Peta    : {len(hasil.peta)} baris dari {hasil.satuan_total} satuan")
+    print(f"  Dugaan  : {len(hasil.dugaan)} dari Langkah 3")
+    print(f"  Ongkos  : {hasil.ongkos.ringkas()}")
+    print()
+
+    _cetak_temuan(hasil.temuan)
+
+    # Yang gugur sama pentingnya dengan yang lolos: inilah bukti Langkah 5
+    # benar-benar bekerja, bukan cuma ada.
+    if hasil.gugur:
+        print()
+        print("=" * 78)
+        print(f"GUGUR DI LANGKAH 5 : {len(hasil.gugur)}")
+        print("=" * 78)
+        for g in hasil.gugur:
+            print(f"  {g}")
+    print()
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Periksa rancangan .docx dengan aturan Fase 1")
     ap.add_argument("berkas", help="Path ke rancangan .docx")
     ap.add_argument("--paragraf-saja", action="store_true", help="Hanya tampilkan paragraf, tanpa menjalankan aturan")
     ap.add_argument("--batas", type=int, default=60, help="Jumlah paragraf yang ditampilkan (default 60, 0 = semua)")
+    ap.add_argument("--struktur", action="store_true", help="Tampilkan pohon satuan hasil parser Fase 2")
+    ap.add_argument("--fase2", action="store_true", help="Jalankan pemeriksaan mekanis Fase 2 (F2-001..007), bukan Fase 1")
+    ap.add_argument("--lanjut", action="store_true", help="Jalankan SELURUH Fase 2 termasuk jalur penalaran. MEMANGGIL MODEL dan BERBIAYA.")
+    ap.add_argument("--fase3", action="store_true", help="Bersama --lanjut: cari pembanding di korpus peraturan (OpenSearch + embedding).")
+    ap.add_argument("--ambang", type=float, default=None, help="Ambang skor Langkah 5. Bawaan dari core/config.py.")
     ap.add_argument("--jenis", choices=["PMK", "KMK"], default="PMK", help="Jenis dokumen; di add-in ini dipilih penelaah (default PMK)")
     args = ap.parse_args()
 
@@ -105,38 +217,56 @@ def main() -> int:
 
     paragraf = [ParagrafInput(index=i, teks=e["teks"]) for i, e in enumerate(entri)]
     jenis = JenisDokumen(args.jenis)
-    temuan = jalankan_semua(paragraf, jenis)
 
-    print("=" * 78)
-    print(f"TEMUAN : {len(temuan)}")
-    print("=" * 78)
-    for t in temuan:
-        print()
-        print(f"T{t.nomor:<3} [{t.jenis_tanda.value:<12}] {t.aturan_id}  paragraf #{t.lokasi.paragraf_index}")
-        # Rentang yang benar-benar ditandai di Word. Dicetak supaya bisa dilihat
-        # apakah yang tersorot memang sesempit yang dimaksud, bukan satu
-        # paragraf penuh.
-        print(
-            f"  Ditandai: [{t.lokasi.offset_mulai}:"
-            f"{t.lokasi.offset_mulai + t.lokasi.panjang}] "
-            f"{t.lokasi.teks_asli!r}"
-        )
-        print(f"  Catatan : {t.catatan}")
-        if t.usulan_rumusan:
-            print(f"  Usulan  : {t.usulan_rumusan}")
-        # Yang menentukan status, BUKAN keterisian butirnya. Butir yang sudah
-        # terisi dari ekstraksi OCR tetap belum diverifikasi siapa pun.
-        butir = t.rujukan.butir
-        status = t.rujukan.status
-        if status == "visual":
-            print(f"  Rujukan : {t.rujukan.sumber} butir {butir}")
-        elif status == "ekstraksi":
-            print(
-                f"  Rujukan : {t.rujukan.sumber} butir {butir} "
-                "— BELUM DIVERIFIKASI VISUAL (isi dari ekstraksi OCR)"
-            )
+    if args.lanjut:
+        return _jalankan_lanjut(paragraf, args)
+
+    if args.struktur or args.fase2:
+        pohon = bangun_pohon(paragraf)
+        if args.struktur:
+            print("=" * 78)
+            print(f"POHON SATUAN : {len(pohon.satuan)} satuan")
+            print("=" * 78)
+            if pohon.gagal:
+                print()
+                print(f"  PARSER MELAPOR GAGAL: {pohon.gagal}")
+                print()
+            for s_ in pohon.satuan:
+                dalam = 0 if s_.induk is None else 1 + s_.id.count("-") // 2
+                isi = (s_.teks[:46] + "…") if len(s_.teks) > 46 else s_.teks
+                print(
+                    f"  {'  ' * dalam}{s_.id:<34} [{s_.jenis.value:<10}] "
+                    f"p{s_.paragraf_mulai}-{s_.paragraf_akhir}  {isi!r}"
+                )
+            hs = saring(pohon)
+            dibaca, dilewati = hs.jumlah
+            print()
+            print(f"  PENYARING LANGKAH 1: {dibaca} dibaca model, {dilewati} dilewati")
+            for s_, alasan in hs.dilewati:
+                print(f"    dilewati  {s_.id:<30} {alasan}")
+            if not args.fase2:
+                return 0
+            print()
+
+        if pohon.gagal:
+            print("=" * 78)
+            print("FASE 2 TIDAK DIJALANKAN")
+            print("=" * 78)
+            print(f"  {pohon.gagal}")
+            return 0
+        daftar = ambil_definisi(pohon)
+        if daftar.gagal:
+            print(f"  (daftar definisi: {daftar.gagal})")
         else:
-            print("  Rujukan : BELUM DIISI — butir dan kutipannya masih placeholder")
+            print(f"  Definisi terbaca: {', '.join(daftar.istilah_saja())}")
+        temuan = jalankan_mekanis(pohon, daftar, paragraf)
+        for urut, t in enumerate(temuan, start=1):
+            t.nomor = urut
+    else:
+        temuan = jalankan_semua(paragraf, jenis)
+
+    _cetak_temuan(temuan)
+
     if not temuan:
         print()
         print("Tidak ada temuan. Periksa apakah itu memang benar, atau justru tanda")

@@ -64,18 +64,18 @@ backend/app/
 │
 ├── bersama/                 DIPAKAI LINTAS TAHAP — wajib tetap kecil
 │   ├── prompt.py               PERAN + seluruh instruksi ke model — satu tempat
-│   ├── llm.py                  SATU-SATUNYA pintu ke Azure OpenAI
-│   ├── opensearch.py           SATU-SATUNYA pintu ke OpenSearch
-│   └── token.py                penghitung token
+│   ├── llm.py                  SATU-SATUNYA pintu ke Azure OpenAI (chat + embedding)
+│   └── opensearch.py           SATU-SATUNYA pintu ke OpenSearch — HANYA MEMBACA
 │
 ├── models/                  bentuk data, bukan aksi
-│   ├── temuan.py               + satuan_id, skor, tahap_konfirmasi
+│   ├── temuan.py               + satuan_id, skor
 │   ├── satuan.py               BARU — bentuk satu satuan
-│   └── pekerjaan.py            BARU — Pekerjaan + HasilSatuan (= peta)
+│   └── pekerjaan.py            BARU — BarisPeta, Dugaan, CalonTemuan, Pekerjaan
 │
 ├── db/
-│   ├── tabel.py                SQLModel
-│   └── sesi.py                 koneksi Postgres
+│   ├── sesi.py                 sambungan Postgres, dan izin untuk tidak ada
+│   ├── tabel.py                dua tabel: pekerjaan dan peta
+│   └── simpanan.py             satu-satunya pintu tulis/baca yang dipakai kode lain
 │
 ├── rules/format_baku.py     FASE 1 — TIDAK DISENTUH
 ├── api/analisis_lanjut.py   BARU — mulai, tanya status, ambil hasil
@@ -84,8 +84,8 @@ backend/app/
 frontend/src/
 ├── lib/aturan-fase2.ts      BARU — keterangan aturan untuk panel Pengaturan
 ├── lib/types.ts             disamakan dengan temuan.py
-├── lib/office.ts            + penandaan bertahap per kelompok
-└── app/taskpane/page.tsx    + progres, kelompok fase, batas tampil
+├── lib/office.ts            TIDAK DISENTUH — lapisan penandaan yang sudah terbukti
+└── app/taskpane/page.tsx    + progres, kelompok fase, batas tampil, penandaan per kelompok
 ```
 
 ### Isi `fase2/__init__.py`
@@ -116,7 +116,11 @@ frontend/src/
 | `mekanis_konsistensi.py` **bukan** `tahap*` | Karena ia memang bukan tahap: F2-001…007 melompat langsung dari tahap1 ke tahap5, tanpa menyentuh model. Namanya harus mengatakan itu |
 | `bersama/` | CLAUDE.md: panggilan ke layanan luar dikumpulkan di satu lapisan. `llm.py` dipakai tahap 2, 3, 4, **dan** 6 — menaruhnya di `tahap2_*` membuat tahap 6 meng-import dari tahap 2, yang terbaca mundur. **Aturan tegasnya:** hanya yang memanggil layanan luar atau mendefinisikan bentuk data boleh masuk sini. Tanpa aturan itu, `bersama/` jadi kode yang sebenarnya dan folder tahap cuma jadi kulit |
 | `models/satuan.py`, bukan `fase2/satuan.py` | `Satuan` itu **bentuk data**, bukan aksi — sekelas dengan `temuan.py`. Menaruhnya di antara berkas `tahap*` mencampur dua jenis isi dalam satu folder, dan itulah yang membuat nama jadi susah dibaca sekilas |
-| `db/` | Analisis berjalan menit. Brief 8.9: hasil disimpan per satuan supaya yang sudah selesai tetap ada meski proses terputus |
+| `db/simpanan.py`, bukan memanggil `sesi.py` langsung | Basis datanya **boleh tidak ada.** Kalau `DATABASE_URL` kosong, simpanan pindah ke memori dan Fase 2 tetap berjalan penuh — yang hilang cuma ketahanan terhadap restart. Penelaah yang mencoba add-in ini di mesinnya sendiri tidak perlu menyiapkan Postgres dulu, dan seluruh tes berjalan tanpa jaringan. Itu cuma mungkin kalau ada satu pintu yang menyembunyikan pilihan itu dari seluruh pemanggil |
+| `db/` menyimpan peta, **bukan temuan** | Peta bagian termahal: Langkah 2 memanggil model puluhan kali. Backend yang mati di satuan ke-68 meninggalkan 68 baris yang sudah dibayar, dan analisis berikutnya meneruskan dari situ. Temuan lahir di Langkah 5 dari bahan yang sudah tersimpan — kehilangannya cuma menuntut penalaran ulang, bukan pembacaan ulang seluruh naskah |
+| `token.py` **tidak jadi dibuat** | Jumlah token dikembalikan Azure di tiap jawaban, jadi menghitungnya sendiri berarti menebak angka yang sudah diberitahukan. Pencatatannya pindah ke `Ongkos` di `llm.py`, tempat angkanya datang |
+| `tahap_konfirmasi` **tidak jadi ditambahkan** ke `Temuan` | Nilainya akan selalu sama untuk seluruh temuan Fase 2/3, karena Langkah 5 tidak punya jalan pintas. Field yang isinya bisa ditebak dari `fase` cuma menambah satu hal lagi yang bisa salah |
+| `office.ts` **tidak disentuh** | Penandaan bertahap per kelompok dikerjakan pemanggilnya — panel memanggil `tandaiSemuaTemuan` sepuluh temuan sekali jalan. Lapisan penandaannya sendiri sudah terbukti di Fase 1 dan tidak punya alasan berubah |
 | `aturan-fase2.ts` | Penelaah harus bisa melihat sendiri apa yang diperiksa dan apa yang **tidak** — kembaran `aturan-fase1.ts` |
 
 ### 2.1 Teknologi
@@ -506,6 +510,7 @@ dan itu terlihat dari kodenya sendiri.
 
 | | |
 |---|---|
+| **Penomoran otomatis tidak ikut terbaca** | lihat di bawah — batasan terbesar Fase 2 saat ini |
 | Tidak ada penghitung kata/karakter | dihitung sendiri dari teks yang sudah dibaca |
 | `Word.search()` ~255 karakter | temuan lebih panjang tidak pernah ketemu → dipotong 120 karakter, warisan Fase 1 |
 | Penandaan butuh teks **cocok persis** | keluaran model wajib diverifikasi kode (Langkah 5) |
@@ -530,6 +535,35 @@ dan itu terlihat dari kodenya sendiri.
 | Metadata relasinya pernah keliru | perlu pemeriksaan kewajaran tahun |
 | Cakupannya belum diverifikasi | brief 8.12 menandai sendiri kesimpulannya belum diperiksa langsung |
 | Akses **baca saja** | tidak ada `index`, `update`, `delete` |
+
+**Penomoran otomatis Word — batasan terbesar Fase 2 saat ini**
+
+Di naskah PMK yang ditulis dengan penomoran otomatis Word, **"BAB I", "Pasal 1",
+dan nomor butir definisi bukan teks.** Ketiganya dihasilkan mesin penomoran
+Word, dan yang sampai ke add-in adalah paragraf yang teksnya kosong atau tanpa
+nomornya. Bentuk penomorannya sendiri `"BAB %1"`, `"Pasal %1"`, dan `"%1."` —
+jadi yang hilang persis penanda struktur yang dicari parser.
+
+Ini bukan kasus aneh: PMK 18 Tahun 2026 yang sudah diundangkan ditulis begitu.
+
+**Akibatnya:** pada naskah semacam itu parser tidak menemukan satu pun Pasal,
+melapor gagal, dan **Fase 2 tidak dijalankan sama sekali.** Perilakunya benar
+menurut kaidah proyek — memilih diam daripada menebak — tetapi diamnya jadi
+permanen, bukan sesekali. Fase 1 tetap berjalan penuh, karena judul, Menimbang,
+Mengingat, dan Menetapkan semuanya teks sungguhan.
+
+**Jalan keluarnya sudah diketahui, dan sengaja ditunda.**
+`Paragraph.listItemOrNullObject.listString` (WordApi 1.3, himpunan yang sama
+dengan cakupan "Bagian Terpilih") mengembalikan nomor yang tampil apa adanya.
+Menempelkannya di depan teks tiap paragraf berlist akan menyelesaikan
+seluruhnya.
+
+Yang membuatnya ditunda: `readParagraphs` dipakai **seluruh** aturan, termasuk
+dua belas aturan Fase 1 yang sudah terbukti dan sudah ditutup dua belas salah
+tandainya. Mengubah teks yang diterimanya berarti menguji ulang semuanya.
+Diputuskan 22 Sep 2026 untuk dikerjakan **setelah** Fase 2 terbukti pada naskah
+yang penomorannya diketik manual — supaya kalau ada yang bergeser, jelas mana
+sebabnya.
 
 **Dari pengalaman yang sudah gagal**
 
@@ -570,6 +604,8 @@ sebanyak itu sendiri adalah informasi.
    bagi penelaah. Diukur setelah dipakai, bukan ditetapkan dari meja.
 5. **Uji Word Fase 1 belum dijalankan.** Seluruh Fase 2 menumpang lapisan
    penandaan yang dibuktikan di situ.
+6. **Kapan penomoran otomatis dibaca** (lihat 4.1). Selama belum, Fase 2 cuma
+   bisa diuji pada naskah yang "Pasal 1"-nya diketik sebagai teks.
 
 ---
 
