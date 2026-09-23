@@ -75,6 +75,18 @@ def pastikan_ulang(
     if not alasan or not teks_asli or not peraturan:
         return None
 
+    # Pagar 1, ditegakkan di tempat daftarnya masih ada. Prompt sudah
+    # melarang menyebut peraturan di luar daftar, tetapi larangan kepada
+    # model tanpa pembuktian tidak berarti apa-apa.
+    sah = hasil.nama_sah
+    if peraturan not in sah:
+        # Model kadang menyalin nama berikut judulnya. Diterima kalau
+        # sebutan resminya memang ada di dalamnya; selain itu gugur.
+        cocok = [n for n in sah if n and n in peraturan]
+        if len(cocok) != 1:
+            return None
+        peraturan = cocok[0]
+
     # Pagar 2, ditegakkan kode. Prompt sudah memintanya, tetapi permintaan
     # kepada model bukan jaminan — dan temuan yang menyatakan "bertentangan"
     # begitu saja melampaui wewenang alat ini.
@@ -90,4 +102,5 @@ def pastikan_ulang(
         skor=skor_sah(isi.get("skor")),
         eksternal=True,
         pembanding=peraturan,
+        pembanding_sah=sorted(sah),
     )

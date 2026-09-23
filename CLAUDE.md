@@ -128,5 +128,8 @@ cd backend && python -m pytest tests/ -q
 cd backend && python tools/cek_docx.py <berkas.docx> --jenis PMK
 cd backend && python tools/cek_docx.py <berkas.docx> --struktur   # pohon satuan
 cd backend && python tools/cek_docx.py <berkas.docx> --fase2      # F2-0xx, gratis
+cd backend && python tools/cek_docx.py <berkas.docx> --tahap0     # apa yang dibaca AI
 cd backend && python tools/cek_docx.py <berkas.docx> --lanjut     # + jalur AI, BERBIAYA
+cd backend && python tools/cek_docx.py <berkas.docx> --lanjut --tahap3   # + peta & dugaan
+cd backend && python tools/cek_docx.py <berkas.docx> --lanjut --fase3    # + korpus OpenSearch
 ```

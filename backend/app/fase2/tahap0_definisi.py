@@ -72,8 +72,10 @@ class DaftarDefinisi(BaseModel):
         # "Penelaah" dengan benar dituduh salah mengeja "Penelaahan", lalu
         # diturunkan jadi catatan kuning padahal tidak ada yang salah.
         # Terbukti pada contoh-rancangan-uji.docx, 22 Sep 2026.
+        # Daftar untuk diulang (urutannya tetap, supaya pesan gugur bisa
+        # dibandingkan antar-jalan), himpunan untuk diperiksa keanggotaannya.
         berdefinisi = set(self.istilah_saja())
-        for istilah in berdefinisi:
+        for istilah in self.istilah_saja():
             if istilah in teks:
                 continue  # ditulis benar
             for kandidat in kata_teks:
@@ -146,6 +148,30 @@ _POLA_PENGANTAR = re.compile(
 )
 
 
+# Bentuk baku penyingkatan istilah: "X yang selanjutnya disebut Y adalah …"
+# atau "… yang selanjutnya disingkat Y adalah …". Yang dipakai di batang tubuh
+# SELALU bentuk pendeknya (Y), bukan rangkaian panjangnya.
+_POLA_PENDEK = re.compile(
+    r"^.*?\byang\s+selanjutnya\s+(?:disebut|disingkat)\s+(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _bentuk_pendek(istilah: str) -> str:
+    """Ambil bentuk pendek sebuah istilah, kalau memang disingkat.
+
+    "Direktur Jenderal Pajak yang selanjutnya disebut Direktur Jenderal"
+        → "Direktur Jenderal"
+
+    Tanpa ini, F2-003 SALAH TANDAI: ia mencari rangkaian panjang itu di batang
+    tubuh, tidak menemukannya — karena naskah memang memakai bentuk pendeknya —
+    lalu menuduh definisinya tidak pernah dipakai. Terbukti pada PMK 18 Tahun
+    2026, 23 Sep 2026.
+    """
+    m = _POLA_PENDEK.match(istilah)
+    return m.group(1).strip().rstrip(",") if m else istilah
+
+
 def ambil_definisi(pohon: PohonSatuan) -> DaftarDefinisi:
     """Ambil daftar istilah dari Pasal 1.
 
@@ -177,7 +203,7 @@ def ambil_definisi(pohon: PohonSatuan) -> DaftarDefinisi:
         m = _POLA_DEFINISI.match(teks)
         if not m:
             continue
-        istilah = m.group(1).strip().rstrip(",")
+        istilah = _bentuk_pendek(m.group(1).strip().rstrip(","))
         arti = m.group(2).strip().rstrip(".").strip()
 
         # Batas kewajaran: istilah yang kepanjangan hampir pasti hasil

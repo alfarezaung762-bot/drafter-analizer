@@ -12,12 +12,17 @@ export type JenisDokumen = "PMK" | "KMK";
 /**
  * Cara temuan dipasang di dokumen.
  * - penggantian: teks lama merah dicoret, usulannya hijau di sebelahnya
+ * - penghapusan: teks lama merah dicoret, TANPA sisipan hijau — perbaikannya
+ *   membuang, bukan mengganti (ditetapkan penelaah 23 Sep 2026)
  * - catatan: blok kuning, warna huruf tidak disentuh
+ *
+ * Tidak satu pun menghapus teks penelaah; "penghapusan" cuma mewarnai dan
+ * mencoret. Yang menghapus tetap penelaah.
  *
  * Keterangan lama menyebut "perubahan terlacak (Track Changes)". Jalur itu
  * ditinggalkan 17 Sep 2026 — alasannya di docs/fase1 drafter.md bagian 6.1.
  */
-export type JenisTanda = "penggantian" | "catatan";
+export type JenisTanda = "penggantian" | "penghapusan" | "catatan";
 
 export type StatusTemuan = "belum_ditinjau" | "diterima" | "ditolak";
 
@@ -72,14 +77,54 @@ export interface Temuan {
   lokasi: LokasiTemuan;
   /** Alasan temuan, bukan pengulangan apa yang sudah terlihat di naskah. */
   catatan: string;
+  /**
+   * Apa yang sebaiknya DILAKUKAN penelaah. Dipisah dari `catatan` supaya
+   * komentar Word bisa ditata "Temuan:" lalu "Saran:". Boleh kosong.
+   */
+  saran?: string;
+  /**
+   * DI MANA perbaikannya dikerjakan, sudah dalam bentuk yang dibaca manusia —
+   * "Pasal 1 (Ketentuan Umum)", "bagian Menimbang". Muncul sebagai baris
+   * "Perbaiki di:" di komentar Word.
+   *
+   * Kosong berarti tempatnya tidak bisa dibuktikan ada di naskah, ATAU
+   * tempatnya satuan temuan ini sendiri. Keduanya berakhir sama: barisnya
+   * tidak ditulis. Backend yang memutuskan, panel tidak menebak.
+   */
+  sasaran?: string;
+  /**
+   * Teks pengganti harfiah untuk lokasi.teks_asli — HANYA terisi pada temuan
+   * `penggantian`, dan penggantian hanya dipakai ketika kesalahannya terbukti
+   * dan penggantinya satu dan pasti. Pada temuan `catatan` selalu null;
+   * contoh rumusan dari model ikut ke dalam `saran`, bukan ke naskah.
+   */
   usulan_rumusan: string | null;
+  /**
+   * Keberatan model atas temuan ini — dan HANYA keberatan, bukan pembatalan.
+   * Model membaca temuan Fase 1 saat menyusun peta; kalau menurutnya sebuah
+   * temuan keliru karena konteks yang lebih luas, catatannya muncul di sini
+   * dan temuannya TETAP ADA. Penelaah yang memutuskan.
+   */
+  catatan_ai?: string;
   rujukan: RujukanTemuan;
   status: StatusTemuan;
 }
 
 export interface ParagrafInput {
   index: number;
+  /** Isi paragraf PERSIS seperti Word menyimpannya. Offset penandaan memakai ini. */
   teks: string;
+  /**
+   * Nomor otomatis Word apa adanya seperti tampil — "Pasal 5", "(2)", "a.",
+   * "BAB I". Kosong untuk paragraf yang tidak bernomor otomatis.
+   *
+   * Dipisah dari `teks` dan TIDAK ditempel ke depannya: offset penandaan
+   * dihitung terhadap `teks`, dan Word tidak punya awalan itu di teksnya.
+   * Menempelkannya membuat seluruh sorotan meleset sepanjang awalannya.
+   */
+  penanda?: string;
+  /** Tingkat kedalaman penomoran (ilvl Word), 0 paling luar. -1 bila bukan butir. */
+  tingkat?: number;
   /**
    * Dulu diisi dari font.allCaps untuk menandai paragraf yang DITAMPILKAN
    * kapital meski hurufnya tersimpan campur. Tidak lagi dikirim frontend:
@@ -157,6 +202,12 @@ export interface AnalisisLanjutRequest {
   fase3?: boolean;
   /** Nomor pekerjaan lama yang petanya dipakai ulang, supaya tidak dibayar dua kali. */
   lanjutkan?: number;
+  /**
+   * Temuan Fase 1 yang SUDAH terpasang di naskah. Dikirim supaya model tidak
+   * mengulangnya, dan supaya Langkah 5 bisa membuang calon yang rentangnya
+   * bertindihan.
+   */
+  temuan_fase1?: Temuan[];
 }
 
 export interface MulaiResponse {
@@ -176,4 +227,9 @@ export interface KemajuanResponse {
   /** Alasan gagal, atau keterangan kenapa Fase 2 tidak dijalankan (mis. naskah KMK). */
   pesan: string;
   temuan: Temuan[];
+  /**
+   * Temuan Fase 1 yang dapat catatan keberatan dari model. Panel memperbarui
+   * komentarnya di naskah; temuannya sendiri tidak dihapus.
+   */
+  keberatan?: Temuan[];
 }

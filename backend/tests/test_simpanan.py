@@ -13,20 +13,13 @@ kemajuan tersimpan, dan peta tidak pernah dibayar dua kali. Jalur Postgres
 memakai kode yang sama persis, tinggal ditukar tempat simpannya.
 """
 
-import pytest
-
-from app.core.config import settings
 from app.db import sesi as db_sesi
 from app.db import simpanan
 from app.models.pekerjaan import BarisPeta, StatusPekerjaan
 
 
-@pytest.fixture(autouse=True)
-def tanpa_basis_data(monkeypatch):
-    monkeypatch.setattr(settings, "DATABASE_URL", "")
-    simpanan.bersihkan_memori()
-    yield
-    simpanan.bersihkan_memori()
+# Fixture `tanpa_basis_data` hidup di tests/conftest.py dan berlaku otomatis
+# untuk seluruh suite, termasuk berkas ini.
 
 
 def test_pekerjaan_baru_dapat_nomor_dan_berstatus_berjalan():

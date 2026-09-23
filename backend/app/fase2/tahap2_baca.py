@@ -28,6 +28,7 @@ from app.bersama.llm import Klien, Ongkos, baca_json
 from app.fase2.tahap0_definisi import DaftarDefinisi
 from app.models.pekerjaan import BarisPeta
 from app.models.satuan import JenisSatuan, PohonSatuan, Satuan
+from app.models.temuan import Temuan
 
 _RUJUKAN = re.compile(
     r"sebagaimana\s+dimaksud\s+(?:dalam|pada)\s+Pasal\s+(\d+[A-Z]?)"
@@ -114,16 +115,69 @@ def kelompokkan(satuan: list[Satuan], per_panggilan: int) -> list[list[Satuan]]:
     return hasil
 
 
-def susun_bahan(kelompok: list[Satuan], pohon: PohonSatuan, konteks: str) -> str:
-    """Rangkai bahan satu panggilan Langkah 2."""
+def temuan_di_satuan(satuan: Satuan, temuan: list[Temuan]) -> list[Temuan]:
+    """Temuan yang jatuh di dalam rentang paragraf satuan ini."""
+    return [
+        t
+        for t in temuan
+        if satuan.paragraf_mulai <= t.lokasi.paragraf_index < satuan.paragraf_akhir
+    ]
+
+
+def susun_bahan(
+    kelompok: list[Satuan],
+    pohon: PohonSatuan,
+    konteks: str,
+    temuan_fase1: Optional[list[Temuan]] = None,
+) -> str:
+    """Rangkai bahan satu panggilan Langkah 2.
+
+    Temuan Fase 1 yang jatuh di satuan ini ikut dilampirkan. Gunanya bukan
+    supaya model menilainya, melainkan supaya model TIDAK MENGULANGNYA:
+    duplikat yang tidak pernah lahir jauh lebih murah daripada duplikat yang
+    dibuang belakangan, dan komentar yang menumpuk di margin adalah keluhan
+    yang sudah pernah terjadi.
+    """
+    sudah = temuan_fase1 or []
     bagian = [konteks, "", "== SATUAN YANG DIPERIKSA =="]
     for s in kelompok:
         isi = pohon.teks_lengkap(s.id) or s.teks
         bagian.append("[" + s.id + "] " + isi)
+        for t in temuan_di_satuan(s, sudah):
+            bagian.append(
+                f"    (SUDAH DITEMUKAN, T{t.nomor}) {t.catatan} "
+                f"— pada teks: {t.lokasi.teks_asli!r}"
+            )
         for r in satuan_dirujuk(s, pohon):
             isi_r = pohon.teks_lengkap(r.id) or r.teks
             bagian.append("    (dirujuk) [" + r.id + "] " + isi_r)
     return "\n".join(bagian)
+
+
+def _serap_keberatan(isi: dict, temuan_fase1: list[Temuan]) -> None:
+    """Tempelkan keberatan model ke temuan yang bersangkutan.
+
+    MENEMPEL, TIDAK MENGHAPUS. Temuannya tetap muncul di panel dan di naskah;
+    yang bertambah cuma satu baris catatan di komentarnya. Penelaah yang
+    memutuskan — ditetapkan 23 Sep 2026.
+    """
+    daftar = isi.get("keberatan")
+    if not isinstance(daftar, list) or not temuan_fase1:
+        return
+    menurut_nomor = {t.nomor: t for t in temuan_fase1}
+    for k in daftar:
+        if not isinstance(k, dict):
+            continue
+        try:
+            nomor = int(k.get("nomor"))
+        except (TypeError, ValueError):
+            continue
+        alasan = str(k.get("alasan", "")).strip()
+        sasaran = menurut_nomor.get(nomor)
+        # Nomor yang tidak ada di daftar yang dikirim berarti model mengarang
+        # sasarannya — dilewati, bukan ditebak.
+        if sasaran is not None and alasan:
+            sasaran.catatan_ai = alasan
 
 
 def baca_satuan(
@@ -135,6 +189,7 @@ def baca_satuan(
     per_panggilan: int = 6,
     lapor: Optional[Callable[[int, int, list[BarisPeta]], None]] = None,
     sudah_ada: Optional[list[BarisPeta]] = None,
+    temuan_fase1: Optional[list[Temuan]] = None,
 ) -> list[BarisPeta]:
     """Hasilkan PETA — satu baris ringkasan per satuan yang lolos penyaring.
 
@@ -160,7 +215,7 @@ def baca_satuan(
     total = len(untuk_dibaca)
 
     for kelompok in kelompokkan(sisa, per_panggilan):
-        bahan = susun_bahan(kelompok, pohon, konteks)
+        bahan = susun_bahan(kelompok, pohon, konteks, temuan_fase1)
         jawab = klien.tanya(P.PERAN, P.susun(P.TAHAP2_BACA, bahan))
         ongkos.catat(jawab)
 
@@ -173,6 +228,8 @@ def baca_satuan(
             if lapor is not None:
                 lapor(len(peta), total, [])
             continue
+
+        _serap_keberatan(isi, temuan_fase1 or [])
 
         baru: list[BarisPeta] = []
         sah = {s.id for s in kelompok}

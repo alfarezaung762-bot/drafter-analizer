@@ -474,35 +474,202 @@ Fase 3 memang kemungkinan, bukan kesimpulan.
 
 ### Fase 2 — mekanis, tanpa AI, hasilnya pasti
 
-| Kode | Menemukan |
-|---|---|
-| F2-001 | Rujukan "sebagaimana dimaksud dalam Pasal N" ke pasal/ayat yang **tidak ada** |
-| F2-002 | Istilah berkapital yang **tidak ada** di daftar definisi Pasal 1 |
-| F2-003 | Definisi di Pasal 1 yang **tidak pernah dipakai** |
-| F2-004 | Penomoran melompat atau berulang (Pasal 5 → Pasal 7; dua ayat (2)) |
-| F2-005 | Lampiran dirujuk tapi tidak ada, atau ada tapi tidak dirujuk |
-| F2-006 | Urutan "Mengingat" tidak mengikuti hierarki |
+| Kode | Menemukan | Dibangun |
+|---|---|---|
+| F2-001 | Rujukan "sebagaimana dimaksud dalam Pasal N" ke pasal/ayat yang **tidak ada** | ✅ |
+| F2-002 | Istilah berkapital yang **tidak ada** di daftar definisi Pasal 1 | ⏸ menunggu daftar pengecualian dari naskah nyata ("Menteri Keuangan", "Direktorat Jenderal") |
+| F2-003 | Definisi di Pasal 1 yang **tidak pernah dipakai** | ✅ |
+| F2-004 | Penomoran melompat atau berulang (Pasal 5 → Pasal 7; dua ayat (2)) | ✅ |
+| F2-005 | Lampiran dirujuk tapi tidak ada, atau ada tapi tidak dirujuk | ⏸ parser belum membaca lampiran sama sekali |
+| F2-006 | Urutan "Mengingat" tidak mengikuti hierarki | ⏸ |
+| F2-007 | Bilangan yang angkanya tidak cocok dengan hurufnya — "30 (tiga belas)" | ✅ tambahan, tidak ada di rancangan awal |
 
 ### Fase 2 — penalaran, dengan AI
 
-| Kode | Menemukan |
-|---|---|
-| F2-101 | **Pasal bertabrakan** — dua ketentuan yang tidak bisa berlaku bersamaan |
-| F2-102 | Kewajiban **tanpa pemikul** yang jelas |
-| F2-103 | Rumusan yang **bisa dibaca dua arah** — syarat kumulatif atau alternatif |
-| F2-104 | Kata operasional **bertabrakan** dalam satu ketentuan (wajib + dapat) |
-| F2-105 | Tujuan di Menimbang yang **tidak tercakup** batang tubuh |
+| Kode | Menemukan | Dibangun |
+|---|---|---|
+| F2-101 | Rumusan yang **bisa dibaca dua arah** | ✅ |
+| F2-102 | Kewajiban **tanpa pemikul** yang jelas | ✅ |
+| F2-103 | Kata operasional **bertabrakan** dalam satu ketentuan (wajib + dapat) | ✅ |
+| F2-104 | **Dua ketentuan bertabrakan** — tidak bisa berlaku bersamaan. Keduanya dibaca utuh dalam satu panggilan | ✅ |
+| F2-105 | Tujuan di Menimbang yang **tidak tercakup** batang tubuh | ✅ |
+
+Urutan nomornya berubah dari rancangan awal: tabrakan dipindah ke F2-104
+supaya ia bersebelahan dengan cabangnya sendiri (`tahap4_tabrakan.py`), dan
+F2-101…103 jadi berisi penilaian atas SATU satuan saja. Tidak ada akibatnya
+selain penomoran — tetapi kode, panel, dan tabel rujukan harus sepakat, dan
+sekarang sepakat.
 
 ### Fase 3 — pembanding dari korpus
 
-| Kode | Menemukan |
-|---|---|
-| F3-001 | **Berpotensi bertentangan** dengan peraturan lain yang masih berlaku |
-| F3-002 | Dasar hukum di Mengingat yang **sudah dicabut atau diubah** |
+| Kode | Menemukan | Dibangun |
+|---|---|---|
+| F3-001 | **Berpotensi bertentangan** dengan peraturan lain yang masih berlaku. Butuh korpus + embedding + model | ✅ |
+| F3-002 | Dasar hukum di Mengingat yang **sudah dicabut**. Butuh korpus saja — **tidak memanggil model, jadi gratis** | ✅ |
+
+F3-002 berjalan **sebelum** penjaga struktur, dan itu disengaja: ia cuma
+membutuhkan bagian Mengingat, yang terbaca utuh bahkan pada naskah yang batang
+tubuhnya gagal diurai — KMK berdiktum, naskah perubahan, dan naskah
+berpenomoran otomatis Word. Pada ketiganya Fase 2 diam, tetapi dasar hukumnya
+tetap diperiksa.
 
 Penomoran sengaja dibedakan: **`F2-0xx` deterministik, `F2-1xx` hasil
 penalaran.** Penelaah berhak tahu mana yang pasti dan mana yang tebakan mesin —
 dan itu terlihat dari kodenya sendiri.
+
+### 4.3 Satu tombol, dan cara dua fase tidak bertabrakan
+
+Ditetapkan penelaah 23 Sep 2026. **Satu tombol "Jalankan Analisis"**; panel
+Pengaturan yang menentukan apa yang jalan. Penelaah tidak perlu tahu batas
+fase untuk memakai alat ini — ia mencentang apa yang ingin diperiksa, alat
+yang mengurus urutannya.
+
+Paragraf dibaca sekali, lalu Fase 1 (detik) → ditandai segera → Fase 2/3
+(menit) → ditandai per kelompok. Hasil Fase 1 tidak ditahan menunggu Fase 2.
+
+Karena keduanya kini berjalan berurutan, keduanya bisa menemukan hal yang
+sama. Penyelesaiannya: **AI membaca, kode yang memutuskan.**
+
+| | Mekanisme | Siapa yang memutuskan |
+|---|---|---|
+| ① | Temuan Fase 1 dilampirkan ke model saat menyusun peta, dengan larangan mengulang | model — duplikat tidak pernah lahir |
+| ② | Calon yang rentangnya bertindihan dengan temuan yang sudah ada dibuang | **kode**, dengan perbandingan rentang |
+| ③ | Model yang menilai sebuah temuan keliru menempelkan `catatan_ai` | penelaah membaca keduanya |
+
+**Model tidak pernah menghapus temuan Fase 1.** Kesalahan Fase 1 bisa
+dibuktikan baris demi baris; keyakinan model tidak bisa. Temuan yang hilang
+diam-diam adalah kegagalan yang paling sulit diketahui penelaah.
+
+### 4.4 Ekspor Tahap 0 — alat pengembang
+
+Tombol di **paling bawah panel Pengaturan**. Menghasilkan teks mentah berisi
+apa yang benar-benar akan dibaca model: paragraf apa adanya berikut
+penandanya, pohon satuan, daftar definisi, konteks tetap, dan muatan tiap
+panggilan Langkah 2 persis seperti yang dikirim.
+
+**Bagian paling atas sengaja daftar satuan yang DIBUANG penyaring Langkah 1,
+berikut teks utuhnya.** Satuan itu tidak pernah sampai ke model dan tidak
+meninggalkan jejak apa pun di panel — ini satu-satunya cara memeriksa apakah
+pembuangannya benar. Penyaringnya berpihak pada meloloskan, tetapi belum
+pernah diperiksa terhadap naskah nyata.
+
+Memanggil kode yang sama dengan jalur sungguhan (`susun_konteks_tetap`,
+`susun_bahan`, `saring`), bukan menyusun ulang: ekspor yang berbohong lebih
+berbahaya daripada tidak ada ekspor, karena ia dipakai memutuskan bahwa
+sesuatu bukan masalah. Tidak memanggil model, tidak berbiaya.
+
+Juga tersedia tanpa Word: `cek_docx.py --tahap0`.
+
+### 4.5 Ekspor Tahap 3 — alat pengembang
+
+Tombol tepat di bawah Ekspor Tahap 0. Pasangannya, dan menjawab pertanyaan
+yang berbeda:
+
+| | Memperlihatkan | Kapan bisa |
+|---|---|---|
+| **Tahap 0** | apa yang **dibaca** model | kapan saja, gratis |
+| **Tahap 3** | apa yang **ditalar** model | sesudah analisis Fase 2 penalaran pernah berjalan |
+
+**Kenapa perlu ada.** Langkah 2 meringkas tiap satuan jadi satu baris, dan
+Langkah 3 menalar di atas kumpulan baris itu — bukan di atas teks penuh.
+Ringkasan yang meleset membuat seluruh penalaran bertumpu pada gambaran yang
+salah, dan **tidak ada langkah sesudahnya yang bisa mengetahuinya**: Langkah 4
+hanya menguji dugaan yang terlanjur lahir, tidak pernah dugaan yang seharusnya
+lahir tetapi tidak. Satu-satunya cara memeriksa apakah ringkasannya jujur
+adalah membacanya sendiri.
+
+Isinya berurutan: peta terurai per satuan (dibaca lebih dulu), satuan yang
+tidak masuk peta, bahan Langkah 3 persis seperti yang dikirim, lalu dugaan
+yang keluar berikut penanda `eksternal`-nya — penanda itu yang menentukan
+apakah Langkah 6 mencari ke korpus atau diam.
+
+**Membaca peta yang tersimpan, tidak menjalankan ulang.** Model tidak
+deterministik: Langkah 2 yang dijalankan ulang menghasilkan ringkasan yang
+berbeda, dan ekspor yang memperlihatkan peta lain daripada yang dipakai akan
+menyesatkan orang yang sedang mencari bug. Akibatnya ekspor ini kosong sampai
+ada analisis yang pernah berjalan — itu keadaan yang benar, bukan kegagalan.
+
+Satu keadaan dibedakan terang-terangan: **dugaan yang belum pernah tercatat**
+dan **Langkah 3 yang berjalan tanpa menemukan apa pun**. Dugaan tinggal di
+memori sementara peta bertahan di basis data, jadi sesudah backend restart
+keduanya terlihat sama kalau tidak dibedakan.
+
+Juga tersedia tanpa Word: `cek_docx.py --lanjut --tahap3`.
+
+### 4.2 Hijau berarti terbukti, dan sumber penggantinya bisa ditunjuk
+
+Ditetapkan penelaah 22 Sep 2026, **diperbarui 23 Sep 2026**. Yang berubah
+bukan syarat buktinya, melainkan dari mana bukti penggantinya boleh datang:
+
+> "kalo memang alat yakin itu salah rasanya aneh jika tidak memberikan saran
+> perbaikan (karna itulah gunanya tahap 6 opensearch), kecuali kesalahannya
+> mewajibkan itu di hapus baru boleh tidak memberikan saran perbaikan … tpi
+> kalo memang benar benar tidak tau saran perbaikan lebih baik tidak perlu di
+> munculkan"
+
+| | Kapan dipakai | Yang terjadi di naskah |
+|---|---|---|
+| **Hijau** (`penggantian`) | salah terbukti **dan** penggantinya didapat dengan sumber yang bisa ditunjuk | teks lama merah dicoret, usulannya hijau di sebelahnya, sumbernya disebut di komentar |
+| **Merah saja** (`penghapusan`) | salah terbukti, perbaikannya **membuang** | teks lama merah dicoret, tidak ada hijau |
+| **Kuning** (`catatan`) | kemungkinan, atau penggantinya tidak diketahui | blok kuning saja, tidak ada yang dicoret |
+
+Keputusan per aturan tertulis di `tahap5_verifikasi.py`, dan tidak seragam:
+F2-001 terbukti tetapi penggantinya tidak bisa diketahui siapa pun; F2-003
+perbaikannya membuang; F2-007 mana yang benar justru pertanyaan pokoknya;
+F2-1xx boleh hijau **hanya** kalau rumusannya datang dari Langkah 6c;
+F3-001 kemungkinan, bukan kesimpulan.
+
+**Syaratnya ditegakkan kode, bukan niat baik.** Penilaian model atas dirinya
+sendiri bukan bukti, jadi usulan F2-1xx tanpa `pembanding` turun jadi contoh
+rumusan di komentar — persis seperti sebelum kebijakan ini berubah. Yang
+dibuka bukan izin bagi model menulis ke naskah, melainkan izin bagi rumusan
+yang sudah dipakai peraturan berlaku untuk masuk sebagai usulan.
+
+Dan yang paling menentukan: empat pemeriksaan per-usulan di Langkah 5 —
+`usulan_harfiah`, `cari_mirip`, `pasal_karangan`, dan rentang `lokasi` —
+**tidak satu pun dilonggarkan**. Itulah yang sebenarnya mencegah naskah
+rusak, bukan daftar aturan mana yang boleh hijau.
+
+### 4.3 Tiap temuan menyebut ke mana perbaikannya
+
+Muncul dari uji di Word: komentar menempel di Pasal 5 tempat frasanya
+bermasalah, tetapi perbaikannya — menambah definisi — berada di Pasal 1, dan
+penelaah tidak diberi tahu. Saran yang tidak menyebut tempatnya bukan saran,
+melainkan keluhan.
+
+Model mengisi `sasaran` dari **daftar tertutup**: `satuan ini`, `judul`,
+`menimbang`, `mengingat`, `menetapkan`, `pasal-1`, atau id satuan mana pun.
+Langkah 5 membuktikan tempat itu ada di pohon; yang tidak terbukti
+**dikosongkan**, karena menunjuk Pasal 45 yang tidak ada lebih buruk daripada
+diam soal tempat. Barisnya juga dilewati kalau sasarannya satuan tempat
+komentar itu sendiri menempel.
+
+Aturan mekanis tidak mengisinya sama sekali, dan itu kesimpulan: keempatnya
+menandai persis tempat yang harus diperbaiki.
+
+**Bentuk komentar di Word:**
+
+```
+Temuan:
+Frasa 'analisis potensi' tidak dijelaskan ruang lingkupnya.
+
+Perbaiki di: Pasal 1 (Ketentuan Umum)
+
+Saran:
+Tambahkan definisi 'analisis potensi' pada daftar istilah di Pasal 1.
+Rumusan serupa: PMK 40 TAHUN 2024 (masih berlaku).
+
+KMK 527/KMK.01/2022 Lampiran II (butir belum diisi) — https://jdih… (T2)
+```
+
+Tiga baris yang wajib ada, dan masing-masing menjawab pertanyaan penelaah
+yang berbeda: **Perbaiki di** menjawab "di mana", **Saran** menjawab "apa",
+dan **baris rujukan** paling bawah menjawab "atas dasar apa". Gunanya yang
+terakhir disebut penelaah sendiri: supaya temuan bisa **ditimbang**, bukan
+cuma dipercaya atau ditolak.
+
+Baris `Saran` **dikosongkan** kalau penggantinya memang tidak diketahui.
+Anjuran yang cuma mengulang masalahnya tidak menolong siapa pun.
 
 ### 4.1 Batasan
 
@@ -511,6 +678,7 @@ dan itu terlihat dari kodenya sendiri.
 | | |
 |---|---|
 | **Penomoran otomatis tidak ikut terbaca** | lihat di bawah — batasan terbesar Fase 2 saat ini |
+| **Naskah perubahan belum didukung** | lihat di bawah — dulu menghasilkan salah tandai |
 | Tidak ada penghitung kata/karakter | dihitung sendiri dari teks yang sudah dibaca |
 | `Word.search()` ~255 karakter | temuan lebih panjang tidak pernah ketemu → dipotong 120 karakter, warisan Fase 1 |
 | Penandaan butuh teks **cocok persis** | keluaran model wajib diverifikasi kode (Langkah 5) |
@@ -526,44 +694,94 @@ dan itu terlihat dari kodenya sendiri.
 | Berbayar, dan modelnya akan diganti | ukuran potongan jadi angka yang bisa diatur |
 | Ada kuota panggilan per menit | jumlah yang berbarengan dibatasi, dengan perlambatan otomatis |
 
-**Dari korpus (Fase 3)**
+**Dari korpus (Fase 3)** — diperiksa langsung 23 Sep 2026
+
+Sampai tanggal itu isi indeks cuma diketahui dari keterangan lisan, dan
+brief 8.12 menandai sendiri bahwa itu belum diverifikasi. Sesudah diperiksa,
+**seluruh dugaan awal tentang bentuknya keliru.** Yang benar:
+
+```
+law_analyzer_emb3sm          18.543 dokumen peraturan
+├── Judul, Nomor, Tahun, Bentuk, Status       ← PascalCase
+└── Blocks[]                 nested — satu blok per pasal
+    ├── Content              TEKS PASALNYA DI SINI
+    ├── Pasal                "pasal-14"
+    ├── Type                 "CONTENT_PASAL" | "DEFINISI" | …
+    └── Chunks[]             nested — HANYA VEKTOR, tanpa teks
+        └── MainVector       knn_vector 1536 dim
+```
 
 | | |
 |---|---|
+| **`index.knn` TIDAK menyala** | kueri `knn` biasa mengembalikan **nol hasil tanpa error** — diam yang tidak kelihatan. Jalan keluarnya `script_score` dengan `knn_score`: jarak dihitung persis, 0,5–1,7 detik untuk 18 ribu dokumen. Menyalakan `index.knn` berarti mengubah setelan indeks produksi yang sedang dipakai Law Analyzer — **dilarang** |
+| Vektor di `Chunks`, teks di `Blocks` induknya | kuerinya bersarang dua tingkat, `inner_hits` diambil dari tingkat `Blocks`, supaya kutipan dan kecocokan makna menunjuk pasal yang **sama** |
 | Teksnya hasil **OCR yang rusak** | kutipan wajib bawa penanda "belum diverifikasi" — mekanismenya sudah ada di `RujukanTemuan` |
-| Memuat peraturan yang sudah dicabut | saring status berlaku sebagai penyaring **keras** |
-| Metadata relasinya pernah keliru | perlu pemeriksaan kewajaran tahun |
-| Cakupannya belum diverifikasi | brief 8.12 menandai sendiri kesimpulannya belum diperiksa langsung |
-| Akses **baca saja** | tidak ada `index`, `update`, `delete` |
+| Memuat peraturan yang sudah dicabut | 2.466 dari 18.543 berstatus "Tidak Berlaku". Disaring **keras** di tingkat dokumen, bukan diturunkan skornya |
+| Blok bukan-pasal ikut terambil | disaring `Blocks.Type = CONTENT_PASAL`; blok DEFINISI cocok secara makna tetapi tidak bisa dipertentangkan dengan ketentuan |
+| Cakupannya | Peraturan Menteri Keuangan 6.243 · Peraturan Pemerintah 6.663 · Undang-Undang 2.555 · Peraturan Presiden 2.322, dan lainnya |
+| Akses **baca saja** | hanya `_search`; tidak ada jalan ke `index`, `update`, `delete`, `_settings` |
 
-**Penomoran otomatis Word — batasan terbesar Fase 2 saat ini**
+**Naskah PERUBAHAN belum didukung**
 
-Di naskah PMK yang ditulis dengan penomoran otomatis Word, **"BAB I", "Pasal 1",
-dan nomor butir definisi bukan teks.** Ketiganya dihasilkan mesin penomoran
-Word, dan yang sampai ke add-in adalah paragraf yang teksnya kosong atau tanpa
-nomornya. Bentuk penomorannya sendiri `"BAB %1"`, `"Pasal %1"`, dan `"%1."` —
-jadi yang hilang persis penanda struktur yang dicari parser.
+PMK/KMK perubahan susunannya berbeda sama sekali: batang tubuhnya "Pasal I"
+dan "Pasal II" (angka Romawi), dan di dalam Pasal I **dikutip pasal-pasal
+milik peraturan induk** yang sedang diubah.
 
-Ini bukan kasus aneh: PMK 18 Tahun 2026 yang sudah diundangkan ditulis begitu.
+Akibatnya, sebelum ada penjaga, alat **salah tandai**: F2-001 menandai
+"sebagaimana dimaksud dalam Pasal 18" sebagai rujukan menggantung, padahal
+Pasal 18 memang ada — di peraturan induknya. Pohon satuannya juga keliru
+(kutipan "Pasal 5" dibaca sebagai pasal dokumen ini), dan kekeliruan itu tidak
+melaporkan dirinya.
 
-**Akibatnya:** pada naskah semacam itu parser tidak menemukan satu pun Pasal,
-melapor gagal, dan **Fase 2 tidak dijalankan sama sekali.** Perilakunya benar
-menurut kaidah proyek — memilih diam daripada menebak — tetapi diamnya jadi
-permanen, bukan sesekali. Fase 1 tetap berjalan penuh, karena judul, Menimbang,
-Mengingat, dan Menetapkan semuanya teks sungguhan.
+Sejak 22 Sep 2026 naskah perubahan dikenali dari judul ("PERUBAHAN ATAS",
+termasuk "PERUBAHAN KEDUA ATAS") atau dari "Pasal I" berangka Romawi, lalu
+**Fase 2 menolak jalan sambil menyebut alasannya**. Fase 1 tetap berjalan
+penuh — pembukaan naskah perubahan bentuknya sama saja.
 
-**Jalan keluarnya sudah diketahui, dan sengaja ditunda.**
-`Paragraph.listItemOrNullObject.listString` (WordApi 1.3, himpunan yang sama
-dengan cakupan "Bagian Terpilih") mengembalikan nomor yang tampil apa adanya.
-Menempelkannya di depan teks tiap paragraf berlist akan menyelesaikan
-seluruhnya.
+**Rencana dukungannya — ditetapkan penelaah 23 Sep 2026, dikerjakan menyusul.**
+Model wajib membaca pasal-pasal peraturan induk yang bersangkutan lewat
+OpenSearch. Pondasinya sudah ada sejak Fase 3 jalan: indeks memuat `Blocks`
+per pasal berikut teksnya, dan `PencariOpenSearch` sudah bisa menemukan sebuah
+peraturan dari bentuk + nomor + tahun.
 
-Yang membuatnya ditunda: `readParagraphs` dipakai **seluruh** aturan, termasuk
-dua belas aturan Fase 1 yang sudah terbukti dan sudah ditutup dua belas salah
-tandainya. Mengubah teks yang diterimanya berarti menguji ulang semuanya.
-Diputuskan 22 Sep 2026 untuk dikerjakan **setelah** Fase 2 terbukti pada naskah
-yang penomorannya diketik manual — supaya kalau ada yang bergeser, jelas mana
-sebabnya.
+Yang perlu ditambahkan:
+
+1. Baca nomor peraturan induk dari judul ("PERUBAHAN ATAS … Nomor 12 Tahun
+   2024") — pembacanya sudah ada, `baca_kutipan`.
+2. Ambil seluruh `Blocks` induknya dari korpus, susun jadi **pohon satuan
+   kedua**.
+3. Periksa rujukan terhadap **gabungan** kedua pohon: "Pasal 18" yang tidak
+   ada di draf tetapi ada di induknya bukan rujukan menggantung.
+4. Pasal yang diubah dibandingkan dengan bunyi lamanya, sehingga terlihat apa
+   yang sebenarnya berubah.
+
+Sampai itu ada, alat memilih diam — dengan suara.
+
+**Penomoran otomatis Word — sudah diselesaikan 23 Sep 2026**
+
+Dulu batasan terbesar Fase 2. Di naskah PMK yang ditulis dengan penomoran
+otomatis Word, "BAB I", "Pasal 1", dan nomor ayat **bukan teks** — ketiganya
+dihasilkan mesin penomoran, dan `paragraph.text` tidak memuatnya. Pada PMK 18
+Tahun 2026: 585 dari 974 paragraf bernomor otomatis, 110 di antaranya teksnya
+kosong sama sekali.
+
+Akibatnya parser tidak menemukan satu pun Pasal, dan pada naskah yang Pasalnya
+terbaca tetapi ayatnya tidak, F2-001 **salah tandai** — menuduh "Pasal 2
+ayat (2) tidak ada" padahal jelas ada di layar.
+
+**Jalan keluarnya:** `ListItem.listString` dan `ListItem.level` (WordApi 1.3)
+dikirim sebagai **medan terpisah** `penanda`, bukan ditempel ke depan teks.
+Alasannya menentukan: `lokasi.offset_mulai` dihitung terhadap teks paragraf,
+dan Word tidak punya awalan "(2) " di teksnya — menempelkannya membuat seluruh
+sorotan meleset sepanjang awalan itu. Parser membaca `ParagrafInput.utuh`
+(penanda + teks); yang menghitung offset tetap membaca `teks`.
+
+Hasilnya pada PMK 18: **599 satuan, 97 Pasal bernomor 1–97 berurutan, 123 ayat,
+333 huruf**, nol salah tandai.
+
+Satu akibat yang perlu diketahui: temuan yang teks aslinya seluruhnya berada di
+dalam nomor otomatis — misalnya F2-004 yang menandai nomor pasal yang melompat
+— tidak bisa ditandai, jadi aturannya memilih diam.
 
 **Dari pengalaman yang sudah gagal**
 
@@ -598,8 +816,11 @@ sebanyak itu sendiri adalah informasi.
 2. **Aturan mekanis mana yang dibangun lebih dulu.** Brief 8.11 menandai
    daftarnya belum dikonfirmasi penelaah. Jalan murahnya: bandingkan dengan
    coretan telaah pada RPMK/RKMK yang sudah diberikan mentor.
-3. **Bentuk index OpenSearch yang sebenarnya.** Keterangan "Dokumen → Blok, satu
-   blok per pasal" masih lisan. Perlu dilihat langsung sebelum Fase 3 ditulis.
+3. ~~**Bentuk index OpenSearch yang sebenarnya.**~~ **SUDAH DIJAWAB 23 Sep
+   2026** — diperiksa langsung, hasilnya di bagian 4.1. Keterangan lisan
+   "Dokumen → Blok, satu blok per pasal" ternyata benar, tetapi nama medannya
+   dan letak vektornya sama sekali berbeda dari dugaan, dan `index.knn` yang
+   mati membuat kueri baku diam-diam tidak menghasilkan apa pun.
 4. **Berapa ambang skor bawaannya**, dan apakah tiga pilihan bernama sudah cukup
    bagi penelaah. Diukur setelah dipakai, bukan ditetapkan dari meja.
 5. **Uji Word Fase 1 belum dijalankan.** Seluruh Fase 2 menumpang lapisan

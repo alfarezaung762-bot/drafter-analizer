@@ -12,6 +12,26 @@
  *   F3-001  perlu korpus peraturan. Kutipan pembandingnya dari pemindaian,
  *           jadi selalu berpenanda "belum diverifikasi".
  *
+ * KEBIJAKAN HIJAU DAN KUNING, ditetapkan penelaah 22 Sep 2026 dan diperbarui
+ * 23 Sep 2026. Yang berubah bukan syarat buktinya, melainkan dari mana bukti
+ * penggantinya boleh datang:
+ *
+ *   HIJAU (penggantian) — kesalahannya TERBUKTI dan penggantinya didapat
+ *                         DENGAN SUMBER YANG BISA DITUNJUK. Teks lama dicoret
+ *                         merah, usulannya hijau di sebelahnya, sumbernya
+ *                         disebut di komentar.
+ *   MERAH (penghapusan) — kesalahannya terbukti dan perbaikannya MEMBUANG.
+ *                         Dicoret merah tanpa sisipan hijau. Teksnya tetap
+ *                         tidak dihapus alat — yang menghapus penelaah.
+ *   KUNING (catatan)    — kemungkinan, atau penggantinya tidak diketahui.
+ *                         Tidak ada yang dicoret. Contoh rumusan ikut ke
+ *                         komentar, tetapi tidak pernah masuk ke naskah.
+ *
+ * Aturan penalaran (F2-1xx) boleh hijau HANYA kalau rumusannya datang dari
+ * F3-003, yaitu dicontoh dari peraturan yang masih berlaku: penilaian model
+ * atas dirinya sendiri bukan bukti. Keputusan per aturan ada di
+ * `backend/app/fase2/tahap5_verifikasi.py`.
+ *
  * ATURAN PEMELIHARAAN: berkas ini WAJIB sama dengan
  * `backend/app/fase2/mekanis_konsistensi.py` dan `tahap4_memastikan.py`.
  * Kalau aturannya berubah, keterangannya ikut diubah di commit yang sama.
@@ -45,7 +65,9 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Kata “Pasal” tanpa frasa baku di depannya",
       "Apakah isi pasal yang dirujuk memang nyambung — itu urusan F2-101",
     ],
-    tanda: "Blok kuning pada frasa rujukannya saja",
+    tanda:
+      "Blok kuning pada frasa rujukannya saja. Tidak ada yang dicoret — " +
+      "kesalahannya terbukti, tetapi nomor penggantinya tidak bisa ditebak alat",
     catatanSumber:
       "Belum dikonfirmasi penelaah. Brief 8.11 mencantumkannya sebagai " +
       "kemungkinan pemeriksaan; dibangun karena kesalahannya bisa dibuktikan " +
@@ -62,9 +84,12 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
     ],
     tidakDiperiksa: [
       "Lampiran — belum dibaca parser sama sekali",
+      "Istilah bentuk panjang: pada “X yang selanjutnya disebut Y”, yang dicari di batang tubuh bentuk pendeknya (Y)",
       "MEMILIH DIAM bila Pasal 1 tidak ditemukan atau tidak memuat satu pun definisi",
     ],
-    tanda: "Blok kuning pada istilahnya di Pasal 1",
+    tanda:
+      "Blok kuning pada istilahnya di Pasal 1. Bukan kesalahan, melainkan " +
+      "kemubaziran — karena itu tidak ada yang dicoret",
     catatanSumber: "Belum dikonfirmasi penelaah (brief 8.11).",
   },
   {
@@ -79,8 +104,11 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
     tidakDiperiksa: [
       "Pasal sisipan bernomor huruf (Pasal 5A) diperlakukan sah, bukan lompatan",
       "Penomoran di dalam lampiran",
+      "MEMILIH DIAM bila nomornya dibuat penomoran otomatis Word: nomornya terbaca untuk menyusun struktur, tetapi tidak bisa disorot di naskah",
     ],
-    tanda: "Blok kuning pada nomornya saja",
+    tanda:
+      "Blok kuning pada nomornya saja. Tidak dicoret: perbaikannya bisa " +
+      "menomori ulang atau menambah bagian yang hilang, dan keduanya berbeda akibat",
     catatanSumber:
       "Bersumber KMK 527 Lampiran II, tetapi NOMOR BUTIRNYA BELUM DIBACA " +
       "VISUAL dari naskah. Sampai ada yang membacanya, tiap temuan membawa " +
@@ -101,8 +129,9 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "MEMILIH DIAM bila hurufnya tidak bisa dibaca jadi angka yang pasti",
     ],
     tanda:
-      "Blok kuning pada bilangannya, dengan usulan angka yang cocok dengan " +
-      "hurufnya. Mana yang benar tetap keputusan penelaah",
+      "Blok kuning pada bilangannya. Contoh rumusan yang cocok ikut di " +
+      "komentar, tetapi TIDAK disisipkan ke naskah — mana yang benar, " +
+      "angkanya atau hurufnya, justru pertanyaan pokoknya",
     catatanSumber: "Bersumber KMK 527 Lampiran II; nomor butirnya belum dibaca visual.",
   },
 
@@ -123,8 +152,9 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Temuan yang kutipannya tidak ketemu persis di naskah DIGUGURKAN, bukan diperlebar",
     ],
     tanda:
-      "Blok kuning berikut saran. Usulan hijau hanya kalau ada satu pengganti " +
-      "harfiah yang pasti",
+      "Blok kuning berikut saran. TIDAK PERNAH mencoret dan tidak pernah " +
+      "menyisipkan teks hijau: perbaikannya menuntut menyusun ulang kalimat, " +
+      "dan susunan ulang tidak bisa dibuktikan benar",
     catatanSumber:
       "TEMUAN HASIL PENALARAN MODEL. Sudah lewat Langkah 4 dan Langkah 5, " +
       "tetapi penilaian “bisa dibaca dua arah” tetap penilaian. Periksa sendiri " +
@@ -141,7 +171,7 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
     tidakDiperiksa: [
       "Kewajiban yang subjeknya jelas dari pasal sebelumnya dalam satu rangkaian",
     ],
-    tanda: "Blok kuning berikut saran",
+    tanda: "Blok kuning berikut saran. Tidak ada yang dicoret",
     catatanSumber: "TEMUAN HASIL PENALARAN MODEL.",
   },
   {
@@ -156,7 +186,7 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
     tidakDiperiksa: [
       "Kata operasional berbeda di pasal yang berbeda — itu lazim dan sah",
     ],
-    tanda: "Blok kuning berikut saran",
+    tanda: "Blok kuning berikut saran. Tidak ada yang dicoret",
     catatanSumber: "TEMUAN HASIL PENALARAN MODEL.",
   },
   {
@@ -191,8 +221,32 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
   },
 
   // -----------------------------------------------------------------------
-  // F3-001 — perlu korpus peraturan
+  // F3-00x — perlu korpus peraturan
   // -----------------------------------------------------------------------
+  {
+    id: "F3-002",
+    fase: 3,
+    denganModel: false,
+    judul: "Dasar hukum di Mengingat masih berlaku",
+    diperiksa: [
+      "Tiap butir Mengingat dibaca: bentuk, nomor, dan tahun peraturannya",
+      "Peraturannya dicari di korpus JDIH, lalu status berlakunya dibaca",
+      "TIDAK memanggil AI sama sekali — status dibaca langsung dari korpus",
+    ],
+    tidakDiperiksa: [
+      "Bentuk di luar UU, Perppu, PP, Perpres, Keppres, PMK, dan KMK — Ketetapan MPR dan peraturan daerah dilewati",
+      "MEMILIH DIAM bila peraturannya tidak ketemu di korpus: tidak ketemu BUKAN bukti sudah dicabut",
+      "MEMILIH DIAM bila dua dokumen bernomor sama berstatus berbeda",
+      "MEMILIH DIAM bila statusnya di luar Berlaku/Tidak Berlaku",
+    ],
+    tanda:
+      "Blok kuning pada sebutan peraturannya saja, bukan seluruh butir " +
+      "(butir Mengingat panjang karena memuat Lembaran Negara)",
+    catatanSumber:
+      "Yang dilaporkan FAKTA dari korpus, bukan penilaian. Tetapi status di " +
+      "korpus dapat tertinggal dari keadaan sebenarnya — pastikan sendiri " +
+      "sebelum mengubah dasar hukum.",
+  },
   {
     id: "F3-001",
     fase: 3,
@@ -215,6 +269,30 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Kutipan pembanding berasal dari pemindaian yang OCR-nya bisa rusak, " +
       "jadi tiap temuan Fase 3 SELALU membawa penanda belum diverifikasi. " +
       "Cakupan korpusnya sendiri juga belum diverifikasi langsung (brief 8.12).",
+  },
+  {
+    id: "F3-003",
+    fase: 3,
+    denganModel: true,
+    judul: "Usulan rumusan dari peraturan yang masih berlaku",
+    diperiksa: [
+      "BUKAN aturan yang mencari temuan sendiri — ia melengkapi temuan penalaran yang sudah ada",
+      "Rumusan dicontoh dari peraturan yang masih berlaku di korpus JDIH, lalu peraturannya disebut di komentar",
+      "SATU-SATUNYA jalan temuan F2-1xx bisa jadi hijau: tanpa peraturan sumber, usulannya tetap kuning",
+    ],
+    tidakDiperiksa: [
+      "Temuan yang sudah punya usulan — tidak ada yang perlu dicari",
+      "Kutipan lebih panjang dari 200 huruf — penggantinya pasti ditolak pemeriksaan rentang",
+      "Lebih dari 15 temuan per dokumen — batas biaya, sisanya dilewati",
+      "Usulan yang menyebut peraturan di luar hasil pencarian — dibuang kode",
+    ],
+    tanda:
+      "Teks lama merah dan dicoret, usulannya hijau di sebelahnya. Komentarnya " +
+      "menyebut peraturan mana yang jadi acuan",
+    catatanSumber:
+      "BERBIAYA — satu embedding, satu kueri korpus, dan satu panggilan AI per " +
+      "temuan. Rumusan acuannya berasal dari pemindaian yang OCR-nya bisa " +
+      "rusak, jadi periksa sendiri sebelum menerima usulannya.",
   },
 ];
 

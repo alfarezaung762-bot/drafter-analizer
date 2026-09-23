@@ -310,3 +310,91 @@ class TestKmkBelumDidukung:
         ]))
         assert pohon.gagal is None
         assert pohon.ada("pasal-1")
+
+
+class TestNaskahPerubahan:
+    """Naskah PERUBAHAN ditolak Fase 2, dan penolakannya bersuara.
+
+    Tanpa penjaga ini, alat SALAH TANDAI: pasal yang dikutip di dalam naskah
+    perubahan milik peraturan induk, bukan draf yang sedang ditelaah. Dibuktikan
+    22 Sep 2026 — F2-001 menandai "sebagaimana dimaksud dalam Pasal 18" sebagai
+    rujukan menggantung padahal Pasal 18 ada di PMK induknya.
+    """
+
+    _KEPALA = [
+        "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+        "NOMOR 40 TAHUN 2026",
+        "TENTANG",
+        "PERUBAHAN ATAS PERATURAN MENTERI KEUANGAN NOMOR 12 TAHUN 2024 "
+        "TENTANG TATA CARA PENETAPAN STATUS PENGGUNAAN",
+        "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+        "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+        "MEMUTUSKAN:",
+        "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG PERUBAHAN ATAS "
+        "PERATURAN MENTERI KEUANGAN NOMOR 12 TAHUN 2024.",
+    ]
+    _ISI = [
+        "Pasal I",
+        "Beberapa ketentuan dalam Peraturan Menteri Keuangan Nomor 12 Tahun 2024 diubah:",
+        "1. Ketentuan Pasal 5 diubah sehingga berbunyi sebagai berikut:",
+        "Pasal 5",
+        "Permohonan sebagaimana dimaksud dalam Pasal 18 diajukan secara elektronik.",
+        "Pasal II",
+        "Peraturan Menteri ini mulai berlaku pada tanggal diundangkan.",
+    ]
+
+    def _pohon(self, baris):
+        return bangun_pohon(
+            [ParagrafInput(index=i, teks=t) for i, t in enumerate(baris)]
+        )
+
+    def test_dikenali_dari_judulnya(self):
+        pohon = self._pohon(self._KEPALA + self._ISI)
+        assert pohon.gagal is not None
+        assert "PERUBAHAN" in pohon.gagal
+
+    def test_alasannya_menyebut_peraturan_induk(self):
+        """Penelaah harus tahu KENAPA, bukan cuma bahwa alat diam."""
+        pohon = self._pohon(self._KEPALA + self._ISI)
+        assert "induk" in pohon.gagal
+        assert "Fase 1 tetap berjalan" in pohon.gagal
+
+    def test_dikenali_dari_pasal_romawi_walau_judulnya_tidak_menyebut(self):
+        kepala = list(self._KEPALA)
+        kepala[3] = "TATA CARA PENETAPAN STATUS PENGGUNAAN"
+        kepala[7] = "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA."
+        pohon = self._pohon(kepala + self._ISI)
+        assert pohon.gagal is not None
+        assert "Pasal I" in pohon.gagal
+
+    def test_perubahan_kedua_juga_dikenali(self):
+        kepala = list(self._KEPALA)
+        kepala[3] = "PERUBAHAN KEDUA ATAS PERATURAN MENTERI KEUANGAN NOMOR 12 TAHUN 2024"
+        pohon = self._pohon(kepala + ["Pasal 1", "Isi biasa."])
+        assert pohon.gagal is not None
+
+    def test_NEGATIF_naskah_baru_biasa_tidak_ikut_ditolak(self):
+        """Penjaga yang kebablasan mematikan Fase 2 untuk naskah yang sah."""
+        pohon = self._pohon(
+            self._KEPALA[:3]
+            + [
+                "TATA CARA PENETAPAN STATUS PENGGUNAAN",
+                "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+                "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+                "MEMUTUSKAN:",
+                "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA.",
+                "Pasal 1",
+                "Isi pasal satu.",
+                "Pasal 2",
+                "Isi pasal dua.",
+            ]
+        )
+        assert pohon.gagal is None
+
+    def test_NEGATIF_kata_perubahan_tanpa_ATAS_tidak_ikut_ditolak(self):
+        """"Perubahan Anggaran" bukan naskah perubahan."""
+        kepala = list(self._KEPALA)
+        kepala[3] = "TATA CARA PERUBAHAN ANGGARAN KEMENTERIAN NEGARA"
+        kepala[7] = "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA."
+        pohon = self._pohon(kepala + ["Pasal 1", "Isi pasal satu."])
+        assert pohon.gagal is None

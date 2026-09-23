@@ -48,8 +48,26 @@ _POLA_PASAL = re.compile(r"^Pasal\s+(\d+[A-Z]?)\s*$", re.IGNORECASE)
 # "BAB I", "BAB XII"
 _POLA_BAB = re.compile(r"^BAB\s+([IVXLCDM]+)\b", re.IGNORECASE)
 
-# "Bagian Kesatu", "Bagian Ketiga"
-_POLA_BAGIAN = re.compile(r"^Bagian\s+(\w+)", re.IGNORECASE)
+# "Bagian Kesatu", "Bagian Ketiga", "Bagian Kedua Belas"
+#
+# DUA PENJAGA, dan keduanya perlu. Pola lamanya `^Bagian\s+(\w+)` menerima
+# kalimat apa pun yang kebetulan diawali kata "Bagian" — dan PMK organisasi
+# penuh dengan unit bernama begitu:
+#
+#     "Bagian Umum mempunyai tugas melaksanakan urusan sumber daya manusia…"
+#
+# Kalimat itu dibaca sebagai JUDUL BAGIAN, lalu ia menutup Pasal 8 yang baru
+# saja dibuka dan menelan isinya — Pasal 8 berakhir kosong, dan isinya tidak
+# pernah sampai ke model. Terbukti pada PMK 18 Tahun 2026, 23 Sep 2026.
+#
+#   1. Nomornya wajib kata bilangan tingkat — "Kesatu", "Kedua", "Pertama".
+#      "Umum", "Kepegawaian", "Keuangan" tidak lolos.
+#   2. Barisnya wajib HABIS di situ. Judul bagiannya ada di baris berikutnya,
+#      dan itu sudah ditangani judul_sesudah().
+_POLA_BAGIAN = re.compile(
+    r"^Bagian\s+(Pertama|Ke[a-z]+(?:\s+(?:Belas|Puluh)(?:\s+[A-Za-z]+)?)?)\s*$",
+    re.IGNORECASE,
+)
 
 # "Paragraf 1" — ISTILAH HUKUM, bukan paragraf Word
 _POLA_PARAGRAF_HUKUM = re.compile(r"^Paragraf\s+(\d+)\s*$", re.IGNORECASE)
@@ -141,7 +159,7 @@ def bangun_pohon(paragraf: list[ParagrafInput]) -> PohonSatuan:
             Satuan(
                 id="penutup",
                 jenis=JenisSatuan.PENUTUP,
-                teks=_trim(paragraf[idx_penutup].teks),
+                teks=_trim(paragraf[idx_penutup].utuh),
                 paragraf_mulai=paragraf[idx_penutup].index,
                 paragraf_akhir=paragraf[idx_penutup].index + 1,
             )
@@ -151,7 +169,7 @@ def bangun_pohon(paragraf: list[ParagrafInput]) -> PohonSatuan:
             Satuan(
                 id="lampiran",
                 jenis=JenisSatuan.LAMPIRAN,
-                teks=_trim(paragraf[idx_lampiran].teks),
+                teks=_trim(paragraf[idx_lampiran].utuh),
                 paragraf_mulai=paragraf[idx_lampiran].index,
                 paragraf_akhir=len(paragraf),
             )
@@ -170,7 +188,7 @@ def _cari(
 ) -> Optional[int]:
     """Indeks paragraf PERTAMA yang cocok pola, atau None."""
     for i in range(mulai, len(paragraf)):
-        if pola.match(_trim(paragraf[i].teks)):
+        if pola.match(_trim(paragraf[i].utuh)):
             return i
     return None
 
@@ -179,7 +197,7 @@ def _baca_judul(paragraf: list[ParagrafInput], batas: int) -> list[Satuan]:
     """Judul = paragraf sesudah baris yang isinya persis TENTANG."""
     idx_tentang = None
     for i in range(min(batas, len(paragraf))):
-        if _trim(paragraf[i].teks).upper() == "TENTANG":
+        if _trim(paragraf[i].utuh).upper() == "TENTANG":
             idx_tentang = i
             break
     if idx_tentang is None:
@@ -188,7 +206,7 @@ def _baca_judul(paragraf: list[ParagrafInput], batas: int) -> list[Satuan]:
     bagian: list[str] = []
     akhir = idx_tentang + 1
     for i in range(idx_tentang + 1, min(batas, len(paragraf))):
-        teks = _trim(paragraf[i].teks)
+        teks = _trim(paragraf[i].utuh)
         if not teks:
             continue
         # Penutup blok judul: PMK memakai frasa Dengan Rahmat, KMK langsung
@@ -229,7 +247,7 @@ def _baca_butir_pembukaan(
     berjalan: Optional[Satuan] = None
 
     for i in range(awal, min(batas, len(paragraf))):
-        teks = _trim(paragraf[i].teks)
+        teks = _trim(paragraf[i].utuh)
         if not teks:
             continue
         # Buang label bagiannya ("Menimbang :") kalau menyatu dengan butirnya.
@@ -272,7 +290,7 @@ def _baca_diktum(
 
     idx = None
     for i in range(idx_memutuskan + 1, min(akhir, len(paragraf))):
-        teks = _trim(paragraf[i].teks)
+        teks = _trim(paragraf[i].utuh)
         if teks and _POLA_MENETAPKAN.match(teks):
             idx = i
             break
@@ -281,10 +299,10 @@ def _baca_diktum(
 
     # Judulnya bisa di paragraf yang sama (bentuk biasa) atau di paragraf
     # berikutnya (bentuk bertabel — label dan isi jatuh di sel berbeda).
-    bagian = [_trim(paragraf[idx].teks)]
+    bagian = [_trim(paragraf[idx].utuh)]
     akhir_idx = idx
     for i in range(idx + 1, min(akhir, len(paragraf))):
-        teks = _trim(paragraf[i].teks)
+        teks = _trim(paragraf[i].utuh)
         if not teks:
             continue
         if _POLA_PASAL.match(teks) or _POLA_BAB.match(teks) or _POLA_DIKTUM_KMK.match(teks):
@@ -333,7 +351,7 @@ def _baca_batang_tubuh(
         Tanpa ini judulnya terbuang, dan satuan BAB jadi cuma berisi nomornya.
         """
         for j in range(posisi + 1, min(akhir, len(paragraf))):
-            t = _trim(paragraf[j].teks)
+            t = _trim(paragraf[j].utuh)
             if not t:
                 continue
             sudah_penanda = any(
@@ -355,7 +373,7 @@ def _baca_batang_tubuh(
         isi = teks_awal
         j = judul_sesudah(p_idx)
         if j is not None:
-            isi = f"{teks_awal} {_trim(paragraf[j].teks)}"
+            isi = f"{teks_awal} {_trim(paragraf[j].utuh)}"
             akhir_p = paragraf[j].index + 1
             lewati.add(j)
         s = Satuan(
@@ -369,7 +387,7 @@ def _baca_batang_tubuh(
         if i in lewati:
             continue
         p = paragraf[i]
-        teks = _trim(p.teks)
+        teks = _trim(p.utuh)
         if not teks:
             continue
 
@@ -465,25 +483,96 @@ def _baca_batang_tubuh(
     return hasil
 
 
+# "PERUBAHAN ATAS", "PERUBAHAN KEDUA ATAS", "PERUBAHAN KETIGA ATAS", …
+_JUDUL_PERUBAHAN = re.compile(r"\bPERUBAHAN\b(\s+\w+)?\s+\bATAS\b", re.IGNORECASE)
+
+# Batang tubuh naskah perubahan: "Pasal I", "Pasal II". Sengaja TIDAK memakai
+# [IVXLC]+ yang longgar — "Pasal I" sampai "Pasal IV" sudah mencakup seluruh
+# naskah perubahan yang wajar, dan pola longgar ikut menangkap "Pasal C" yang
+# bukan Romawi.
+_PASAL_ROMAWI = re.compile(r"^\s*Pasal\s+(I{1,3}|IV)\s*$", re.IGNORECASE)
+
+
+def _naskah_perubahan(
+    paragraf: list[ParagrafInput], hasil: list[Satuan]
+) -> Optional[str]:
+    """Alasan gagal bila naskahnya peraturan PERUBAHAN, None kalau bukan.
+
+    Dua penanda, dan salah satu saja sudah cukup. Keduanya dipakai karena
+    masing-masing bisa luput sendirian: judul bisa terpotong di naskah yang
+    belum rapi, dan "Pasal I" bisa hilang kalau penomorannya otomatis.
+    """
+    judul = next((s for s in hasil if s.jenis == JenisSatuan.JUDUL), None)
+    lewat_judul = judul is not None and bool(_JUDUL_PERUBAHAN.search(judul.teks))
+    lewat_romawi = any(_PASAL_ROMAWI.match(p.utuh) for p in paragraf)
+
+    if not (lewat_judul or lewat_romawi):
+        return None
+
+    penanda = "judulnya memuat \"PERUBAHAN ATAS\"" if lewat_judul else "batang tubuhnya memakai \"Pasal I\""
+    return (
+        f"Naskah ini peraturan PERUBAHAN ({penanda}) — Fase 2 tidak "
+        "dijalankan. Pasal yang dikutip di dalamnya milik peraturan induk, "
+        "bukan draf ini, sehingga pemeriksaan rujukan dan istilah akan salah "
+        "tandai. Memeriksanya dengan benar menuntut membaca peraturan "
+        "induknya. Fase 1 tetap berjalan seperti biasa."
+    )
+
+
 def _periksa_kewajaran(
     paragraf: list[ParagrafInput], hasil: list[Satuan]
 ) -> Optional[str]:
     """Batas kewajaran. Mengembalikan alasan gagal, atau None kalau sehat."""
     pasal = [s for s in hasil if s.jenis == JenisSatuan.PASAL]
 
+    # Naskah PERUBAHAN belum didukung Fase 2 — dan ini penjaga yang paling
+    # menentukan dari ketiganya, karena tanpa dia alat SALAH TANDAI.
+    #
+    # PMK perubahan susunannya berbeda sama sekali: batang tubuhnya "Pasal I"
+    # dan "Pasal II" (angka Romawi), dan di dalam Pasal I dikutip pasal-pasal
+    # milik peraturan INDUK yang sedang diubah. Tiga akibatnya, semuanya sudah
+    # dibuktikan 22 Sep 2026:
+    #
+    #   1. Romawi tidak dikenali, jadi kutipan "Pasal 5" milik induk dibaca
+    #      sebagai pasal dokumen ini, dan butir perubahan di bawahnya nyangkut
+    #      jadi anaknya. Pohonnya keliru, tetapi `gagal` tetap None.
+    #   2. F2-001 menandai "sebagaimana dimaksud dalam Pasal 18" sebagai
+    #      rujukan menggantung — padahal Pasal 18 memang ada, di peraturan
+    #      induknya. Itu salah tandai, dan CLAUDE.md butir 1 melarangnya.
+    #   3. Pasal 1 definisi biasanya tidak ada di naskah perubahan, sehingga
+    #      seluruh pemeriksaan istilah kehilangan dasarnya.
+    #
+    # Memeriksa naskah perubahan dengan benar menuntut membaca peraturan
+    # induknya, dan itu pekerjaan tersendiri. Sampai itu ada, alat memilih
+    # diam — dengan suara.
+    if alasan := _naskah_perubahan(paragraf, hasil):
+        return alasan
+
     if len(paragraf) >= _MIN_PARAGRAF_WAJIB_ADA_PASAL and not pasal:
-        # Sebab yang paling sering, dan sudah terbukti di naskah nyata
-        # (PMK 18 Tahun 2026): "Pasal 1" dan "BAB I" bukan teks melainkan
-        # penomoran otomatis Word, sehingga tidak ikut terbaca add-in.
-        # Disebut terang-terangan di sini karena pesan "strukturnya tidak
-        # terbaca" saja membuat penelaah mengira naskahnya yang salah.
-        # Batasannya, berikut jalan keluarnya, ada di
-        # docs/fase-2dan-3drafter.md bagian 4.1.
+        # Sampai 23 Sep 2026 sebab tersering adalah penomoran otomatis Word:
+        # "Pasal 1" dan "BAB I" bukan teks, jadi tidak ikut terbaca add-in.
+        # Itu sudah diperbaiki — `ParagrafInput.penanda` kini membawanya.
+        #
+        # Karena itu pesan ini menunjuk sebab yang TERSISA, dan yang pertama
+        # bisa diperiksa sendiri penelaah: kalau tidak satu pun paragraf punya
+        # penanda, berarti pembacaan nomor otomatis memang tidak berjalan —
+        # Word-nya belum mendukung WordApi 1.3, atau jalur cadangan menyala.
+        berpenanda = sum(1 for p in paragraf if p.penanda)
+        if berpenanda == 0:
+            sebab = (
+                "Tidak satu pun paragraf membawa nomor otomatis, padahal naskah "
+                "PMK biasanya memakainya. Kemungkinan Word ini belum mendukung "
+                "pembacaan nomor daftar (WordApi 1.3)."
+            )
+        else:
+            sebab = (
+                f"{berpenanda} paragraf sudah membawa nomor otomatis, tetapi tidak "
+                "satu pun berbentuk \"Pasal N\". Periksa apakah naskahnya memang "
+                "belum punya batang tubuh."
+            )
         return (
             f"Tidak satu pun Pasal terbaca dari {len(paragraf)} paragraf — "
-            "Fase 2 tidak dijalankan. Sebab yang paling mungkin: nomor BAB dan "
-            "Pasal dibuat dengan penomoran otomatis Word, sehingga tidak ikut "
-            "terbaca add-in. Fase 1 tetap berjalan seperti biasa."
+            f"Fase 2 tidak dijalankan. {sebab} Fase 1 tetap berjalan seperti biasa."
         )
 
     # KMK belum didukung Fase 2 — dan diamnya harus TERDENGAR.
@@ -499,7 +588,7 @@ def _periksa_kewajaran(
     # jelas. KMK menyusul, bukan dibuang.
     if not pasal:
         for p in paragraf:
-            if _POLA_DIKTUM_KMK.match(_trim(p.teks)):
+            if _POLA_DIKTUM_KMK.match(_trim(p.utuh)):
                 return (
                     "Naskah ini memakai diktum (KESATU, KEDUA, …), bukan Pasal — "
                     "ciri KMK. Fase 2 baru mendukung PMK; pemeriksaan Fase 2 "

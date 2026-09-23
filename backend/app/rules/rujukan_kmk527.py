@@ -459,6 +459,24 @@ RUJUKAN: dict[str, dict[str, object]] = {
     # jadi statusnya TIDAK PERNAH "visual" — penanda "belum diverifikasi" di
     # panel memang harus menyala untuk tiap temuan Fase 3.
     # -----------------------------------------------------------------------
+    "F3-002": {
+        "nama_aturan": "Dasar hukum di Mengingat masih berlaku",
+        "sumber": "Korpus peraturan JDIH — medan Status",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "TIDAK memanggil model sama sekali — status dibaca langsung dari "
+            "korpus. Yang dilaporkan fakta, bukan penilaian: peraturan ini "
+            "berstatus Tidak Berlaku di JDIH. Tetap perlu diperiksa penelaah, "
+            "karena status di korpus bisa tertinggal dari keadaan sebenarnya. "
+            "Aturan ini MEMILIH DIAM pada empat keadaan — bentuk tidak "
+            "dikenali, tidak ketemu, cocok ganda berstatus beda, dan status "
+            "di luar Berlaku/Tidak Berlaku."
+        ),
+    },
     "F3-001": {
         "nama_aturan": "Berpotensi bertentangan dengan peraturan lain",
         "sumber": "Korpus peraturan JDIH — kutipan dari pemindaian",
@@ -472,6 +490,25 @@ RUJUKAN: dict[str, dict[str, object]] = {
             "'berpotensi bertentangan'. Nama peraturan pembandingnya disalin "
             "dari hasil pencarian korpus dan diverifikasi kode di Langkah 5; "
             "model tidak boleh menyebut peraturan dari ingatannya."
+        ),
+    },
+    "F3-003": {
+        "nama_aturan": "Usulan rumusan dari peraturan yang masih berlaku",
+        "sumber": "Korpus peraturan JDIH — kutipan dari pemindaian",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "BUKAN aturan yang menghasilkan temuan sendiri. Ia melengkapi "
+            "temuan penalaran yang sudah ada dengan usulan rumusan yang "
+            "dicontoh dari peraturan yang masih berlaku, lalu nama peraturan "
+            "itu ikut ke komentar. Inilah satu-satunya jalan temuan F2-1xx "
+            "bisa jadi hijau: tanpa peraturan sumber, usulannya tetap turun "
+            "jadi contoh rumusan di komentar. Berbiaya — satu embedding, satu "
+            "kueri korpus, dan satu panggilan model per temuan, dibatasi 15 "
+            "per dokumen."
         ),
     },
 }

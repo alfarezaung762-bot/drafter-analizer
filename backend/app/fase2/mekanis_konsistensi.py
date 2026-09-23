@@ -28,25 +28,47 @@ from app.models.temuan import (
     StatusTemuan,
     Temuan,
 )
+from app.fase2.tahap5_verifikasi import boleh_menyisipkan
 from app.rules.rujukan_kmk527 import ambil_rujukan
 
 
-def _buat_temuan(
+def buat_temuan(
     aturan_id: str,
     satuan: Satuan,
     paragraf: list[ParagrafInput],
     teks_asli: str,
     catatan: str,
+    saran: str = "",
     usulan: Optional[str] = None,
+    penghapusan: bool = False,
 ) -> Optional[Temuan]:
     """Bentuk Temuan dari sebuah satuan, atau None kalau tidak bisa ditandai.
 
     Mengembalikan None bila `teks_asli` tidak ditemukan persis di rentang
     paragraf satuan itu. Temuan yang rentangnya tidak ketemu TIDAK DITANDAI
     SAMA SEKALI — bukan diperlebar ke satu paragraf. CLAUDE.md butir 6.
+
+    `penghapusan` untuk kesalahan yang perbaikannya MEMBUANG: teks lama merah
+    dan dicoret, tanpa sisipan hijau.
+
+    TIDAK ADA parameter `sasaran` di sini, dan itu kesimpulan bukan kelalaian.
+    Seluruh aturan mekanis menandai persis tempat yang harus diperbaiki —
+    F2-001 di rujukannya, F2-003 di definisinya, F2-007 di bilangannya,
+    F3-002 di butir Mengingat-nya. Baris "Perbaiki di" pada komentar yang
+    sudah menempel di tempat itu menambah baris tanpa menambah keterangan.
     """
     if not satuan.bisa_ditandai:
         return None
+
+    # Kebijakan hijau/kuning yang sama dengan jalur AI — dibaca dari satu
+    # tempat, bukan ditetapkan ulang di sini. Usulan pada aturan yang tidak
+    # boleh menyisipkan bukan dibuang, melainkan pindah ke Saran sebagai
+    # contoh rumusan: berguna dibaca, tidak pernah masuk ke naskah.
+    hijau = usulan is not None and boleh_menyisipkan(aturan_id)
+    if usulan is not None and not hijau:
+        contoh = f'Contoh rumusan: "{usulan}"'
+        saran = f"{saran} {contoh}".strip() if saran else contoh
+        usulan = None
 
     for p in paragraf:
         if not (satuan.paragraf_mulai <= p.index < satuan.paragraf_akhir):
@@ -57,8 +79,16 @@ def _buat_temuan(
         return Temuan(
             id=f"f-{uuid.uuid4().hex[:8]}",
             aturan_id=aturan_id,
-            fase=2,
-            jenis_tanda=JenisTanda.CATATAN,
+            # Fase diturunkan dari kodenya, bukan dipatok — F3-002 memakai
+            # pembangun yang sama tetapi temuannya milik Fase 3.
+            fase=3 if aturan_id.startswith("F3") else 2,
+            jenis_tanda=(
+                JenisTanda.PENGGANTIAN
+                if hijau
+                else JenisTanda.PENGHAPUSAN
+                if penghapusan
+                else JenisTanda.CATATAN
+            ),
             # skor sengaja dibiarkan kosong: aturan mekanis tidak menebak,
             # jadi tidak ada keyakinan yang perlu diangkakan.
             satuan_id=satuan.id,
@@ -69,6 +99,7 @@ def _buat_temuan(
                 teks_asli=teks_asli,
             ),
             catatan=catatan,
+            saran=saran,
             usulan_rumusan=usulan,
             rujukan=RujukanTemuan(**ambil_rujukan(aturan_id)),
             status=StatusTemuan.BELUM_DITINJAU,
@@ -129,15 +160,15 @@ def cek_rujukan_menggantung(
             if pohon.ada(target):
                 continue
 
-            temuan = _buat_temuan(
+            temuan = buat_temuan(
                 aturan_id="F2-001",
                 satuan=s,
                 paragraf=paragraf,
                 teks_asli=m.group(0),
-                catatan=(
-                    f"Merujuk {sebutan}, tetapi {sebutan} tidak ada di naskah ini. "
-                    "Saran: periksa nomor rujukannya, atau pastikan bagian yang "
-                    "dirujuk memang sudah tertulis."
+                catatan=f"Merujuk {sebutan}, tetapi {sebutan} tidak ada di naskah ini.",
+                saran=(
+                    "Periksa nomor rujukannya, atau pastikan bagian yang dirujuk "
+                    "memang sudah tertulis."
                 ),
             )
             if temuan:
@@ -174,17 +205,23 @@ def cek_definisi_tak_terpakai(
         satuan = pohon.cari(d.satuan_id)
         if satuan is None:
             continue
-        temuan = _buat_temuan(
+        temuan = buat_temuan(
             aturan_id="F2-003",
             satuan=satuan,
             paragraf=paragraf,
             teks_asli=d.istilah,
             catatan=(
                 f"Istilah \"{d.istilah}\" didefinisikan di Pasal 1 tetapi tidak "
-                "pernah dipakai di batang tubuh. Saran: hapus definisinya kalau "
-                "memang tidak diperlukan, atau periksa apakah ada ketentuan yang "
-                "terlewat ditulis."
+                "pernah dipakai di batang tubuh."
             ),
+            saran=(
+                "Hapus definisinya kalau memang tidak diperlukan, atau periksa "
+                "apakah ada ketentuan yang terlewat ditulis."
+            ),
+            # Satu-satunya aturan yang perbaikannya MEMBUANG, bukan mengganti:
+            # definisi yang tidak dipakai tidak punya rumusan pengganti yang
+            # masuk akal. Dicoret merah tanpa sisipan hijau.
+            penghapusan=True,
         )
         if temuan:
             hasil.append(temuan)
@@ -229,23 +266,24 @@ def _periksa_deret(
         n = int(angka)
 
         if n in terlihat:
-            t = _buat_temuan(
+            t = buat_temuan(
                 "F2-004", s, paragraf, s.nomor.strip("()") if s.nomor else str(n),
-                catatan=(
-                    f"{sebutan} nomor {n} muncul lebih dari sekali. "
-                    "Saran: nomori ulang berurutan."
-                ),
+                catatan=f"{sebutan} nomor {n} muncul lebih dari sekali.",
+                saran="Nomori ulang berurutan.",
             )
             if t:
                 hasil.append(t)
         elif sebelum is not None and n > sebelum + 1:
             hilang = ", ".join(str(x) for x in range(sebelum + 1, n))
-            t = _buat_temuan(
+            t = buat_temuan(
                 "F2-004", s, paragraf, s.nomor.strip("()") if s.nomor else str(n),
                 catatan=(
                     f"{sebutan} melompat dari {sebelum} ke {n} — nomor {hilang} "
-                    "tidak ada. Saran: periksa apakah ada bagian yang terlewat, "
-                    "atau nomori ulang berurutan."
+                    "tidak ada."
+                ),
+                saran=(
+                    "Periksa apakah ada bagian yang terlewat, atau nomori ulang "
+                    "berurutan."
                 ),
             )
             if t:
@@ -329,15 +367,18 @@ def cek_bilangan(pohon: PohonSatuan, paragraf: list[ParagrafInput]) -> list[Temu
             if nilai is None or nilai == angka:
                 continue  # tak terbaca → diam; cocok → tidak ada temuan
 
-            temuan = _buat_temuan(
+            temuan = buat_temuan(
                 aturan_id="F2-007",
                 satuan=s,
                 paragraf=paragraf,
                 teks_asli=m.group(0),
                 catatan=(
                     f"Angka {angka} tidak cocok dengan hurufnya — \"{kata}\" "
-                    f"berarti {nilai}. Saran: samakan keduanya; mana yang benar "
-                    "ditentukan penelaah."
+                    f"berarti {nilai}."
+                ),
+                saran=(
+                    "Samakan keduanya. Mana yang benar — angkanya atau "
+                    "hurufnya — ditentukan penelaah."
                 ),
                 usulan=f"{nilai} ({kata})",
             )

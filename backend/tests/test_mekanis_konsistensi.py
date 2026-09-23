@@ -114,7 +114,20 @@ class TestF2007Bilangan:
         ], ["F2-007"])
         assert len(t) == 1
         assert "berarti 13" in t[0].catatan
-        assert t[0].usulan_rumusan == "13 (tiga belas)"
+
+    def test_contoh_rumusan_masuk_ke_saran_BUKAN_ke_naskah(self):
+        """Kebijakan hijau/kuning, 22 Sep 2026.
+
+        F2-007 membuktikan ketidakcocokannya, tetapi mana yang benar — angkanya
+        atau hurufnya — justru pertanyaan pokoknya. Jadi tidak ada yang dicoret:
+        rumusan yang cocok cuma ditawarkan di komentar.
+        """
+        t = _jalan([
+            "Pasal 1", "Permohonan diselesaikan paling lambat 30 (tiga belas) hari.",
+        ], ["F2-007"])[0]
+        assert t.jenis_tanda.value == "catatan"
+        assert t.usulan_rumusan is None
+        assert 'Contoh rumusan: "13 (tiga belas)"' in t.saran
 
     def test_cocok_tidak_ditandai(self):
         assert _jalan([

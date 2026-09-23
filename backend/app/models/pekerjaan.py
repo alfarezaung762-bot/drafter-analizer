@@ -111,11 +111,35 @@ class CalonTemuan(BaseModel):
     alasan: str = ""
     teks_asli: str = ""
     saran: str = ""
+    sasaran: str = Field(
+        default="",
+        description=(
+            "DI MANA perbaikannya dikerjakan — id satuan atau salah satu nama "
+            "tetap, BUKAN kalimat bebas, supaya bisa dibuktikan kode.\n"
+            "\n"
+            "Ada karena komentar yang menempel di Pasal 5 bisa menyuruh "
+            "menambah definisi, padahal definisinya harus ditulis di Pasal 1. "
+            "Penelaah tidak punya cara menebaknya. Langkah 5 membuktikan "
+            "tempat yang disebut memang ada di naskah; yang tidak terbukti "
+            "dikosongkan, karena menunjuk Pasal yang tidak ada lebih buruk "
+            "daripada diam soal tempat."
+        ),
+    )
     usulan_rumusan: str = ""
     skor: float = 0.0
     eksternal: bool = False
     pembanding: str = Field(
         default="", description="Fase 3: nama peraturan pembanding, disalin dari hasil pencarian."
+    )
+    pembanding_sah: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Fase 3: nama peraturan yang BOLEH disebut — persis yang dikirim "
+            "ke model pada Langkah 6. Dibawa per calon, bukan satu daftar "
+            "untuk seluruh dokumen, karena tiap ketentuan punya pembandingnya "
+            "sendiri. Langkah 5 memakainya untuk membuktikan model tidak "
+            "menyebut peraturan dari ingatannya."
+        ),
     )
 
 

@@ -1768,7 +1768,7 @@ selesai. Tiap baris bisa dijawab ya/tidak dengan mata sendiri:
 |---|---|
 | Temuan `penggantian` merah tercoret, usulannya hijau di sebelahnya | Lihat naskah |
 | Temuan `catatan` blok kuning, **warna hurufnya tidak berubah** | Bandingkan dengan sebelum analisis |
-| Tepat satu komentar per temuan, dua baris | Buka panel komentar Word, hitung |
+| Tepat satu komentar per temuan, berformat `Temuan:` / `Saran:` / rujukan | Buka panel komentar Word. Blok `Saran:` boleh tidak ada pada temuan Fase 1 yang memang belum punya saran terpisah |
 | Nomor `(T1)`, `(T2)` di komentar cocok dengan nomor kartu di panel | Cocokkan satu per satu |
 | **Nol** baris `Formatted: Highlight` di margin | Tab Review, All Markup |
 | Tab Review menunjukkan **0 revisions** | Tab Review |

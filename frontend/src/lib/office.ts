@@ -102,6 +102,52 @@ export function cakupanTerpilihTersedia(): boolean {
   return checkApiSupport("1.3");
 }
 
+/**
+ * Nomor otomatis Word tiap paragraf — "Pasal 5", "(2)", "a.", "BAB I".
+ *
+ * KENAPA INI ADA. `paragraph.text` TIDAK memuat nomor yang dibuat mesin
+ * penomoran Word. Pada PMK 18 Tahun 2026 yang sudah diundangkan, 585 dari 974
+ * paragrafnya bernomor otomatis dan 110 di antaranya teksnya kosong sama
+ * sekali — seluruh isinya nomor. Tanpa fungsi ini, backend menerima dokumen
+ * tanpa satu pun "Pasal", lalu menuduh ayat yang jelas-jelas ada sebagai tidak
+ * ada. Itu salah tandai, dan salah tandai merusak kepercayaan penelaah.
+ *
+ * DIJALANKAN DI Word.run SENDIRI, bukan menumpang pembacaan teks. Kalau
+ * pemuatannya gagal di tengah jalan, konteksnya tercemar — dan kegagalan di
+ * sini tidak boleh ikut menjatuhkan pembacaan teks yang sudah pasti berhasil.
+ *
+ * CLAUDE.md butir 9: requirement set didukung ≠ fitur diizinkan. Karena itu
+ * ada dua lapis penjagaan — pemeriksaan 1.3, DAN try/catch runtime. Kalau
+ * keduanya jebol, hasilnya daftar kosong dan analisis tetap berjalan seperti
+ * sebelum fitur ini ada.
+ */
+async function bacaPenanda(): Promise<{ penanda: string; tingkat: number }[]> {
+  if (!checkApiSupport("1.3")) return [];
+  try {
+    return await Word.run(async (context) => {
+      const paragraf = context.document.body.paragraphs;
+      paragraf.load("items");
+      await context.sync();
+
+      const butir = paragraf.items.map((p) => p.listItemOrNullObject);
+      butir.forEach((b) => b.load("isNullObject,listString,level"));
+      await context.sync();
+
+      return butir.map((b) =>
+        b.isNullObject
+          ? { penanda: "", tingkat: -1 }
+          : { penanda: b.listString ?? "", tingkat: b.level ?? -1 }
+      );
+    });
+  } catch (err) {
+    console.warn(
+      "Nomor otomatis Word tidak terbaca; analisis lanjut memakai teks apa adanya.",
+      err
+    );
+    return [];
+  }
+}
+
 export async function readParagraphs(
   scope: "all" | "selection" = "all"
 ): Promise<ParagrafInput[]> {
@@ -116,13 +162,25 @@ export async function readParagraphs(
     );
   }
 
+  // Dibaca untuk SELURUH badan dokumen, bukan cuma bagian terpilih: nomor
+  // paragraf di bawah memang penomoran seluruh dokumen, jadi indeksnya cocok.
+  const nomor = await bacaPenanda();
+  const ambil = (idx: number) => ({
+    penanda: nomor[idx]?.penanda ?? "",
+    tingkat: nomor[idx]?.tingkat ?? -1,
+  });
+
   return Word.run(async (context) => {
     const body = context.document.body.paragraphs;
     body.load("text");
     await context.sync();
 
     if (scope !== "selection") {
-      return body.items.map((p, idx) => ({ index: idx, teks: p.text }));
+      return body.items.map((p, idx) => ({
+        index: idx,
+        teks: p.text,
+        ...ambil(idx),
+      }));
     }
 
     // Mode "Bagian Terpilih": nomor paragraf TETAP memakai penomoran seluruh
@@ -140,7 +198,7 @@ export async function readParagraphs(
     const hasil: ParagrafInput[] = [];
     body.items.forEach((p, idx) => {
       if (!irisan[idx].isNullObject) {
-        hasil.push({ index: idx, teks: p.text });
+        hasil.push({ index: idx, teks: p.text, ...ambil(idx) });
       }
     });
     return hasil;
@@ -272,10 +330,22 @@ function ordinalKemunculan(
 }
 
 /**
- * Isi komentar Word untuk sebuah temuan — dua baris.
+ * Isi komentar Word untuk sebuah temuan — tiga bagian bernama.
  *
- * Baris pertama ALASAN, bukan pengulangan apa yang sudah terlihat di naskah.
- * Baris kedua rujukan, ditutup nomor temuan.
+ *     Temuan:
+ *     <apa yang ditemukan>
+ *     Saran:
+ *     <apa yang sebaiknya dilakukan>
+ *     <rujukan> — <tautan> (Tn)
+ *
+ * Bentuk ini ditetapkan penelaah, 22 Sep 2026. Alasannya disebut sendiri:
+ * baris rujukan di bawah ada "agar penelaah ngerti ini bukan asal klaim dan
+ * bisa dipertimbangkan". Jadi rujukannya bukan hiasan — ia yang membuat
+ * temuan bisa ditimbang, bukan cuma dipercaya atau ditolak.
+ *
+ * "Saran" dibedakan dari "Temuan" karena keduanya memang beda jenis: yang
+ * satu pernyataan tentang naskah, yang satu anjuran. Dilem jadi satu paragraf,
+ * penelaah harus memilahnya sendiri tiap kali.
  *
  * Nama produk sengaja TIDAK ditulis: ruang komentar sempit, dan nomor temuan
  * sudah cukup jadi penanda.
@@ -292,10 +362,35 @@ function susunIsiKomentar(temuan: Temuan): string {
         (terverifikasi ? "" : " (belum diverifikasi visual)")
       : `${temuan.rujukan.sumber} (butir belum diisi)`;
 
-  return (
-    `${temuan.catatan}\n` +
+  const baris = [`Temuan:`, temuan.catatan];
+
+  // DI MANA perbaikannya dikerjakan. Ada karena komentar yang menempel di
+  // Pasal 5 bisa menyuruh menambah definisi, padahal definisinya harus
+  // ditulis di Pasal 1 — dan penelaah tidak punya cara menebaknya.
+  //
+  // Backend sudah mengosongkannya kalau tempatnya tidak terbukti ada di
+  // naskah, atau kalau tempatnya satuan temuan ini sendiri.
+  const sasaran = temuan.sasaran?.trim();
+  if (sasaran) baris.push(`Perbaiki di: ${sasaran}`);
+
+  // Temuan lama (dan temuan Fase 1 yang belum dipisah medannya) bisa datang
+  // tanpa `saran`. Blok Saran ditinggalkan kosong-melompong lebih buruk
+  // daripada tidak ada blok sama sekali — dan sejak 23 Sep 2026 backend
+  // sengaja mengosongkannya ketika penggantinya memang tidak diketahui,
+  // daripada mengisinya dengan anjuran hampa.
+  const saran = temuan.saran?.trim();
+  if (saran) baris.push(`Saran:`, saran);
+
+  // Keberatan model atas temuan ini. Ditempelkan, BUKAN menggantikan temuannya
+  // — AI tidak pernah menghapus temuan yang kesalahannya sudah terbukti
+  // (ditetapkan penelaah, 23 Sep 2026). Penelaah yang menimbang keduanya.
+  const catatanAi = temuan.catatan_ai?.trim();
+  if (catatanAi) baris.push(`Catatan AI:`, catatanAi);
+
+  baris.push(
     `${rujukanStr} — ${temuan.rujukan.pdf_url} ${penandaKomentar(temuan)}`
   );
+  return baris.join("\n");
 }
 
 /**
@@ -553,6 +648,9 @@ export async function tandaiSemuaTemuan(
 
         const punyaUsulan =
           t.jenis_tanda === "penggantian" && !!t.usulan_rumusan;
+        // Kesalahan yang perbaikannya MEMBUANG: dicoret merah, tanpa sisipan
+        // hijau. Teksnya tetap tidak dihapus kode — yang menghapus penelaah.
+        const usulHapus = t.jenis_tanda === "penghapusan";
 
         try {
           // Urutannya penting. Warna dulu, lalu sisipkan usulan di sebelahnya,
@@ -569,6 +667,13 @@ export async function tandaiSemuaTemuan(
             usulan.font.highlightColor = null as unknown as string;
             bungkusContentControl(usulan, `${TAG_USUL}${t.nomor}`, t.nomor);
             hasil.diusulkan++;
+            hasil.dicoretMerah++;
+          } else if (usulHapus) {
+            // Diusulkan dibuang. Merah dan dicoret sama seperti penggantian,
+            // tetapi TIDAK ADA yang disisipkan — memang tidak ada rumusan
+            // pengganti yang masuk akal untuk definisi yang tidak terpakai.
+            r.font.color = WARNA_SALAH;
+            r.font.strikeThrough = true;
             hasil.dicoretMerah++;
           } else {
             // Tidak ada rumusan pengganti tunggal — ini peringatan, bukan usul
@@ -850,6 +955,42 @@ async function hapusSemuaKomentarAlat(
  * bergeser oleh penyisipan usulan. Kalau tidak ada, jatuh ke pencarian teks
  * dengan perhitungan kemunculan keberapa.
  */
+/**
+ * Ganti komentar sebuah temuan yang SUDAH terpasang, tanpa menyentuh tandanya.
+ *
+ * Dipakai ketika model menempelkan keberatan pada temuan Fase 1: temuannya
+ * tetap di tempatnya dengan sorotan dan nomor yang sama, yang berubah cuma isi
+ * komentarnya — kini bertambah baris "Catatan AI:".
+ *
+ * Jangkarnya content control bertag `DA-ASLI-{n}` yang dipasang saat menandai.
+ * Kalau jangkarnya tidak ada (temuan tidak tertandai di naskah), fungsi ini
+ * tidak melakukan apa-apa dan mengembalikan false — catatan AI-nya tetap
+ * terbaca di kartu panel.
+ */
+export async function perbaruiKomentarTemuan(temuan: Temuan): Promise<boolean> {
+  if (!isOfficeAvailable() || !checkApiSupport("1.4")) return false;
+
+  try {
+    return await Word.run(async (context) => {
+      const cc = context.document.body.contentControls.getByTag(
+        `${TAG_ASLI}${temuan.nomor}`
+      );
+      cc.load("items");
+      await context.sync();
+      if (cc.items.length === 0) return false;
+
+      await hapusKomentarTemuanDi(context, temuan);
+
+      cc.items[0].getRange().insertComment(susunIsiKomentar(temuan));
+      await context.sync();
+      return true;
+    });
+  } catch (err) {
+    console.warn("Gagal memperbarui komentar temuan:", err);
+    return false;
+  }
+}
+
 export async function selectFindingLocation(temuan: Temuan): Promise<boolean> {
   if (!isOfficeAvailable()) return false;
 

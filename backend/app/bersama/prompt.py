@@ -38,6 +38,16 @@ TAHAP2_BACA = """Di bawah ini beberapa satuan dari satu rancangan PMK.
 Untuk TIAP satuan, kembalikan satu baris ringkasan. Jangan menilai dulu —
 tugasmu di sini merekam, bukan memutuskan.
 
+SEBAGIAN SATUAN SUDAH DIPERIKSA pemeriksaan format, dan temuannya dilampirkan
+di bawah satuannya dengan tanda (SUDAH DITEMUKAN). Dua hal yang berlaku untuk
+itu:
+
+- JANGAN MENGULANGNYA. Kalau kamu melihat hal yang sama, lewati saja —
+  temuannya sudah ada dan komentarnya sudah terpasang di naskah.
+- Kalau menurutmu temuan itu KELIRU karena konteks yang lebih luas yang kamu
+  lihat, tulis keberatanmu. Keberatanmu akan ditempelkan pada temuan itu
+  sebagai catatan; temuannya tetap ada, dan penelaah yang memutuskan.
+
 Jawab dengan JSON:
 {
   "baris": [
@@ -49,8 +59,17 @@ Jawab dengan JSON:
       "dugaan": "<kalau ADA yang janggal, sebutkan dalam satu kalimat.
                   Kalau tidak ada, kosongkan dengan string kosong>"
     }
+  ],
+  "keberatan": [
+    {
+      "nomor": <nomor temuan yang kamu keberatani, angka di dalam (T…)>,
+      "alasan": "<satu kalimat: kenapa temuan itu menurutmu keliru>"
+    }
   ]
-}"""
+}
+
+`keberatan` boleh kosong, dan SERINGNYA memang kosong. Isi hanya kalau kamu
+punya alasan yang bisa ditunjuk dari naskah, bukan sekadar merasa janggal."""
 
 
 # ---------------------------------------------------------------------------
@@ -108,12 +127,27 @@ Jawab dengan JSON:
               ditujukan kepada penelaah. Kalau tidak terbukti: kenapa gugur>",
   "teks_asli": "<kalau terbukti: potongan teks PERSIS dari satuan itu yang
                  menjadi letak masalahnya. Sependek mungkin, tetapi utuh
-                 sebagai frasa. Salin huruf demi huruf>",
+                 sebagai frasa, dan WAJIB berada dalam SATU ayat — kutipan
+                 yang merentang beberapa ayat tidak akan ketemu di naskah dan
+                 temuanmu gugur. Salin huruf demi huruf>",
   "saran": "<satu kalimat saran perbaikan untuk penelaah. Boleh menawarkan
-             dua jalan kalau memang ada dua>",
-  "usulan_rumusan": "<kalau ADA satu pengganti harfiah yang pasti untuk
-                      teks_asli, tulis di sini. Kalau tidak ada satu jawaban
-                      pasti, kosongkan>",
+             dua jalan kalau memang ada dua. Kalau kamu tidak tahu apa yang
+             sebaiknya dilakukan, KOSONGKAN — saran yang cuma mengulang
+             masalahnya tidak menolong siapa pun>",
+  "sasaran": "<DI MANA perbaikannya dikerjakan. WAJIB salah satu dari:
+               'satuan ini' — perbaikannya persis di teks yang kamu kutip
+               'pasal-1'    — perlu menambah/mengubah definisi di Ketentuan Umum
+               'menimbang' | 'mengingat' | 'menetapkan' | 'judul'
+               '<id satuan>' — id satuan LAIN yang memang ada di naskah ini
+              Jangan mengarang id. Kalau tidak yakin, tulis 'satuan ini'>",
+  "usulan_rumusan": "<PENGGANTI PERSIS UNTUK teks_asli SAJA — bukan untuk
+                      kalimatnya, bukan untuk ayatnya. Bayangkan teks_asli
+                      dihapus dan tulisan ini ditaruh di tempatnya: kalimatnya
+                      harus jadi utuh dan benar, tanpa ada kata yang terulang.
+                      JANGAN mengulang kata-kata yang berada SEBELUM teks_asli.
+                      Kalau perbaikannya menuntut menulis ulang kalimat yang
+                      lebih panjang daripada teks_asli, KOSONGKAN saja dan
+                      cukup tulis maksudmu di 'saran'>",
   "skor": <0.0 sampai 1.0, seberapa yakin kamu>
 }"""
 
@@ -133,8 +167,15 @@ Jawab dengan JSON:
   "terbukti": true/false,
   "satuan_ditandai": "<id satuan yang menyimpang>",
   "alasan": "<satu kalimat, dan SEBUTKAN kedua satuannya>",
-  "teks_asli": "<potongan teks PERSIS dari satuan yang ditandai>",
-  "saran": "<satu kalimat saran>",
+  "teks_asli": "<potongan teks PERSIS dari satuan yang ditandai. Sependek
+                 mungkin dan WAJIB berada dalam satu ayat>",
+  "saran": "<satu kalimat saran. Kosongkan kalau kamu tidak tahu apa yang
+             sebaiknya dilakukan>",
+  "sasaran": "<DI MANA perbaikannya dikerjakan. WAJIB salah satu dari:
+               'satuan ini' | 'pasal-1' | 'menimbang' | 'mengingat' |
+               'menetapkan' | 'judul' | '<id satuan lain yang memang ada>'.
+              Pada tabrakan, seringkali yang tepat justru id satuan satunya
+              lagi. Jangan mengarang id>",
   "skor": <0.0 sampai 1.0>
 }"""
 
@@ -159,9 +200,48 @@ Jawab dengan JSON:
   "peraturan": "<nama peraturan pembanding, salin dari daftar>",
   "alasan": "<satu kalimat. WAJIB memakai kata 'berpotensi bertentangan',
               bukan 'bertentangan' — temuan ini kemungkinan, bukan kesimpulan>",
-  "teks_asli": "<potongan teks PERSIS dari rancangan yang diperiksa>",
+  "teks_asli": "<potongan teks PERSIS dari rancangan yang diperiksa.
+                SEPENDEK MUNGKIN — satu frasa atau satu ayat saja, JANGAN
+                seluruh pasalnya. Kutipan yang merentang beberapa ayat tidak
+                akan ketemu di naskah dan temuanmu gugur seluruhnya. Salin
+                huruf demi huruf, termasuk tanda bacanya>",
   "saran": "<satu kalimat saran>",
   "skor": <0.0 sampai 1.0>
+}"""
+
+
+TAHAP6_RUMUSAN = """Sebuah kelemahan sudah TERBUKTI pada rancangan di bawah,
+tetapi penggantinya belum diketahui. Di bawah ini juga ada rumusan dari
+peraturan yang MASIH BERLAKU untuk hal serupa.
+
+Tugasmu: usulkan pengganti untuk `teks_asli` SAJA, mencontoh cara peraturan
+yang sudah berlaku merumuskannya.
+
+EMPAT SYARAT, dan usulan yang melanggar salah satunya lebih baik dikosongkan:
+
+  1. Penggantinya untuk `teks_asli` SAJA — bukan untuk kalimatnya, bukan untuk
+     ayatnya. Bayangkan `teks_asli` dihapus dan tulisanmu ditaruh persis di
+     tempatnya: kalimatnya harus jadi utuh dan benar, tanpa kata yang terulang.
+     JANGAN mengulang kata-kata yang berada SEBELUM `teks_asli`.
+  2. Panjangnya sepadan. Kalau perbaikannya menuntut menulis ulang kalimat yang
+     jauh lebih panjang, KOSONGKAN — usulan begitu akan ditolak kode.
+  3. Istilah yang sudah didefinisikan di Pasal 1 wajib dieja PERSIS.
+  4. `peraturan` WAJIB disalin dari daftar di bawah. Jangan menyebut peraturan
+     lain dari ingatanmu, sekalipun kamu yakin — kode memeriksanya, dan yang
+     di luar daftar digugurkan seluruhnya.
+
+Teks pembanding berasal dari pemindaian yang OCR-nya bisa rusak. Kalau
+kutipannya terbaca janggal, jangan dijadikan contoh.
+
+Mengosongkan `usulan_rumusan` adalah jawaban yang baik, bukan kegagalan.
+
+Jawab dengan JSON:
+{
+  "usulan_rumusan": "<pengganti harfiah untuk teks_asli, atau string kosong>",
+  "peraturan": "<nama peraturan yang kamu contoh, salin dari daftar.
+                 Kosongkan kalau usulan_rumusan kosong>",
+  "saran": "<satu kalimat untuk penelaah: apa yang diperbaiki dan kenapa>",
+  "skor": <0.0 sampai 1.0, seberapa yakin usulanmu tepat>
 }"""
 
 

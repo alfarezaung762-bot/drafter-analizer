@@ -22,7 +22,7 @@ import threading
 from typing import Optional
 
 from app.db import sesi as db_sesi
-from app.models.pekerjaan import BarisPeta, Pekerjaan, StatusPekerjaan
+from app.models.pekerjaan import BarisPeta, Dugaan, Pekerjaan, StatusPekerjaan
 from app.models.temuan import Temuan
 
 
@@ -37,6 +37,15 @@ class _Memori:
 
 _memori = _Memori()
 _temuan: dict[int, list[Temuan]] = {}
+# Temuan Fase 1 yang dapat keberatan model. Dipisah dari `_temuan` karena
+# panel sudah memegang temuan itu — yang perlu dikirim balik cuma catatannya,
+# bukan temuannya lagi.
+_keberatan: dict[int, list[Temuan]] = {}
+# Dugaan Langkah 3. Di memori saja, sekelas temuan: sekali petanya tersimpan,
+# menalar ulang cuma satu panggilan — jauh lebih murah daripada membaca ulang
+# seluruh naskah. Yang dipakai Ekspor Tahap 3 untuk memperlihatkan apa yang
+# KELUAR dari Langkah 3, bukan cuma apa yang masuk.
+_dugaan: dict[int, list[Dugaan]] = {}
 _kunci = threading.Lock()
 
 
@@ -258,6 +267,68 @@ def ambil_temuan(nomor: int) -> list[Temuan]:
         return list(_temuan.get(nomor, []))
 
 
+def tambah_keberatan(nomor: int, temuan: list[Temuan]) -> None:
+    with _kunci:
+        _keberatan.setdefault(nomor, []).extend(temuan)
+
+
+def ambil_keberatan(nomor: int) -> list[Temuan]:
+    with _kunci:
+        return list(_keberatan.get(nomor, []))
+
+
+# ---------------------------------------------------------------------------
+# Dugaan Langkah 3 — memori saja
+# ---------------------------------------------------------------------------
+
+
+def simpan_dugaan(nomor: int, dugaan: list[Dugaan]) -> None:
+    """Catat hasil Langkah 3. Daftar kosong TETAP dicatat, dan itu penting.
+
+    "Langkah 3 tidak menghasilkan dugaan" dan "Langkah 3 belum pernah
+    dijalankan" adalah dua keadaan yang berbeda, dan Ekspor Tahap 3 harus bisa
+    membedakannya. Karena itu yang dipakai `nomor in _dugaan`, bukan panjang
+    daftarnya.
+    """
+    with _kunci:
+        _dugaan[nomor] = list(dugaan)
+
+
+def ambil_dugaan(nomor: int) -> Optional[list[Dugaan]]:
+    """None berarti BELUM PERNAH dicatat; daftar kosong berarti nihil."""
+    with _kunci:
+        ada = _dugaan.get(nomor)
+        return None if ada is None else list(ada)
+
+
+def pekerjaan_terakhir(dokumen: str) -> Optional[int]:
+    """Nomor pekerjaan terbaru untuk sebuah dokumen, atau None.
+
+    Dipakai Ekspor Tahap 3 supaya panel yang baru dimuat ulang — dan karena
+    itu lupa nomor pekerjaannya — tetap bisa mengekspor analisis terakhir.
+    """
+    s = db_sesi.sesi()
+    if s is None:
+        with _kunci:
+            cocok = [
+                n for n, p in _memori.pekerjaan.items() if p.dokumen == dokumen
+            ]
+            return max(cocok) if cocok else None
+
+    from sqlmodel import select
+
+    from app.db.tabel import PekerjaanDB
+
+    with s:
+        baris = s.exec(
+            select(PekerjaanDB.id)
+            .where(PekerjaanDB.dokumen == dokumen)
+            .order_by(PekerjaanDB.id.desc())  # type: ignore[union-attr]
+            .limit(1)
+        ).first()
+        return baris
+
+
 def bersihkan_memori() -> None:
     """Hanya untuk tes. Tidak menyentuh basis data."""
     with _kunci:
@@ -265,3 +336,7 @@ def bersihkan_memori() -> None:
         _memori.peta.clear()
         _memori.urut = 0
         _temuan.clear()
+        _keberatan.clear()
+        _dugaan.clear()
+        _temuan.clear()
+        _keberatan.clear()

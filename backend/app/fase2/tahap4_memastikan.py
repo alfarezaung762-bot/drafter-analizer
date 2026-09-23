@@ -92,6 +92,7 @@ def pastikan_tunggal(
         alasan=str(isi.get("alasan", "")).strip(),
         teks_asli=teks_asli,
         saran=str(isi.get("saran", "")).strip(),
+        sasaran=str(isi.get("sasaran", "")).strip(),
         usulan_rumusan=str(isi.get("usulan_rumusan", "")).strip(),
         skor=skor_sah(isi.get("skor")),
         eksternal=dugaan.eksternal,

@@ -396,13 +396,76 @@ Pengaturan.
 parsernya belum mendukung itu dan memilih diam dengan menyebut alasannya.
 Fase 1 pada KMK tetap berjalan seperti biasa.
 
-**HANYA NASKAH YANG "Pasal 1"-NYA DIKETIK SEBAGAI TEKS.** Kalau rancangan
-memakai penomoran otomatis Word, "BAB I" dan "Pasal 1" tidak ikut terbaca
-add-in, parser tidak menemukan satu pun Pasal, dan **Fase 2 tidak dijalankan** —
-panel menyebutkan alasannya. Fase 1 tetap berjalan penuh. Cara memastikannya:
-klik tepat sebelum tulisan "Pasal 1" di Word; kalau kursor tidak bisa masuk ke
-dalam tulisan itu, nomornya otomatis. Batasan ini tercatat di
-`fase-2dan-3drafter.md` bagian 4.1 berikut jalan keluarnya.
+**BUKAN NASKAH PERUBAHAN.** Kalau judulnya memuat "PERUBAHAN ATAS", atau
+batang tubuhnya memakai "Pasal I" berangka Romawi, Fase 2 **tidak dijalankan**
+dan panel menyebutkan alasannya. Sebabnya: pasal yang dikutip di dalam naskah
+perubahan milik peraturan **induk**, bukan draf ini — memeriksanya seolah
+milik draf ini menghasilkan salah tandai. Fase 1 tetap berjalan penuh.
+
+**Naskah berpenomoran otomatis sudah didukung** sejak 23 Sep 2026. Kalau
+"BAB I", "Pasal 1", atau nomor ayat dibuat dengan penomoran otomatis Word,
+nomornya kini ikut terbaca add-in. Sebelum itu Fase 2 tidak menemukan satu pun
+Pasal, dan pada naskah yang ayatnya bernomor otomatis F2-001 **salah tandai**.
+
+Satu hal yang tersisa: temuan yang letaknya persis di nomor itu sendiri — mis.
+F2-004 yang menandai nomor pasal yang melompat — tidak bisa disorot di Word,
+jadi aturannya memilih diam.
+
+## Kalau tidak ada yang dicentang
+
+Sejak 23 Sep 2026 tombolnya **satu**: "Jalankan Analisis". Apa yang dijalankan
+ditentukan panel Pengaturan. Kalau tidak ada satu pun pemeriksaan dicentang,
+tombolnya mati dan panel menyebutkan alasannya.
+
+Fase 1 dan Fase 2 bisa menemukan hal yang sama. Penanganannya: temuan Fase 1
+dikirim ke AI supaya tidak diulang, tumpang tindih yang tersisa dibuang kode,
+dan kalau AI menilai sebuah temuan keliru ia menempelkan baris `Catatan AI:`
+di komentarnya. **Temuannya tidak pernah dihapus AI** — penelaah yang
+memutuskan.
+
+## Warna tandanya, dan apa artinya
+
+| Warna | Artinya | Di naskah |
+|---|---|---|
+| **Hijau** | kesalahannya **terbukti** dan penggantinya punya sumber yang bisa ditunjuk | teks lama dicoret merah, usulannya hijau di sebelahnya, sumbernya disebut di komentar |
+| **Merah saja** | kesalahannya terbukti dan perbaikannya **membuang** | teks lama dicoret merah, tidak ada usulan hijau |
+| **Kuning** | kemungkinan, atau penggantinya tidak diketahui | blok kuning saja, tidak ada yang dicoret |
+
+**Tidak ada yang menghapus tulisan Anda.** Merah dan coretan cuma warna;
+yang menghapus tetap Anda.
+
+Temuan Fase 2 yang **hasil penalaran** (F2-101 sampai F2-105) berwarna hijau
+hanya kalau rumusan penggantinya dicontoh dari peraturan yang masih berlaku
+lewat F3-003 — dan peraturannya disebut di komentar supaya bisa Anda periksa.
+Tanpa itu tetap kuning: penilaian AI atas dirinya sendiri bukan bukti. F2-003
+satu-satunya yang merah saja, karena definisi yang tidak terpakai memang
+dibuang, bukan diganti. F3-001 selalu kuning — "berpotensi bertentangan" itu
+kemungkinan, bukan kesimpulan.
+
+Komentarnya bisa sampai empat bagian:
+
+```
+Temuan:
+<apa yang ditemukan>
+
+Perbaiki di: <di mana perbaikannya dikerjakan>
+
+Saran:
+<apa yang sebaiknya dilakukan, kadang berikut contoh rumusan>
+
+<rujukan> — <tautan> (T2)
+```
+
+**Perbaiki di** muncul kalau perbaikannya ada di tempat lain — komentar di
+Pasal 5 yang perlu ditindaklanjuti dengan menambah definisi di Pasal 1,
+misalnya. Ia tidak ditulis kalau perbaikannya memang persis di tempat
+komentarnya, dan tidak ditulis kalau alat tidak bisa memastikan tempatnya.
+
+**Saran** dikosongkan kalau penggantinya memang tidak diketahui. Anjuran yang
+cuma mengulang masalahnya tidak menolong siapa pun.
+
+Baris rujukan paling bawah supaya bisa **ditimbang sendiri**, bukan dipercaya
+begitu saja.
 
 ## Tanpa AI — gratis, hasilnya pasti
 
@@ -428,6 +491,21 @@ penilaian. Periksa sendiri sebelum menerima.
 | F2-104 | Dua ketentuan yang tidak bisa berlaku bersamaan | sda, ditambah: pengecualian yang sah bukan tabrakan |
 | F2-105 | Tujuan di Menimbang yang tidak ada ketentuannya di batang tubuh | sda |
 | F3-001 | Berpotensi bertentangan dengan peraturan lain | Tidak ada pembanding yang status berlakunya terbaca; peraturan yang disebut tidak ada di hasil pencarian; kalimatnya tidak memakai "berpotensi bertentangan" |
+| F3-003 | **Bukan mencari temuan** — melengkapi temuan F2-1xx dengan usulan rumusan yang dicontoh dari peraturan yang masih berlaku, lalu menyebut peraturannya di komentar. Satu-satunya jalan temuan penalaran bisa jadi hijau | Temuan sudah punya usulan; kutipannya lebih dari 200 huruf; sudah 15 temuan dicarikan di dokumen ini; peraturan yang disebut tidak ada di hasil pencarian |
+
+## Fase 3 tanpa AI — gratis
+
+| Kode | Yang diperiksa | Kapan diam |
+|---|---|---|
+| F3-002 | Tiap dasar hukum di Mengingat dicari di korpus JDIH, status berlakunya dibaca. **Tidak memanggil AI sama sekali** | Bentuk di luar UU/Perppu/PP/Perpres/Keppres/PMK/KMK; tidak ketemu di korpus; dua dokumen bernomor sama berstatus beda; status di luar Berlaku/Tidak Berlaku |
+
+F3-002 tetap berjalan **walau Fase 2 menolak** — pada KMK, naskah perubahan,
+dan naskah berpenomoran otomatis. Yang dibutuhkannya cuma bagian Mengingat,
+dan itu terbaca di ketiganya.
+
+Yang dilaporkannya **fakta dari korpus**, bukan penilaian. Tetapi status di
+korpus bisa tertinggal dari keadaan sebenarnya — pastikan sendiri sebelum
+mengganti dasar hukum.
 
 **Yang belum dibangun di Fase 2:** F2-002 (istilah berkapital yang tidak
 berdefinisi — menunggu daftar pengecualian dari naskah nyata), F2-005

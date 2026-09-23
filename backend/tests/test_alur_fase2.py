@@ -439,12 +439,60 @@ class TestVerifikasi:
         assert lolos == []
         assert "di bawah ambang" in gugur[0]
 
-    def test_usulan_harfiah_jadi_penggantian_hijau(self):
-        lolos, _ = self._jalan(
+    def test_usulan_TANPA_peraturan_sumber_tetap_kuning(self):
+        """KAIDAH YANG MENJAGA KEBIJAKAN HIJAU 23 Sep 2026.
+
+        Usulan ini harfiah dan ejaannya benar, tetapi lahir dari penilaian
+        model atas dirinya sendiri — tanpa `pembanding`. Penilaian model
+        bukan bukti, jadi tetap kuning dan usulannya pindah ke Saran sebagai
+        contoh. Kalau suatu hari syarat ini hilang, tes ini yang berbunyi.
+        """
+        lolos, gugur = self._jalan(
             self._calon(usulan_rumusan="wajib mengajukan permohonan kepada Pengelola Barang")
+        )
+        assert lolos[0].jenis_tanda == JenisTanda.CATATAN
+        assert lolos[0].usulan_rumusan is None
+        assert "Contoh rumusan:" in lolos[0].saran
+        assert "tanpa peraturan sumber" in gugur[0]
+
+    def test_usulan_BERIKUT_peraturan_sumber_jadi_hijau(self):
+        """Rumusan dari peraturan yang masih berlaku adalah bukti yang bisa
+        ditunjuk — itulah yang dibuka Langkah 6c."""
+        lolos, _ = self._jalan(
+            self._calon(
+                usulan_rumusan="wajib mengajukan permohonan kepada Pengelola Barang",
+                pembanding="PMK 40 TAHUN 2024",
+                pembanding_sah=["PMK 40 TAHUN 2024"],
+            )
         )
         assert lolos[0].jenis_tanda == JenisTanda.PENGGANTIAN
         assert lolos[0].usulan_rumusan
+
+    def test_hijau_menyebut_peraturan_sumbernya_di_komentar(self):
+        """Syarat kebijakan hijau, bukan hiasan: penelaah harus bisa memeriksa
+        sendiri bahwa ini bukan asal klaim."""
+        lolos, _ = self._jalan(
+            self._calon(
+                usulan_rumusan="wajib mengajukan permohonan kepada Pengelola Barang",
+                pembanding="PMK 40 TAHUN 2024",
+                pembanding_sah=["PMK 40 TAHUN 2024"],
+            )
+        )
+        assert "Rumusan serupa: PMK 40 TAHUN 2024" in lolos[0].saran
+
+    def test_aturan_di_luar_himpunan_hijau_tidak_pernah_hijau(self):
+        """F3-001 membawa pembanding juga, tetapi temuannya KEMUNGKINAN —
+        bukan kesimpulan — jadi ia tetap kuning."""
+        lolos, gugur = self._jalan(
+            self._calon(
+                aturan_id="F3-001",
+                usulan_rumusan="wajib mengajukan permohonan kepada Pengelola Barang",
+                pembanding="PMK 40 TAHUN 2024",
+                pembanding_sah=["PMK 40 TAHUN 2024"],
+            )
+        )
+        assert lolos[0].jenis_tanda == JenisTanda.CATATAN
+        assert "tidak membuktikan kesalahan" in gugur[0]
 
     def test_DITURUNKAN_usulan_berupa_penjelasan_bukan_pengganti(self):
         lolos, gugur = self._jalan(
@@ -455,16 +503,25 @@ class TestVerifikasi:
         assert "DITURUNKAN" in gugur[0]
 
     def test_DITURUNKAN_istilah_berdefinisi_salah_eja_di_usulan(self):
+        """Peraturan sumbernya sah, tetapi istilah berdefinisi salah eja —
+        "Pengeloa Barang" mengubah arti hukumnya. Turun jadi kuning."""
         lolos, gugur = self._jalan(
-            self._calon(usulan_rumusan="wajib mengajukan permohonan kepada Pengeloa Barang")
+            self._calon(
+                usulan_rumusan="wajib mengajukan permohonan kepada Pengeloa Barang",
+                pembanding="PMK 40 TAHUN 2024",
+                pembanding_sah=["PMK 40 TAHUN 2024"],
+            )
         )
         assert len(lolos) == 1
         assert lolos[0].jenis_tanda == JenisTanda.CATATAN
         assert "salah eja" in gugur[0]
 
-    def test_saran_ikut_terbaca_penelaah_di_catatan(self):
+    def test_saran_punya_medan_sendiri_terpisah_dari_catatan(self):
+        """Komentar Word menata 'Temuan:' lalu 'Saran:' — dua medan, bukan satu."""
         lolos, _ = self._jalan(self._calon())
-        assert "Saran:" in lolos[0].catatan
+        assert lolos[0].saran == "sebutkan subjeknya"
+        assert "Saran" not in lolos[0].catatan
+        assert lolos[0].catatan == "tidak jelas siapa pemikulnya"
 
     def test_GUGUR_pembanding_fase3_di_luar_hasil_pencarian(self):
         paragraf, pohon, daftar = _siapkan()
@@ -815,3 +872,126 @@ class TestAlurLengkap:
         paragraf = _naskah(["Pasal 4", "Hal sebagaimana dimaksud dalam Pasal 88 berlaku."])
         hasil = jalankan_lanjut(paragraf, klien=None, aturan_aktif=["F2-004"])
         assert hasil.temuan == []
+
+
+# ===========================================================================
+# REGRESI — dua cacat yang ditemukan saat --lanjut dijalankan pada
+# contoh-rancangan-uji.docx, 22 Sep 2026. Keduanya lolos seluruh tes yang ada
+# waktu itu, dan baru kelihatan dari keluaran model sungguhan.
+# ===========================================================================
+
+
+class TestRegresiUsulanMenimpaLebihDariRentangnya:
+    """CACAT A — yang paling merusak, dan paling sulit dilihat.
+
+    Model menjawab usulan yang menulis ulang SELURUH kalimat, padahal yang
+    dicoret cuma penggalan belakangnya. Usulannya terbaca wajar sendirian dan
+    panjangnya masih masuk akal, jadi pemeriksaan panjang meloloskannya. Begitu
+    disisipkan, kalimatnya tertulis dua kali di naskah penelaah.
+    """
+
+    _PARAGRAF = (
+        "(2) Catatan telaah sebagaimana dimaksud pada ayat (1) "
+        "disampaikan kepada Unit Pemrakarsa."
+    )
+    _ASLI = "disampaikan kepada Unit Pemrakarsa."
+    _USULAN_MENIMPA = (
+        "Catatan telaah sebagaimana dimaksud pada ayat (1) "
+        "disampaikan kepada Unit Pemrakarsa oleh Penelaah."
+    )
+
+    def _sebelum(self):
+        return self._PARAGRAF[: self._PARAGRAF.index(self._ASLI)]
+
+    def test_usulan_yang_mengulang_teks_sebelumnya_ditolak(self):
+        assert not tahap5_verifikasi.usulan_harfiah(
+            self._USULAN_MENIMPA, self._ASLI, self._sebelum()
+        )
+
+    def test_panjangnya_saja_TIDAK_cukup_menangkapnya(self):
+        """Bukti kenapa pemeriksaan teks-sebelum perlu ada.
+
+        Tanpa `sebelum`, usulan yang sama lolos — 99 huruf masih di bawah
+        batas 175 untuk teks_asli 35 huruf.
+        """
+        assert tahap5_verifikasi.usulan_harfiah(self._USULAN_MENIMPA, self._ASLI)
+
+    def test_pengganti_yang_benar_tetap_diterima(self):
+        assert tahap5_verifikasi.usulan_harfiah(
+            "disampaikan oleh Penelaah kepada Unit Pemrakarsa.",
+            self._ASLI,
+            self._sebelum(),
+        )
+
+    def test_teks_sebelum_yang_pendek_tidak_menghalangi(self):
+        """Nomor ayat di depan ("(1) ") terlalu pendek untuk jadi penanda."""
+        assert tahap5_verifikasi.usulan_harfiah(
+            "Pengguna Barang wajib mengajukan", "wajib mengajukan", "(1) "
+        )
+
+    def test_lewat_verifikasi_penuh_temuannya_turun_jadi_kuning(self):
+        paragraf = _naskah(
+            [
+                "Pasal 4",
+                "(1) Permohonan sebagaimana dimaksud dalam Pasal 2 "
+                "disampaikan kepada Pengelola Barang.",
+            ]
+        )
+        pohon = bangun_pohon(paragraf)
+        daftar = ambil_definisi(pohon)
+        calon = CalonTemuan(
+            aturan_id="F2-102",
+            satuan_id="pasal-4-ayat-1",
+            alasan="tidak jelas siapa yang menyampaikan",
+            teks_asli="disampaikan kepada Pengelola Barang.",
+            usulan_rumusan=(
+                "Permohonan sebagaimana dimaksud dalam Pasal 2 disampaikan "
+                "kepada Pengelola Barang oleh Pengguna Barang."
+            ),
+            # Pembanding diisi supaya calon ini LOLOS kebijakan hijau dan
+            # benar-benar sampai ke pemeriksaan rentang. Yang diuji di sini
+            # penjagaan rentangnya, bukan kebijakan hijau-kuningnya — dan
+            # penjagaan itu harus menahan usulan sekalipun sumbernya sah.
+            pembanding="PMK 40 TAHUN 2024",
+            pembanding_sah=["PMK 40 TAHUN 2024"],
+            skor=0.95,
+        )
+        lolos, gugur = tahap5_verifikasi.verifikasi(
+            [calon], pohon, daftar, paragraf, 0.7
+        )
+        assert len(lolos) == 1
+        assert lolos[0].jenis_tanda == JenisTanda.CATATAN
+        assert "bukan pengganti harfiah" in gugur[0]
+
+
+class TestRegresiIstilahBerdefinisiSalingMenuduh:
+    """CACAT B — dua istilah sah yang cuma terpaut satu-dua huruf.
+
+    Naskah hukum penuh pasangan begini: Penelaah/Penelaahan,
+    Pengguna/Penggunaan. Usulan yang menulis salah satunya dengan BENAR
+    dituduh salah mengeja tetangganya, lalu diturunkan tanpa sebab.
+    """
+
+    _DEF = [
+        "Pasal 1",
+        "Dalam Peraturan Menteri ini yang dimaksud dengan:",
+        "1. Penelaah adalah pegawai yang melakukan penelaahan.",
+        "2. Penelaahan adalah kegiatan memeriksa kesesuaian Rancangan.",
+        "3. Rancangan adalah naskah yang belum ditetapkan.",
+    ]
+
+    def _daftar(self):
+        paragraf = [
+            ParagrafInput(index=i, teks=t) for i, t in enumerate(_KEPALA + self._DEF)
+        ]
+        return ambil_definisi(bangun_pohon(paragraf))
+
+    def test_istilah_tetangga_yang_dieja_benar_tidak_dituduh(self):
+        d = self._daftar()
+        assert "Penelaah" in d.istilah_saja() and "Penelaahan" in d.istilah_saja()
+        assert d.cari_mirip("Catatan disampaikan oleh Penelaah.") == []
+
+    def test_salah_ketik_sungguhan_TETAP_tertangkap(self):
+        """Penjagaan baru tidak boleh mematikan gunanya yang asli."""
+        d = self._daftar()
+        assert "Penelaah" in d.cari_mirip("Catatan disampaikan oleh Peneleah.")

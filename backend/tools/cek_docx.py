@@ -39,6 +39,8 @@ except ImportError:
     print("python-docx belum terpasang. Jalankan:  pip install python-docx")
     raise SystemExit(1)
 
+from tools.penomoran import Penomoran
+
 from app.models.temuan import JenisDokumen, ParagrafInput
 from app.rules.format_baku import jalankan_semua
 from app.fase2.tahap0_struktur import bangun_pohon
@@ -50,20 +52,39 @@ from app.fase2.mekanis_konsistensi import jalankan_mekanis
 def baca_paragraf(path: Path) -> list[dict]:
     """Baca seluruh paragraf dokumen menurut urutan asli, termasuk isi tabel.
 
-    Tiap entri: {'teks': str, 'dari_tabel': bool}
+    Tiap entri: {'teks': str, 'penanda': str, 'tingkat': int, 'dari_tabel': bool}
+
+    `penanda` adalah nomor otomatis Word — "Pasal 5", "(2)", "a." — yang TIDAK
+    ikut di `paragraph.text` dan karena itu harus dihitung sendiri. Pada naskah
+    PMK sungguhan 60% paragrafnya bernomor otomatis, jadi tanpa ini alat
+    diagnosa membaca naskah yang berbeda dari yang dibaca add-in.
+
+    Penghitungnya CERMINAN Word, bukan Word — batasnya di tools/penomoran.py.
     """
     doc = Document(str(path))
+    nomor = Penomoran(doc)
     hasil: list[dict] = []
+
+    def tambah(p, dari_tabel: bool) -> None:
+        penanda, tingkat = nomor.berikutnya(p)
+        hasil.append(
+            {
+                "teks": p.text,
+                "penanda": penanda,
+                "tingkat": tingkat,
+                "dari_tabel": dari_tabel,
+            }
+        )
 
     for child in doc.element.body.iterchildren():
         if child.tag == qn("w:p"):
-            hasil.append({"teks": Paragraph(child, doc).text, "dari_tabel": False})
+            tambah(Paragraph(child, doc), False)
         elif child.tag == qn("w:tbl"):
             tabel = Table(child, doc)
             for baris in tabel.rows:
                 for sel in baris.cells:
                     for p in sel.paragraphs:
-                        hasil.append({"teks": p.text, "dari_tabel": True})
+                        tambah(p, True)
 
     return hasil
 
@@ -84,9 +105,15 @@ def _cetak_temuan(temuan) -> None:
             f"{t.lokasi.offset_mulai + t.lokasi.panjang}] "
             f"{t.lokasi.teks_asli!r}"
         )
-        print(f"  Catatan : {t.catatan}")
+        print(f"  Temuan  : {t.catatan}")
+        # Saran punya medan sendiri sejak 22 Sep 2026. Menyembunyikannya di
+        # sini membuat alat diagnosa memperlihatkan separuh dari yang akan
+        # dibaca penelaah di komentar Word.
+        if getattr(t, "saran", ""):
+            print(f"  Saran   : {t.saran}")
         if t.usulan_rumusan:
-            print(f"  Usulan  : {t.usulan_rumusan}")
+            # Hanya terisi pada temuan HIJAU — yang benar-benar disisipkan.
+            print(f"  Disisipkan hijau: {t.usulan_rumusan}")
         # Yang menentukan status, BUKAN keterisian butirnya. Butir yang sudah
         # terisi dari ekstraksi OCR tetap belum diverifikasi siapa pun.
         butir = t.rujukan.butir
@@ -111,7 +138,7 @@ def _jalankan_lanjut(paragraf, args) -> int:
     dua-duanya tidak kelihatan dari panel.
     """
     from app.bersama.llm import KlienAzure, PerapalAzure
-    from app.bersama.opensearch import KorpusOpenSearch
+    from app.bersama.opensearch import KorpusOpenSearch, PencariOpenSearch
     from app.core.config import settings
     from app.fase2.alur import jalankan_lanjut
 
@@ -120,12 +147,14 @@ def _jalankan_lanjut(paragraf, args) -> int:
         print("Azure OpenAI belum terkonfigurasi. Periksa lewat GET /cek-env.")
         return 1
 
-    korpus = perapal = None
+    korpus = perapal = pencari = None
     if args.fase3:
         korpus, perapal = KorpusOpenSearch(), PerapalAzure()
         if not (korpus.siap and perapal.siap):
-            print("Fase 3 diminta tetapi OpenSearch/embedding belum siap — dilewati.")
+            print("F3-001 diminta tetapi OpenSearch/embedding belum siap — dilewati.")
             korpus = perapal = None
+        cari = PencariOpenSearch()
+        pencari = cari if cari.siap else None
 
     def lapor(selesai: int, total: int, _baru) -> None:
         print(f"  Langkah 2: {selesai}/{total} satuan terbaca")
@@ -139,6 +168,7 @@ def _jalankan_lanjut(paragraf, args) -> int:
         klien=klien,
         korpus=korpus,
         perapal=perapal,
+        pencari=pencari,
         ambang=args.ambang if args.ambang is not None else settings.FASE2_AMBANG_SKOR,
         per_panggilan=settings.FASE2_SATUAN_PER_PANGGILAN,
         lapor=lapor,
@@ -148,6 +178,14 @@ def _jalankan_lanjut(paragraf, args) -> int:
         print()
         print("FASE 2 TIDAK DIJALANKAN")
         print(f"  {hasil.tidak_dijalankan}")
+        # F3-002 berjalan SEBELUM penjaga struktur, jadi temuannya bisa ada
+        # walau Fase 2 berhenti. Menyembunyikannya di sini membuat alat
+        # diagnosa berbohong tentang apa yang sebenarnya diperiksa.
+        if hasil.temuan:
+            print()
+            _cetak_temuan(hasil.temuan)
+        for g in hasil.gugur:
+            print(f"  (diam) {g}")
         return 0
 
     print()
@@ -155,6 +193,21 @@ def _jalankan_lanjut(paragraf, args) -> int:
     print(f"  Dugaan  : {len(hasil.dugaan)} dari Langkah 3")
     print(f"  Ongkos  : {hasil.ongkos.ringkas()}")
     print()
+
+    # Dicetak dari hasil yang BARU SAJA berjalan, bukan dari simpanan: peta
+    # yang diperlihatkan harus peta yang dipakai, dan di CLI keduanya ada di
+    # tangan sekaligus.
+    if args.tahap3:
+        from app.fase2.ekspor_tahap3 import susun_ekspor_tahap3
+
+        print(
+            susun_ekspor_tahap3(
+                paragraf,
+                hasil.peta,
+                hasil.dugaan,
+                dokumen=Path(args.berkas).name,
+            )
+        )
 
     _cetak_temuan(hasil.temuan)
 
@@ -178,8 +231,10 @@ def main() -> int:
     ap.add_argument("--batas", type=int, default=60, help="Jumlah paragraf yang ditampilkan (default 60, 0 = semua)")
     ap.add_argument("--struktur", action="store_true", help="Tampilkan pohon satuan hasil parser Fase 2")
     ap.add_argument("--fase2", action="store_true", help="Jalankan pemeriksaan mekanis Fase 2 (F2-001..007), bukan Fase 1")
+    ap.add_argument("--tahap0", action="store_true", help="ALAT PENGEMBANG: cetak apa yang akan dibaca model, termasuk satuan yang dibuang penyaring")
     ap.add_argument("--lanjut", action="store_true", help="Jalankan SELURUH Fase 2 termasuk jalur penalaran. MEMANGGIL MODEL dan BERBIAYA.")
     ap.add_argument("--fase3", action="store_true", help="Bersama --lanjut: cari pembanding di korpus peraturan (OpenSearch + embedding).")
+    ap.add_argument("--tahap3", action="store_true", help="Bersama --lanjut: cetak peta Langkah 2 dan dugaan Langkah 3 yang baru saja dipakai.")
     ap.add_argument("--ambang", type=float, default=None, help="Ambang skor Langkah 5. Bawaan dari core/config.py.")
     ap.add_argument("--jenis", choices=["PMK", "KMK"], default="PMK", help="Jenis dokumen; di add-in ini dipilih penelaah (default PMK)")
     args = ap.parse_args()
@@ -207,7 +262,9 @@ def main() -> int:
     print(f"--- {batas} paragraf pertama (ditampilkan apa adanya, termasuk spasi/tab) ---")
     for i in range(batas):
         tanda = "[TABEL]" if entri[i]["dari_tabel"] else "       "
-        print(f"{i:>4} {tanda} {entri[i]['teks']!r}")
+        pen = entri[i].get("penanda", "")
+        awalan = f"{pen!r:<12}" if pen else " " * 12
+        print(f"{i:>4} {tanda} {awalan} {entri[i]['teks']!r}")
     if batas < len(entri):
         print(f"     ... {len(entri) - batas} paragraf berikutnya tidak ditampilkan (pakai --batas 0 untuk semua)")
     print()
@@ -215,8 +272,29 @@ def main() -> int:
     if args.paragraf_saja:
         return 0
 
-    paragraf = [ParagrafInput(index=i, teks=e["teks"]) for i, e in enumerate(entri)]
+    paragraf = [
+        ParagrafInput(
+            index=i,
+            teks=e["teks"],
+            penanda=e.get("penanda", ""),
+            tingkat=e.get("tingkat", -1),
+        )
+        for i, e in enumerate(entri)
+    ]
     jenis = JenisDokumen(args.jenis)
+
+    if args.tahap0:
+        from app.core.config import settings
+        from app.fase2.ekspor_tahap0 import susun_ekspor
+
+        print(
+            susun_ekspor(
+                paragraf,
+                per_panggilan=settings.FASE2_SATUAN_PER_PANGGILAN,
+                dokumen=path.name,
+            )
+        )
+        return 0
 
     if args.lanjut:
         return _jalankan_lanjut(paragraf, args)

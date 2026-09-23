@@ -28,13 +28,18 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from app.bersama.llm import Klien, Ongkos, Perapal
-from app.bersama.opensearch import Korpus
+from app.bersama.opensearch import Korpus, PencariPeraturan
 from app.fase2 import tahap2_baca, tahap3_menalar, tahap4_memastikan, tahap5_verifikasi
 from app.fase2.mekanis_konsistensi import jalankan_mekanis
 from app.fase2.tahap0_definisi import ambil_definisi
 from app.fase2.tahap0_struktur import bangun_pohon
 from app.fase2.tahap1_saring import saring
-from app.fase3 import tahap6_cari, tahap6_pastikan_ulang
+from app.fase3 import (
+    tahap6_cari,
+    tahap6_dasar_hukum,
+    tahap6_pastikan_ulang,
+    tahap6_rumusan,
+)
 from app.models.pekerjaan import BarisPeta, CalonTemuan, Dugaan
 from app.models.temuan import ParagrafInput, Temuan
 
@@ -67,6 +72,7 @@ def jalankan_lanjut(
     klien: Optional[Klien] = None,
     korpus: Optional[Korpus] = None,
     perapal: Optional[Perapal] = None,
+    pencari: Optional[PencariPeraturan] = None,
     aturan_aktif: Optional[list[str]] = None,
     ambang: float = 0.7,
     per_panggilan: int = 6,
@@ -74,6 +80,7 @@ def jalankan_lanjut(
     batas_temuan: int = 50,
     lapor: Optional[Callable[[int, int, list[BarisPeta]], None]] = None,
     peta_tersimpan: Optional[list[BarisPeta]] = None,
+    temuan_fase1: Optional[list[Temuan]] = None,
 ) -> HasilLanjut:
     """Jalankan Fase 2, dan Fase 3 bila korpusnya tersedia.
 
@@ -90,13 +97,34 @@ def jalankan_lanjut(
     """
     hasil = HasilLanjut()
     dipakai = None if aturan_aktif is None else {a.strip().upper() for a in aturan_aktif}
+    aktif_f3_002 = pencari is not None and (dipakai is None or "F3-002" in dipakai)
 
     # --- Langkah 0 : struktur ------------------------------------------
     pohon = bangun_pohon(paragraf)
+
+    # --- F3-002 : dasar hukum dicabut ----------------------------------
+    #
+    # SENGAJA DI ATAS penjaga struktur, dan itu bukan kelalaian urutan.
+    # F3-002 cuma membutuhkan bagian Mengingat, dan Mengingat terbaca utuh
+    # bahkan pada naskah yang batang tubuhnya gagal diurai: KMK berdiktum,
+    # naskah perubahan, dan naskah berpenomoran otomatis Word. Menaruhnya
+    # di bawah penjaga berarti membuang pemeriksaan yang sebenarnya masih
+    # bisa dijalankan pada ketiga naskah itu.
+    #
+    # Ditaruh di luar cabang Fase 3 bersama F3-001 karena wataknya memang
+    # berbeda: ia menanyai korpus tetapi TIDAK memanggil model, jadi tidak
+    # perlu menunggu Langkah 2–4 dan tidak menambah biaya sepeser pun.
+    if aktif_f3_002:
+        t_dasar, lewat = tahap6_dasar_hukum.cek_dasar_hukum(pohon, paragraf, pencari)
+        hasil.temuan += t_dasar
+        hasil.gugur += lewat
+
     if pohon.gagal:
         # Termasuk naskah KMK, yang memakai diktum dan belum didukung Fase 2.
-        # Fase 1 tetap berjalan seperti biasa; yang berhenti hanya Fase 2.
+        # Fase 1 tetap berjalan seperti biasa; yang berhenti hanya Fase 2 —
+        # dan F3-002 di atas sudah sempat jalan.
         hasil.tidak_dijalankan = pohon.gagal
+        hasil.temuan = _nomori(hasil.temuan, mulai_nomor, batas_temuan)
         return hasil
 
     daftar = ambil_definisi(pohon)
@@ -124,6 +152,7 @@ def jalankan_lanjut(
         per_panggilan,
         lapor=lapor,
         sudah_ada=peta_tersimpan,
+        temuan_fase1=temuan_fase1,
     )
 
     # --- Langkah 3 : menalar di atas peta -------------------------------
@@ -138,7 +167,16 @@ def jalankan_lanjut(
     calon = _cabang_fase3(calon, pohon, korpus, perapal, klien, hasil, dipakai)
 
     # --- Langkah 5 : gerbang terakhir, SELALU ---------------------------
-    lolos, gugur = tahap5_verifikasi.verifikasi(calon, pohon, daftar, paragraf, ambang)
+    # Yang jadi pembanding tumpang tindih: temuan Fase 1 DAN temuan mekanis
+    # Fase 2 yang sudah lebih dulu jadi di atas.
+    lolos, gugur = tahap5_verifikasi.verifikasi(
+        calon,
+        pohon,
+        daftar,
+        paragraf,
+        ambang,
+        temuan_ada=list(temuan_fase1 or []) + hasil.temuan,
+    )
     hasil.temuan += lolos
     hasil.gugur += gugur
     hasil.temuan = _nomori(hasil.temuan, mulai_nomor, batas_temuan)
@@ -173,13 +211,21 @@ def _cabang_fase3(
                 sisa.append(c)
         return sisa
 
-    if dipakai is not None and "F3-001" not in dipakai:
+    pakai_f3_001 = dipakai is None or "F3-001" in dipakai
+    pakai_f3_003 = dipakai is None or "F3-003" in dipakai
+
+    if not pakai_f3_001 and not pakai_f3_003:
         return [c for c in calon if not c.eksternal]
 
     keluar: list[CalonTemuan] = []
     for c in calon:
         if not c.eksternal:
             keluar.append(c)
+            continue
+        if not pakai_f3_001:
+            # Klaim eksternal tanpa F3-001 tidak punya isi, persis seperti
+            # ketika Fase 3 mati seluruhnya.
+            hasil.gugur.append(f"{c.aturan_id} {c.satuan_id}: F3-001 tidak dinyalakan")
             continue
         cari = tahap6_cari.cari_pembanding(c, pohon, korpus, perapal)
         if cari.gagal or not cari.pembanding:
@@ -192,6 +238,16 @@ def _cabang_fase3(
             hasil.gugur.append(f"F3-001 {c.satuan_id}: tidak terbukti pada pembanding")
             continue
         keluar.append(naik)
+
+    # --- Langkah 6c : mencarikan rumusan pengganti ----------------------
+    #
+    # SESUDAH F3-001 selesai, supaya calon yang gugur di sana tidak sempat
+    # dibayari pencarian. Berlaku untuk calon internal MAUPUN yang baru naik
+    # jadi F3-001 — keduanya sama-sama berakhir kuning tanpa usulan.
+    if pakai_f3_003:
+        hasil.gugur += tahap6_rumusan.lengkapi(
+            keluar, pohon, korpus, perapal, klien, hasil.ongkos
+        )
     return keluar
 
 
