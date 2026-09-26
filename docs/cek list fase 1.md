@@ -469,12 +469,21 @@ begitu saja.
 
 ## Tanpa AI — gratis, hasilnya pasti
 
-| Kode | Yang diperiksa | Yang TIDAK diperiksa | Kapan diam |
-|---|---|---|---|
-| F2-001 | Rujukan bentuk baku "sebagaimana dimaksud dalam/pada Pasal N ayat (n)" menunjuk satuan yang ada | Rujukan ke peraturan lain ("Pasal 12 Undang-Undang Nomor 1 Tahun 2004"); kata "Pasal" tanpa frasa baku | Pohon satuan tidak sehat |
-| F2-003 | Tiap istilah berdefinisi Pasal 1 dipakai di batang tubuh | Lampiran — belum dibaca parser sama sekali | Pasal 1 tidak ada, atau tidak memuat satu pun definisi |
-| F2-004 | Deret nomor Pasal, ayat, huruf, angka tidak melompat atau berulang | Pasal sisipan berhuruf (Pasal 5A) dianggap sah; penomoran di lampiran | Rentang paragrafnya tidak ketemu |
-| F2-007 | Bilangan "30 (tiga puluh)" — angka dan hurufnya cocok | Kurung yang isinya bukan bilangan ("Pengguna Barang (PB)"); bilangan di atas ribuan | Hurufnya tidak bisa dibaca jadi angka yang pasti |
+| Kode | Yang diperiksa | Yang TIDAK diperiksa | Kapan diam | Dasar KMK 527 |
+|---|---|---|---|---|
+| F2-001 | Rujukan bentuk baku "sebagaimana dimaksud dalam/pada Pasal N ayat (n)" menunjuk satuan yang ada | Rujukan ke peraturan lain ("Pasal 12 Undang-Undang Nomor 1 Tahun 2004"); kata "Pasal" tanpa frasa baku | Pohon satuan tidak sehat | butir 54d, 54h — **turunan** |
+| F2-003 | Tiap istilah berdefinisi Pasal 1 dipakai di batang tubuh, **termasuk Pasal 10–19** | Lampiran — belum dibaca parser sama sekali, padahal butir 67 menghitungnya | Pasal 1 tidak ada, atau tidak memuat satu pun definisi | butir 61, pengecualian butir 64 |
+| F2-004 | Deret nomor Pasal, ayat, huruf, angka tidak melompat atau berulang | Pasal sisipan berhuruf (Pasal 5A) dianggap sah; penomoran di lampiran | Rentang paragrafnya tidak ketemu | butir 54c, 54f, 54k-7 |
+| F2-007 | Bilangan "30 (tiga puluh)" — angka dan hurufnya cocok | Kurung yang isinya bukan bilangan ("Pengguna Barang (PB)"); bilangan di atas ribuan | Hurufnya tidak bisa dibaca jadi angka yang pasti | butir 54j |
+
+**F2-003 mencoret merah, bukan memblok kuning** — perbaikannya membuang
+definisinya, bukan menggantinya. Teksnya tetap tidak dihapus alat.
+
+**Butir 64 adalah pengecualian yang tidak bisa dinilai alat.** Istilah yang
+dipakai sekali tetapi pengertiannya diperlukan untuk suatu bab tetap boleh
+didefinisikan. Karena itu F2-003 baru berbunyi kalau istilahnya **tidak muncul
+sama sekali** di luar Pasal 1 — lebih longgar daripada butir 61, dan itu
+disengaja.
 
 ## Dengan AI — berjalan menit, berbiaya
 
@@ -490,7 +499,7 @@ penilaian. Periksa sendiri sebelum menerima.
 | F2-103 | wajib / harus / dapat / dilarang bertabrakan dalam satu ketentuan | sda |
 | F2-104 | Dua ketentuan yang tidak bisa berlaku bersamaan | sda, ditambah: pengecualian yang sah bukan tabrakan |
 | F2-105 | Tujuan di Menimbang yang tidak ada ketentuannya di batang tubuh | sda |
-| F3-001 | Berpotensi bertentangan dengan peraturan lain | Tidak ada pembanding yang status berlakunya terbaca; peraturan yang disebut tidak ada di hasil pencarian; kalimatnya tidak memakai "berpotensi bertentangan" |
+| F3-001 | Berpotensi bertentangan dengan peraturan lain — **KMK 527 Lampiran III huruf C angka 3–4 dan huruf E Syarat Substantif 2b** | Tidak ada pembanding yang status berlakunya terbaca; peraturan yang disebut tidak ada di hasil pencarian; kalimatnya tidak memakai "berpotensi bertentangan" |
 | F3-003 | **Bukan mencari temuan** — melengkapi temuan F2-1xx dengan usulan rumusan yang dicontoh dari peraturan yang masih berlaku, lalu menyebut peraturannya di komentar. Satu-satunya jalan temuan penalaran bisa jadi hijau | Temuan sudah punya usulan; kutipannya lebih dari 200 huruf; sudah 15 temuan dicarikan di dokumen ini; peraturan yang disebut tidak ada di hasil pencarian |
 
 ## Fase 3 tanpa AI — gratis

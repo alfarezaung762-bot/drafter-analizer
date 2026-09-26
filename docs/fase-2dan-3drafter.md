@@ -609,7 +609,7 @@ bukan syarat buktinya, melainkan dari mana bukti penggantinya boleh datang:
 
 | | Kapan dipakai | Yang terjadi di naskah |
 |---|---|---|
-| **Hijau** (`penggantian`) | salah terbukti **dan** penggantinya didapat dengan sumber yang bisa ditunjuk | teks lama merah dicoret, usulannya hijau di sebelahnya, sumbernya disebut di komentar |
+| **Hijau** (`penggantian`) | salah terbukti, penggantinya bersumber jelas, **dan** penggantinya muat di tempat yang dicoret | teks lama merah dicoret, usulannya hijau di sebelahnya, sumbernya disebut di komentar |
 | **Merah saja** (`penghapusan`) | salah terbukti, perbaikannya **membuang** | teks lama merah dicoret, tidak ada hijau |
 | **Kuning** (`catatan`) | kemungkinan, atau penggantinya tidak diketahui | blok kuning saja, tidak ada yang dicoret |
 
@@ -626,9 +626,34 @@ dibuka bukan izin bagi model menulis ke naskah, melainkan izin bagi rumusan
 yang sudah dipakai peraturan berlaku untuk masuk sebagai usulan.
 
 Dan yang paling menentukan: empat pemeriksaan per-usulan di Langkah 5 —
-`usulan_harfiah`, `cari_mirip`, `pasal_karangan`, dan rentang `lokasi` —
+`periksa_usulan`, `cari_mirip`, `pasal_karangan`, dan rentang `lokasi` —
 **tidak satu pun dilonggarkan**. Itulah yang sebenarnya mencegah naskah
 rusak, bukan daftar aturan mana yang boleh hijau.
+
+**Syarat terakhir: penggantinya wajib MUAT.** Ditetapkan 25 Sep 2026 sesudah
+hijau pertama yang benar-benar dihasilkan korpus membuat ayatnya kehilangan
+kata kerja:
+
+```
+dicoret : "penyelesaiannya dilakukan melalui rapat pembahasan"
+usulan  : "rapat pembahasan yang diselenggarakan oleh unit kerja …"
+jadinya : "… perbedaan pendapat …, rapat pembahasan yang …"   ← tanpa predikat
+```
+
+Panjangnya masuk akal dan ia tidak mengulang teks sebelumnya, jadi kedua
+penjaga lama meloloskannya. Tandanya yang sebenarnya: **kata pertama yang
+dicoret lenyap dari usulannya** — satu klausa diganti satu frasa. Berlaku
+mulai coretan empat kata; di bawah itu frasa memang lazim diganti seluruhnya
+("30 (tiga belas)" → "13 (tiga belas)").
+
+Harganya diketahui dan diterima: usulan yang sengaja mengubah kalimat pasif
+jadi aktif ikut tertahan, karena penjaga tidak bisa membedakannya dari yang
+merusak. Yang tertahan **tidak hilang** — ia tetap ditulis di komentar sebagai
+contoh rumusan. Pertukarannya: satu naskah rusak ditukar satu usulan bagus
+yang pindah ke komentar.
+
+Memeriksa satu contoh dengan tangan:
+`python tools/cek_usulan.py --kalimat … --dicoret … --usulan …`
 
 ### 4.3 Tiap temuan menyebut ke mana perbaikannya
 
@@ -670,6 +695,37 @@ cuma dipercaya atau ditolak.
 
 Baris `Saran` **dikosongkan** kalau penggantinya memang tidak diketahui.
 Anjuran yang cuma mengulang masalahnya tidak menolong siapa pun.
+
+### 4.6 Dasar KMK 527: kutipan, turunan, atau belum ada
+
+Butir yang menopang tiap aturan ditelusuri 25 Sep 2026 dengan membaca **citra
+halaman** KMK 527, bukan ekstraksi teksnya. Hasilnya membelah aturan Fase 2/3
+jadi tiga, dan pembelahannya ditampilkan ke penelaah apa adanya:
+
+| Keadaan | Penanda di panel | Contoh |
+|---|---|---|
+| Ada butir yang berbunyi persis demikian | tidak ada penanda | F2-003 (butir 61), F2-007 (butir 54j), F3-001 |
+| Ada butir yang **akibatnya** demikian | "dasar turunan" | F2-001 (butir 54d hanya mengatur kapitalisasi acuan) |
+| Tidak ada butirnya, sudah dicari | "rujukan belum diverifikasi" | F2-102, F2-103 |
+
+**Dasar F3-001 ternyata di Lampiran III, bukan Lampiran II** — itu sebabnya ia
+tidak ketemu saat butir 1–132 ditelusuri. Huruf C angka 3 dan 4 mewajibkan
+analisis terhadap peraturan yang lebih tinggi dan yang setingkat, dan angka 3b
+serta 4b menegaskan analisisnya **tidak sebatas pada peraturan yang
+mengamanatkan penyusunan**. Kalimat itulah pembenaran paling langsung untuk
+pencarian korpus: syaratnya memang menuntut melihat di luar Mengingat, dan itu
+tidak mungkin dituntaskan manual.
+
+**Kenapa dibedakan.** Butir yang tertulis di komentar adalah dasar hukum yang
+akan ditelusuri penelaah sendiri. Menuliskan `butir 54d` untuk aturan rujukan
+menggantung berarti mengarang dasar — penelaah yang memeriksanya akan menemukan
+butir tentang huruf kapital, dan kepercayaannya habis di situ. Maka butirnya
+tetap disebut supaya bisa ditelusuri, tetapi statusnya mengatakan terang-terangan
+bahwa ini turunan.
+
+**Kekosongan dilaporkan, tidak ditambal.** F2-102 dan F2-103 sudah dicari di
+Lampiran II dan tidak ketemu dasarnya. Keduanya tetap berjalan — aturannya
+berguna — tetapi tidak mengaku bersumber KMK 527.
 
 ### 4.1 Batasan
 

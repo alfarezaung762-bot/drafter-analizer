@@ -717,6 +717,39 @@ kesalahannya sudah diketahui lebih dulu lalu hasilnya dicocokkan. Itu pula
 kegunaan berkas uji itu seterusnya: bukan sekadar contoh, melainkan alat
 untuk menemukan salah tandai yang belum terpikirkan. Lihat bagian 16.2.
 
+**Kasus 13 — F2-003 membuang Pasal 10 sampai Pasal 19. Bug, sudah diperbaiki
+25 Sep 2026.**
+
+Salah tandai pertama milik Fase 2, dan sebabnya satu baris.
+
+F2-003 menyusun teks pembanding "batang tubuh" dengan membuang satuan yang
+`id`-nya berawalan `"pasal-1"` — maksudnya membuang daftar definisi di Pasal 1,
+supaya istilah tidak dihitung terpakai hanya karena ia didefinisikan. Tetapi
+awalan itu juga mengenai `pasal-10` sampai `pasal-19` berikut seluruh ayat dan
+hurufnya.
+
+Sepuluh pasal hilang diam-diam dari pembanding. Tiap istilah yang kebetulan
+hanya dipakai di sana dituduh mubazir, lalu **dicoret merah** — karena F2-003
+satu-satunya aturan yang memasang PENGHAPUSAN.
+
+Terbukti pada `Naskah Pengundangan PMK 17 Tahun 2026.docx`: istilah "DIPA"
+dipakai di `pasal-10-huruf-c`, `pasal-19-ayat-1-huruf-d`, dan
+`pasal-19-ayat-3-huruf-b`, tetap ditandai. Pada naskah bertahap-pasal banyak,
+makin banyak istilah yang jatuh ke rentang itu dan makin banyak salah
+tandainya.
+
+Perbandingannya sekarang persis, bukan berawalan:
+`s.id == "pasal-1" or s.id.startswith("pasal-1-")` — pola yang di
+`tahap1_saring.py` memang sudah benar sejak awal. Tesnya
+(`test_dipakai_di_pasal_dua_angka_tetap_dianggap_terpakai`) memasang istilahnya
+tepat di Pasal 12 dan sudah dibuktikan GAGAL tanpa perbaikannya.
+
+**Pelajarannya, dan ini yang berlaku seterusnya:** `id` satuan adalah alamat
+berstruktur, bukan teks biasa. Membandingkannya dengan awalan akan selalu
+menjebak pada angka dua digit — `pasal-1` versus `pasal-10`, `bab-i` versus
+`bab-ii`. Perbandingan `id` wajib persis, atau berawalan yang **menyertakan
+pemisahnya**.
+
 ### 6.11 Batas yang sudah diketahui
 
 - **Warna asli disimpan di memori panel, bukan di dokumen.** Kalau Word ditutup

@@ -79,6 +79,14 @@ _SELISIH_BEBAS = 40  # frasa pendek boleh melar tanpa dihitung lipatannya
 _EKOR_SEBELUM = 20
 _SEBELUM_TERLALU_PENDEK = 8  # di bawah ini ekornya tidak khas, pemeriksaan dilewati
 
+# Panjang coretan yang mulai diperiksa bentuk kalimatnya. Di bawah ini coretan
+# masih berupa frasa, dan frasa memang lazim diganti seluruhnya — "30 (tiga
+# belas)" jadi "13 (tiga belas)" membuang kata pertamanya, dan itu benar.
+# Empat kata ke atas hampir selalu sudah berupa klausa.
+_KATA_MINIMAL_PEMBUKA = 4
+
+_TANDA_BACA = ".,;:()[]\"'“”‘’-–—"
+
 
 # Aturan yang BOLEH mencoret naskah dan menyisipkan usulan hijau.
 #
@@ -273,6 +281,72 @@ def pasal_karangan(teks: str, pohon: PohonSatuan) -> list[str]:
     return hilang
 
 
+def _kata(teks: str) -> list[str]:
+    """Pecah jadi kata, tanpa tanda baca di pinggirnya."""
+    return [k for k in re.split(r"\s+", teks.strip()) if k.strip(_TANDA_BACA)]
+
+
+def periksa_usulan(usulan: str, teks_asli: str, sebelum: str = "") -> str:
+    """Kenapa `usulan` TIDAK layak disisipkan. String kosong berarti layak.
+
+    Dipisah dari `usulan_harfiah` supaya alasannya bisa dibaca — baik di
+    daftar gugur saat diagnosa, maupun oleh `tools/cek_usulan.py` yang dipakai
+    memeriksa satu contoh dengan tangan.
+    """
+    if not usulan:
+        return "usulan kosong"
+    if _BUKAN_PENGGANTI.match(usulan):
+        return "usulan berupa penjelasan, bukan teks pengganti"
+    if usulan.strip() == teks_asli.strip():
+        return "usulan sama persis dengan yang dicoret — tidak mengubah apa pun"
+
+    batas = max(len(teks_asli) * _LIPAT_MAKS, len(teks_asli) + _SELISIH_BEBAS)
+    if len(usulan) > batas:
+        return f"usulan {len(usulan)} huruf, terlalu panjang untuk mengganti {len(teks_asli)} huruf"
+
+    awal = sebelum.strip()
+    if len(awal) >= _SEBELUM_TERLALU_PENDEK and awal[-_EKOR_SEBELUM:] in usulan:
+        return "usulan mengulang teks yang ada SEBELUM coretan — kalimatnya akan tertulis dua kali"
+
+    # PENJAGA BENTUK KALIMAT, ditetapkan penelaah 25 Sep 2026.
+    #
+    # Kaidah yang ia sebutkan sendiri: "selama memang kata yang benarnya bisa
+    # disisipkan di kalimat yang berpotensi salah, masukkan saja; tapi kalau
+    # mengharuskan di tempat yang berbeda, hanya bertanda kuning dan ada
+    # komentar."
+    #
+    # Masalahnya ada usulan yang KELIHATAN muat padahal tidak. Terbukti pada
+    # contoh-rancangan-uji.docx:
+    #
+    #     dicoret : "penyelesaiannya dilakukan melalui rapat pembahasan"
+    #     usulan  : "rapat pembahasan yang diselenggarakan oleh unit kerja
+    #                yang melakukan penelaahan"
+    #
+    # Panjangnya masuk akal dan tidak mengulang teks sebelumnya, jadi kedua
+    # penjaga di atas meloloskannya. Tetapi kata kerja "dilakukan" ikut
+    # tercoret tanpa pengganti, dan ayatnya kehilangan predikat.
+    #
+    # Tandanya: kata PERTAMA yang dicoret lenyap dari usulannya. Itu berarti
+    # satu klausa diganti satu frasa, bukan frasa diganti frasa.
+    #
+    # Hanya berlaku pada coretan panjang. Frasa pendek memang lazim diganti
+    # seluruhnya — "30 (tiga belas)" jadi "13 (tiga belas)" membuang kata
+    # pertamanya dan itu benar.
+    kata = _kata(teks_asli)
+    if len(kata) >= _KATA_MINIMAL_PEMBUKA:
+        pembuka = kata[0].strip(_TANDA_BACA)
+        if pembuka and not re.search(
+            r"\b" + re.escape(pembuka) + r"\b", usulan, re.IGNORECASE
+        ):
+            return (
+                f'usulan membuang kata pembuka "{pembuka}" dari coretan '
+                "sepanjang ini — satu klausa diganti satu frasa, kalimatnya "
+                "akan kehilangan predikat"
+            )
+
+    return ""
+
+
 def usulan_harfiah(usulan: str, teks_asli: str, sebelum: str = "") -> bool:
     """Apakah `usulan` layak disisipkan sebagai pengganti `teks_asli`.
 
@@ -292,25 +366,9 @@ def usulan_harfiah(usulan: str, teks_asli: str, sebelum: str = "") -> bool:
     `lokasi` — pelanggaran CLAUDE.md butir 5. Terbukti pada
     contoh-rancangan-uji.docx, 22 Sep 2026.
 
-    Penjagaannya: kalau ekor teks-sebelum muncul lagi di dalam usulan, berarti
-    usulannya menggantikan lebih banyak daripada yang dicoret.
+    Alasan penolakannya ada di `periksa_usulan`.
     """
-    if not usulan:
-        return False
-    if _BUKAN_PENGGANTI.match(usulan):
-        return False
-    if usulan.strip() == teks_asli.strip():
-        return False  # tidak mengubah apa pun
-
-    batas = max(len(teks_asli) * _LIPAT_MAKS, len(teks_asli) + _SELISIH_BEBAS)
-    if len(usulan) > batas:
-        return False
-
-    awal = sebelum.strip()
-    if len(awal) >= _SEBELUM_TERLALU_PENDEK and awal[-_EKOR_SEBELUM:] in usulan:
-        return False
-
-    return True
+    return periksa_usulan(usulan, teks_asli, sebelum) == ""
 
 
 def verifikasi_satu(
@@ -373,8 +431,8 @@ def verifikasi_satu(
             if p.index == lokasi.paragraf_index:
                 sebelum = p.teks[: lokasi.offset_mulai]
                 break
-        if not usulan_harfiah(usulan, calon.teks_asli, sebelum):
-            diturunkan = "usulan bukan pengganti harfiah untuk rentang yang dicoret"
+        if sebab := periksa_usulan(usulan, calon.teks_asli, sebelum):
+            diturunkan = sebab
         elif daftar.gagal is None and (salah_eja := daftar.cari_mirip(usulan)):
             diturunkan = "istilah berdefinisi salah eja di usulan: " + ", ".join(salah_eja)
 

@@ -16,10 +16,11 @@
  * 23 Sep 2026. Yang berubah bukan syarat buktinya, melainkan dari mana bukti
  * penggantinya boleh datang:
  *
- *   HIJAU (penggantian) — kesalahannya TERBUKTI dan penggantinya didapat
- *                         DENGAN SUMBER YANG BISA DITUNJUK. Teks lama dicoret
- *                         merah, usulannya hijau di sebelahnya, sumbernya
- *                         disebut di komentar.
+ *   HIJAU (penggantian) — kesalahannya TERBUKTI, penggantinya didapat DENGAN
+ *                         SUMBER YANG BISA DITUNJUK, DAN penggantinya
+ *                         benar-benar MUAT di tempat yang dicoret. Teks lama
+ *                         dicoret merah, usulannya hijau di sebelahnya,
+ *                         sumbernya disebut di komentar.
  *   MERAH (penghapusan) — kesalahannya terbukti dan perbaikannya MEMBUANG.
  *                         Dicoret merah tanpa sisipan hijau. Teksnya tetap
  *                         tidak dihapus alat — yang menghapus penelaah.
@@ -31,6 +32,13 @@
  * F3-003, yaitu dicontoh dari peraturan yang masih berlaku: penilaian model
  * atas dirinya sendiri bukan bukti. Keputusan per aturan ada di
  * `backend/app/fase2/tahap5_verifikasi.py`.
+ *
+ * SYARAT TERAKHIR, ditetapkan penelaah 25 Sep 2026: penggantinya wajib
+ * benar-benar MUAT di tempat yang dicoret. Usulan yang mengganti satu klausa
+ * dengan satu frasa membuat kalimatnya kehilangan predikat — terbukti pada
+ * hijau pertama yang dihasilkan korpus. Usulan begitu turun jadi kuning dan
+ * tetap terbaca di komentar sebagai contoh rumusan. Periksa satu contoh
+ * dengan tangan: `python tools/cek_usulan.py --kalimat … --dicoret … --usulan …`
  *
  * ATURAN PEMELIHARAAN: berkas ini WAJIB sama dengan
  * `backend/app/fase2/mekanis_konsistensi.py` dan `tahap4_memastikan.py`.
@@ -69,9 +77,11 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Blok kuning pada frasa rujukannya saja. Tidak ada yang dicoret — " +
       "kesalahannya terbukti, tetapi nomor penggantinya tidak bisa ditebak alat",
     catatanSumber:
-      "Belum dikonfirmasi penelaah. Brief 8.11 mencantumkannya sebagai " +
-      "kemungkinan pemeriksaan; dibangun karena kesalahannya bisa dibuktikan " +
-      "mutlak dari struktur dokumen, tanpa penafsiran.",
+      "DASAR TURUNAN. Butir 54d dan 54h KMK 527 (halaman 40, dibaca visual " +
+      "25 Sep 2026) mengatur kapitalisasi acuan “Pasal” dan “ayat”, bukan " +
+      "keberadaan yang diacu — tidak ada butir yang berbunyi “rujukan wajib " +
+      "menunjuk pasal yang ada”. Kesalahannya tetap dibuktikan mutlak dari " +
+      "struktur dokumen, tanpa penafsiran.",
   },
   {
     id: "F2-003",
@@ -79,18 +89,25 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
     denganModel: false,
     judul: "Definisi di Pasal 1 dipakai di batang tubuh",
     diperiksa: [
-      "Tiap istilah berdefinisi dicari kemunculannya di seluruh batang tubuh",
-      "Istilah yang tidak pernah muncul di luar Pasal 1 ditandai",
+      "Tiap istilah berdefinisi dicari kemunculannya di SELURUH batang tubuh, termasuk Pasal 10 sampai Pasal 19",
+      "Istilah yang tidak pernah muncul sama sekali di luar Pasal 1 ditandai",
+      "Pencarian tidak peduli huruf besar-kecil",
     ],
     tidakDiperiksa: [
-      "Lampiran — belum dibaca parser sama sekali",
+      "Lampiran — belum dibaca parser sama sekali, padahal butir 67 menghitung kemunculan di lampiran juga",
       "Istilah bentuk panjang: pada “X yang selanjutnya disebut Y”, yang dicari di batang tubuh bentuk pendeknya (Y)",
+      "Istilah yang dipakai SEKALI tetap dibiarkan, walau butir 61 menuntut pemakaian berulang — supaya pengecualian butir 64 tidak pernah salah tandai",
       "MEMILIH DIAM bila Pasal 1 tidak ditemukan atau tidak memuat satu pun definisi",
     ],
     tanda:
-      "Blok kuning pada istilahnya di Pasal 1. Bukan kesalahan, melainkan " +
-      "kemubaziran — karena itu tidak ada yang dicoret",
-    catatanSumber: "Belum dikonfirmasi penelaah (brief 8.11).",
+      "Istilahnya di Pasal 1 dicoret merah, TANPA usulan hijau — perbaikannya " +
+      "membuang definisinya, bukan menggantinya. Teksnya tidak dihapus alat",
+    catatanSumber:
+      "Butir 61 KMK 527 Lampiran II (halaman 45, dibaca visual 25 Sep 2026): " +
+      "hanya istilah yang dipakai berulang yang boleh dimuat di ketentuan " +
+      "umum. Pengecualiannya butir 64 — istilah yang dipakai sekali tetapi " +
+      "pengertiannya diperlukan untuk suatu bab — dan pengecualian itu tidak " +
+      "bisa dinilai kode, jadi timbang sendiri sebelum menghapus.",
   },
   {
     id: "F2-004",
@@ -110,9 +127,10 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Blok kuning pada nomornya saja. Tidak dicoret: perbaikannya bisa " +
       "menomori ulang atau menambah bagian yang hilang, dan keduanya berbeda akibat",
     catatanSumber:
-      "Bersumber KMK 527 Lampiran II, tetapi NOMOR BUTIRNYA BELUM DIBACA " +
-      "VISUAL dari naskah. Sampai ada yang membacanya, tiap temuan membawa " +
-      "penanda rujukan belum diverifikasi.",
+      "Butir 54c, 54f, dan 54k-7 KMK 527 (halaman 40 dan 41, dibaca visual " +
+      "25 Sep 2026). Kata kuncinya “nomor urut”: deret yang melompat atau " +
+      "berulang bukan lagi urut. Berlaku sama untuk Pasal, ayat, dan rincian " +
+      "bertingkat.",
   },
   {
     id: "F2-007",
@@ -132,7 +150,11 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Blok kuning pada bilangannya. Contoh rumusan yang cocok ikut di " +
       "komentar, tetapi TIDAK disisipkan ke naskah — mana yang benar, " +
       "angkanya atau hurufnya, justru pertanyaan pokoknya",
-    catatanSumber: "Bersumber KMK 527 Lampiran II; nomor butirnya belum dibaca visual.",
+    catatanSumber:
+      "Butir 54j KMK 527 (halaman 41, dibaca visual 25 Sep 2026): bilangan " +
+      "ditulis angka Arab diikuti kata atau frasa di antara tanda kurung. " +
+      "Butir itu TIDAK menentukan mana yang benar kalau keduanya berbeda, " +
+      "jadi aturan ini tidak pernah menghasilkan hijau.",
   },
 
   // -----------------------------------------------------------------------
@@ -152,13 +174,15 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Temuan yang kutipannya tidak ketemu persis di naskah DIGUGURKAN, bukan diperlebar",
     ],
     tanda:
-      "Blok kuning berikut saran. TIDAK PERNAH mencoret dan tidak pernah " +
-      "menyisipkan teks hijau: perbaikannya menuntut menyusun ulang kalimat, " +
-      "dan susunan ulang tidak bisa dibuktikan benar",
+      "Blok kuning berikut saran. Hijau HANYA kalau F3-003 dinyalakan dan " +
+      "rumusan penggantinya dicontoh dari peraturan yang masih berlaku — " +
+      "penilaian model atas dirinya sendiri tidak pernah cukup untuk mencoret",
     catatanSumber:
-      "TEMUAN HASIL PENALARAN MODEL. Sudah lewat Langkah 4 dan Langkah 5, " +
-      "tetapi penilaian “bisa dibaca dua arah” tetap penilaian. Periksa sendiri " +
-      "sebelum menerima.",
+      "DASAR TURUNAN. Butir 66 KMK 527 (halaman 46, dibaca visual 25 Sep " +
+      "2026) melarang pengertian ganda, tetapi HANYA untuk definisi di " +
+      "ketentuan umum; di luar Pasal 1 aturan ini turunan. TEMUAN HASIL " +
+      "PENALARAN MODEL: sudah lewat Langkah 4 dan Langkah 5, tetapi penilaian " +
+      "“bisa dibaca dua arah” tetap penilaian. Periksa sendiri sebelum menerima.",
   },
   {
     id: "F2-102",
@@ -171,8 +195,14 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
     tidakDiperiksa: [
       "Kewajiban yang subjeknya jelas dari pasal sebelumnya dalam satu rangkaian",
     ],
-    tanda: "Blok kuning berikut saran. Tidak ada yang dicoret",
-    catatanSumber: "TEMUAN HASIL PENALARAN MODEL.",
+    tanda:
+      "Blok kuning berikut saran. Hijau hanya lewat F3-003, dengan " +
+      "peraturan sumbernya disebut di komentar",
+    catatanSumber:
+      "BELUM ADA DASARNYA DI KMK 527. Dicari 25 Sep 2026 di Lampiran II " +
+      "dan tidak ketemu: tidak satu butir pun mewajibkan norma menyebut " +
+      "subjek pemikulnya. Kekosongan itu dilaporkan apa adanya, tidak " +
+      "ditambal butir yang kebetulan mirip. TEMUAN HASIL PENALARAN MODEL.",
   },
   {
     id: "F2-103",
@@ -186,8 +216,15 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
     tidakDiperiksa: [
       "Kata operasional berbeda di pasal yang berbeda — itu lazim dan sah",
     ],
-    tanda: "Blok kuning berikut saran. Tidak ada yang dicoret",
-    catatanSumber: "TEMUAN HASIL PENALARAN MODEL.",
+    tanda:
+      "Blok kuning berikut saran. Hijau hanya lewat F3-003, dengan " +
+      "peraturan sumbernya disebut di komentar",
+    catatanSumber:
+      "BELUM ADA DASARNYA DI KMK 527. Dicari 25 Sep 2026: Lampiran II " +
+      "mengatur kata penghubung dalam tabulasi (butir 54l-o) dan " +
+      "melarang beberapa frasa tertentu, tetapi tidak mengatur benturan " +
+      "wajib/harus/dapat/dilarang di dalam satu ketentuan. TEMUAN HASIL " +
+      "PENALARAN MODEL.",
   },
   {
     id: "F2-104",
@@ -202,8 +239,14 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Pengecualian yang sah — “kecuali sebagaimana dimaksud dalam Pasal 12” bukan tabrakan",
       "Tabrakan dengan peraturan lain — itu F3-001",
     ],
-    tanda: "Blok kuning pada satuan yang menyimpang, catatannya menyebut kedua pasalnya",
-    catatanSumber: "TEMUAN HASIL PENALARAN MODEL.",
+    tanda:
+      "Blok kuning pada satuan yang menyimpang, catatannya menyebut kedua " +
+      "pasalnya. Hijau hanya lewat F3-003",
+    catatanSumber:
+      "DASAR TURUNAN. Butir 54a dan 54g KMK 527 (halaman 39-40, dibaca " +
+      "visual 25 Sep 2026) menuntut satu norma per satuan; tidak satu pun " +
+      "berkata dua ketentuan tidak boleh saling meniadakan. TEMUAN HASIL " +
+      "PENALARAN MODEL.",
   },
   {
     id: "F2-105",
@@ -216,8 +259,14 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
     tidakDiperiksa: [
       "Ketentuan di batang tubuh yang tidak disebut Menimbang — arah sebaliknya tidak diperiksa",
     ],
-    tanda: "Blok kuning pada butir Menimbang yang bersangkutan",
-    catatanSumber: "TEMUAN HASIL PENALARAN MODEL.",
+    tanda:
+      "Blok kuning pada butir Menimbang yang bersangkutan. Hijau hanya " +
+      "lewat F3-003",
+    catatanSumber:
+      "DASAR TURUNAN. Butir 17 dan 19 KMK 527 (halaman 34, dibaca visual " +
+      "25 Sep 2026) mengatur ISI konsiderans; tidak satu pun mewajibkan tiap " +
+      "maksud yang disebut di sana punya ketentuannya di batang tubuh. " +
+      "TEMUAN HASIL PENALARAN MODEL.",
   },
 
   // -----------------------------------------------------------------------
@@ -243,9 +292,13 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Blok kuning pada sebutan peraturannya saja, bukan seluruh butir " +
       "(butir Mengingat panjang karena memuat Lembaran Negara)",
     catatanSumber:
-      "Yang dilaporkan FAKTA dari korpus, bukan penilaian. Tetapi status di " +
-      "korpus dapat tertinggal dari keadaan sebenarnya — pastikan sendiri " +
-      "sebelum mengubah dasar hukum.",
+      "DASAR TURUNAN, dan koreksinya penting. Butir 28 dan 29 KMK 527 " +
+      "(halaman 36, dibaca visual 25 Sep 2026) melarang mencantumkan " +
+      "peraturan yang BELUM BERLAKU — bukan yang SUDAH DICABUT, padahal " +
+      "itulah yang diperiksa aturan ini. Larangannya berdiri di atas asas " +
+      "umum, bukan di atas KMK 527. Yang dilaporkan tetap FAKTA dari korpus, " +
+      "bukan penilaian; tetapi status di korpus dapat tertinggal dari " +
+      "keadaan sebenarnya — pastikan sendiri sebelum mengubah dasar hukum.",
   },
   {
     id: "F3-001",
@@ -266,9 +319,13 @@ export const ATURAN_FASE2: KeteranganAturanLanjut[] = [
       "Blok kuning. Bahasanya selalu “berpotensi bertentangan”, tidak pernah " +
       "“bertentangan” — temuan ini kemungkinan, bukan kesimpulan",
     catatanSumber:
-      "Kutipan pembanding berasal dari pemindaian yang OCR-nya bisa rusak, " +
-      "jadi tiap temuan Fase 3 SELALU membawa penanda belum diverifikasi. " +
-      "Cakupan korpusnya sendiri juga belum diverifikasi langsung (brief 8.12).",
+      "KMK 527 Lampiran III huruf C angka 3 dan 4 (halaman 89, dibaca visual " +
+      "25 Sep 2026), dan huruf E Syarat Substantif 2b (halaman 93 untuk PMK, " +
+      "halaman 95 untuk KMK). Huruf C angka 3b dan 4b justru menyuruh analisis " +
+      "MELAMPAUI peraturan yang disebut di Mengingat — itulah sebabnya aturan " +
+      "ini perlu korpus. Kutipan pembandingnya tetap berasal dari pemindaian " +
+      "yang OCR-nya bisa rusak, dan cakupan korpusnya belum diverifikasi " +
+      "langsung (brief 8.12) — periksa sendiri sebelum menerima.",
   },
   {
     id: "F3-003",

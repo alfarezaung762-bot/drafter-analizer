@@ -39,15 +39,23 @@ export interface RujukanTemuan {
   kutipan: string;
   pdf_url: string;
   /**
-   * Keandalan rujukan: "placeholder" (belum diisi), "ekstraksi" (dari teks
-   * OCR, belum dibaca manusia), "visual" (sudah diketik ulang manusia dari
-   * naskah).
+   * Keandalan rujukan:
+   * - "placeholder" — belum diisi sama sekali
+   * - "ekstraksi"   — dari teks OCR, belum dibaca manusia
+   * - "turunan"     — butirnya SUDAH dibaca manusia, tetapi aturannya akibat
+   *                   butir itu, bukan bunyinya (ditambahkan 25 Sep 2026)
+   * - "visual"      — sudah diketik ulang manusia dari naskah
    *
    * Gate legal menyala untuk apa pun yang BUKAN "visual". Sebelum 18 Sep 2026
    * gate itu menilai dari keterisian butir — begitu butirnya diisi dari OCR,
    * gate-nya mati sendiri padahal tidak ada yang diverifikasi.
+   *
+   * "turunan" ikut menyalakan gate, tetapi penandanya berbunyi lain: butirnya
+   * benar dan bisa ditelusuri, yang perlu ditimbang penelaah cuma apakah
+   * turunannya sah. Menyamakannya dengan "belum diverifikasi" membuang
+   * keterangan yang sudah susah payah diperiksa.
    */
-  status?: "placeholder" | "ekstraksi" | "visual";
+  status?: "placeholder" | "ekstraksi" | "turunan" | "visual";
 }
 
 export interface Temuan {

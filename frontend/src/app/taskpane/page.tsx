@@ -46,6 +46,11 @@ const API_BASE =
 const BATAS_KARTU_AWAL = 40;
 const TAMBAH_KARTU = 40;
 
+// Panjang alasan yang masih muat tiga baris di lebar panel Word. Di atasnya
+// tombol "selengkapnya" muncul; di bawahnya tidak, karena tombol yang tidak
+// pernah mengubah apa pun cuma mengajak penelaah menekan sia-sia.
+const BATAS_ALASAN_RINGKAS = 160;
+
 // Jarak antar-pengambilan kemajuan Fase 2. Dua detik: cukup rapat supaya
 // angkanya terasa hidup, cukup renggang supaya panel tidak sibuk sendiri.
 const JEDA_TANYA_MS = 2000;
@@ -150,6 +155,17 @@ export default function TaskpanePage() {
   // Berapa kartu yang boleh digambar. Naik kalau penelaah menekan
   // "Tampilkan lebih banyak".
   const [batasTampil, setBatasTampil] = useState(BATAS_KARTU_AWAL);
+
+  // Kartu mana yang alasannya sedang dibentangkan. Per kartu, bukan satu
+  // saklar untuk semua — penelaah membentangkan yang sedang ditimbangnya saja.
+  const [alasanTerbuka, setAlasanTerbuka] = useState<Set<string>>(new Set());
+  const bentangkanAlasan = (id: string) =>
+    setAlasanTerbuka((prev) => {
+      const baru = new Set(prev);
+      if (baru.has(id)) baru.delete(id);
+      else baru.add(id);
+      return baru;
+    });
 
   // Alat pengembang — ekspor Tahap 0 dan Tahap 3.
   const [mengekspor, setMengekspor] = useState(false);
@@ -341,6 +357,15 @@ export default function TaskpanePage() {
         ` ${hasil.idTidakDitandai.length} temuan TIDAK ditandai di naskah` +
         " karena letak persisnya tidak ketemu — alasannya ada di kartunya" +
         " masing-masing di bawah.";
+    }
+    // Balon komentar kosong tidak menjelaskan apa-apa tetapi tetap menyorot
+    // naskah, jadi penelaah melihat tanda yang bisu. Disebut terang-terangan
+    // daripada dibiarkan ditemukan sendiri.
+    if (hasil.komentarKosong > 0) {
+      pesan +=
+        ` ${hasil.komentarKosong} komentar terpasang tetapi isinya kosong —` +
+        " Word menolak menuliskannya. Isi temuannya tetap terbaca di kartu" +
+        " di bawah. Laporkan ini ke pengembang bila berulang.";
     }
     if (!hasil.pelacakanMati) {
       pesan +=
@@ -1515,8 +1540,14 @@ export default function TaskpanePage() {
         <div className="space-y-1.5">
           {temuanBerlokasi.slice(0, batasTampil).map((temuan) => {
             const isSelected = selectedTemuanId === temuan.id;
+            // Tiga keadaan, bukan dua. "turunan" berarti butirnya SUDAH
+            // dibaca manusia dari naskah KMK 527 — yang perlu ditimbang cuma
+            // apakah aturannya memang akibat wajar butir itu. Menyamakannya
+            // dengan "belum diverifikasi" membuang keterangan yang sudah
+            // diperiksa, dan membuat penelaah mengabaikan keduanya sekaligus.
+            const rujukanTurunan = temuan.rujukan.status === "turunan";
             const isPlaceholderRujukan =
-              temuan.rujukan.status !== "visual";
+              temuan.rujukan.status !== "visual" && !rujukanTurunan;
             // Penjelasan temuan TIDAK diulang di sini — tempatnya di komentar
             // Word, di titik kesalahannya (bagian 6.6). Panel hanya navigasi.
             const cuplikan = temuan.lokasi.teks_asli.trim();
@@ -1584,6 +1615,19 @@ export default function TaskpanePage() {
                       rujukan belum diverifikasi
                     </span>
                   )}
+                  {rujukanTurunan && (
+                    <span
+                      className="text-[8px] bg-slate-200 text-slate-700 px-1 rounded font-bold"
+                      title={
+                        `${temuan.rujukan.sumber} butir ${temuan.rujukan.butir}` +
+                        " sudah dibaca dari naskah KMK 527, tetapi aturan ini" +
+                        " akibat butir itu — bukan bunyinya. Timbang sendiri" +
+                        " apakah turunannya sah."
+                      }
+                    >
+                      dasar turunan
+                    </span>
+                  )}
                   {temuan.status === "diterima" && (
                     <span className="ml-auto text-emerald-700 text-[9px] font-medium">
                       diterima
@@ -1611,7 +1655,26 @@ export default function TaskpanePage() {
                     tetap tidak mengulang penjelasan komentarnya (bagian 6.9). */}
                 {tanpaTanda && (
                   <div className="text-[10px] text-slate-700 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 leading-snug">
-                    {temuan.catatan}
+                    {/* Dipotong tiga baris supaya satu alasan panjang tidak
+                        mendorong kartu-kartu berikutnya keluar layar. Yang
+                        dipotong cuma TAMPILANNYA — teksnya utuh, sekali klik. */}
+                    <p
+                      className={
+                        alasanTerbuka.has(temuan.id) ? "" : "line-clamp-3"
+                      }
+                    >
+                      {temuan.catatan}
+                    </p>
+                    {temuan.catatan.length > BATAS_ALASAN_RINGKAS && (
+                      <button
+                        onClick={() => bentangkanAlasan(temuan.id)}
+                        className="mt-0.5 text-slate-500 hover:text-slate-800 underline underline-offset-2"
+                      >
+                        {alasanTerbuka.has(temuan.id)
+                          ? "ringkas"
+                          : "selengkapnya"}
+                      </button>
+                    )}
                   </div>
                 )}
 

@@ -191,10 +191,17 @@ def cek_definisi_tak_terpakai(
     # Pencarian SENGAJA tidak peduli huruf besar-kecil. Naskah kerap menulis
     # istilahnya dengan huruf kecil di batang tubuh, dan melaporkannya sebagai
     # "tidak pernah dipakai" adalah salah tandai.
+    #
+    # PERBANDINGAN ID-NYA HARUS PERSIS, BUKAN BERAWALAN. `startswith("pasal-1")`
+    # juga mengenai pasal-10 sampai pasal-19 berikut seluruh ayat dan hurufnya —
+    # sepuluh pasal hilang diam-diam dari teks pembanding, dan tiap istilah yang
+    # kebetulan hanya dipakai di sana dilaporkan tidak pernah terpakai. Terbukti
+    # pada PMK 17 Tahun 2026: "DIPA" dipakai di pasal-10 dan pasal-19, tetap
+    # dituduh mubazir. Salah tandai, CLAUDE.md butir 1.
     batang = " ".join(
         s.teks.lower()
         for s in pohon.satuan
-        if not s.id.startswith("pasal-1")
+        if not (s.id == "pasal-1" or s.id.startswith("pasal-1-"))
         and s.jenis not in (JenisSatuan.MENIMBANG, JenisSatuan.MENGINGAT)
     )
 

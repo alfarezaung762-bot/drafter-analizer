@@ -80,6 +80,38 @@ class TestF2003DefinisiTakTerpakai:
             "Pasal 2", "Permohonan diajukan kepada pengelola barang.",
         ], ["F2-003"]) == []
 
+    def test_dipakai_di_pasal_dua_angka_tetap_dianggap_terpakai(self):
+        """KAIDAH YANG MENJAGA SELURUH F2-003.
+
+        Teks pembanding dulu disusun dengan membuang satuan ber-id BERAWALAN
+        "pasal-1" — yang juga mengenai pasal-10 sampai pasal-19. Sepuluh pasal
+        hilang diam-diam, dan tiap istilah yang kebetulan hanya dipakai di sana
+        dituduh mubazir. Terbukti pada PMK 17 Tahun 2026: "DIPA" dipakai di
+        Pasal 10 dan Pasal 19, tetap ditandai.
+
+        Kalau suatu hari awalan id dipakai lagi sebagai penyaring, tes ini yang
+        berbunyi.
+        """
+        isi = ["Pasal 1", "1. DIPA adalah dokumen pelaksanaan anggaran."]
+        for n in range(2, 20):
+            isi += [f"Pasal {n}", f"Ketentuan pelaksanaan tahap ke-{n} berlaku."]
+        # Satu-satunya pemakaian ada di Pasal 12 — di dalam rentang yang dulu
+        # terbuang. Dipasang PERSIS di situ, bukan di Pasal 2, supaya tesnya
+        # benar-benar menguji rentang yang bermasalah.
+        isi[2 * 12 - 1] = "Penyaluran dibebankan pada DIPA BUN."
+        assert _jalan(isi, ["F2-003"]) == []
+
+    def test_definisi_di_pasal_1_sendiri_tidak_dihitung_pemakaian(self):
+        """Batasnya tetap ada: istilah yang cuma muncul di daftar definisi
+        Pasal 1 memang belum dipakai."""
+        t = _jalan([
+            "Pasal 1",
+            "1. Sistem Informasi adalah aplikasi pencatatan barang.",
+            "2. Hari adalah Sistem Informasi yang dipakai harian.",
+            "Pasal 2", "Permohonan diselesaikan dalam 5 (lima) Hari.",
+        ], ["F2-003"])
+        assert [x.lokasi.teks_asli for x in t] == ["Sistem Informasi"]
+
 
 class TestF2004Penomoran:
     def test_pasal_melompat(self):

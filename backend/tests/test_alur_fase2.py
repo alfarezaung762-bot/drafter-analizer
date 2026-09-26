@@ -961,7 +961,9 @@ class TestRegresiUsulanMenimpaLebihDariRentangnya:
         )
         assert len(lolos) == 1
         assert lolos[0].jenis_tanda == JenisTanda.CATATAN
-        assert "bukan pengganti harfiah" in gugur[0]
+        # Alasannya disebut spesifik, bukan "bukan pengganti harfiah" yang
+        # generik — penelusur bug perlu tahu penjaga MANA yang berbunyi.
+        assert "tertulis dua kali" in gugur[0]
 
 
 class TestRegresiIstilahBerdefinisiSalingMenuduh:

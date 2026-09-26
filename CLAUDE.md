@@ -132,4 +132,14 @@ cd backend && python tools/cek_docx.py <berkas.docx> --tahap0     # apa yang dib
 cd backend && python tools/cek_docx.py <berkas.docx> --lanjut     # + jalur AI, BERBIAYA
 cd backend && python tools/cek_docx.py <berkas.docx> --lanjut --tahap3   # + peta & dugaan
 cd backend && python tools/cek_docx.py <berkas.docx> --lanjut --fase3    # + korpus OpenSearch
+
+# Baca butir KMK 527 dari CITRA halaman, bukan dari ekstraksi teks (butir 4)
+cd backend && python tools/halaman_pdf.py "tools/contoh/527KMK.012022Kep 1.pdf" 45-47
+
+# Satu usulan hijau: disisipkan ke naskah, atau turun jadi kuning?
+cd backend && python tools/cek_usulan.py --kalimat "<ayat utuh>" \
+    --dicoret "<yang dicoret>" --usulan "<teks pengganti>"
 ```
+
+Alat pengembangan dipasang terpisah: `pip install -r requirements-dev.txt`.
+Tidak satu pun dipanggil backend saat berjalan.

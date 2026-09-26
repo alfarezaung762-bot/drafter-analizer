@@ -1,0 +1,20 @@
+# Alat pengembangan dan diagnosa. TIDAK dipasang di server.
+#
+# Dipisah dari requirements.txt karena tidak satu pun dipanggil backend saat
+# berjalan: memasangnya di server cuma menambah permukaan tanpa menambah
+# kemampuan.
+
+pytest
+
+# Membaca .docx pada tools/cek_docx.py — alat diagnosa aturan tanpa Word.
+python-docx
+
+# Merender halaman PDF KMK 527 jadi gambar, untuk dibaca VISUAL saat
+# memverifikasi butir rujukan.
+#
+# CLAUDE.md butir 4 melarang menurunkan aturan dari EKSTRAKSI TEKS salinan
+# KMK 527, karena salinannya hasil pemindaian dan OCR-nya rusak ("clan" untuk
+# "dan", "MENTER!" untuk "MENTERI"). Larangan itu tetap berlaku penuh: paket
+# ini dipakai menghasilkan CITRA halaman yang dibaca mata, bukan teks yang
+# diekstrak mesin.
+pymupdf

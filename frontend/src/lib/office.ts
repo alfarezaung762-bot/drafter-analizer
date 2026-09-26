@@ -355,11 +355,20 @@ function susunIsiKomentar(temuan: Temuan): string {
   // sudah terisi dari ekstraksi OCR tetap belum diverifikasi siapa pun, dan
   // komentar di naskah orang tidak boleh menampilkannya seolah final.
   const butir = temuan.rujukan.butir;
-  const terverifikasi = temuan.rujukan.status === "visual";
+  const status = temuan.rujukan.status;
+  // Tiga keadaan, dan masing-masing berbunyi lain di komentar. "turunan"
+  // berarti butirnya sudah dibaca manusia dari naskah KMK 527 tetapi aturannya
+  // AKIBAT butir itu, bukan bunyinya — penelaah berhak tahu bedanya sebelum
+  // memakainya sebagai dasar mengubah naskah.
+  const penanda =
+    status === "visual"
+      ? ""
+      : status === "turunan"
+        ? " (dasar turunan — butirnya mengatur hal lain yang berakibat ini)"
+        : " (belum diverifikasi visual)";
   const rujukanStr =
     butir && butir !== "..."
-      ? `${temuan.rujukan.sumber} butir ${butir}` +
-        (terverifikasi ? "" : " (belum diverifikasi visual)")
+      ? `${temuan.rujukan.sumber} butir ${butir}${penanda}`
       : `${temuan.rujukan.sumber} (butir belum diisi)`;
 
   const baris = [`Temuan:`, temuan.catatan];
@@ -477,6 +486,16 @@ export type HasilPenandaan = {
   /** Jumlah komentar yang terpasang. */
   dikomentari: number;
   /**
+   * Komentar yang terpasang tetapi isinya KOSONG sesudah dibaca ulang.
+   *
+   * Dilaporkan pada 25 Sep 2026: balon komentar muncul di margin dengan nama
+   * penulis saja, tanpa satu huruf pun di dalamnya — jadi penelaah melihat
+   * sorotan di naskah yang tidak menjelaskan apa-apa. Alat yang menempelkan
+   * balon kosong tidak bisa dibedakan dari alat yang rusak, jadi kalau angka
+   * ini bukan nol panel wajib menyebutnya.
+   */
+  komentarKosong: number;
+  /**
    * Id temuan yang TIDAK tertandai di naskah — letak persisnya tidak ketemu,
    * atau pemasangannya gagal. Wajib disampaikan per temuan, bukan cuma
    * jumlahnya: kartunya di panel harus memuat alasannya sendiri, karena bagi
@@ -502,6 +521,7 @@ const HASIL_KOSONG: HasilPenandaan = {
   diblokKuning: 0,
   diusulkan: 0,
   dikomentari: 0,
+  komentarKosong: 0,
   idTidakDitandai: [],
   pelacakanMati: false,
 };
@@ -631,6 +651,10 @@ export async function tandaiSemuaTemuan(
         bolehDigambar.add(t.id);
       }
 
+      // Komentar yang baru dipasang, disimpan supaya isinya bisa dibaca ulang
+      // sesudah sync — lihat Tahap 4 di bawah.
+      const komentarBaru: [Temuan, Word.Comment][] = [];
+
       for (const { t, i } of antrean) {
         if (!bolehDigambar.has(t.id)) {
           hasil.idTidakDitandai.push(t.id);
@@ -683,19 +707,47 @@ export async function tandaiSemuaTemuan(
             hasil.diblokKuning++;
           }
 
-          bungkusContentControl(r, `${TAG_ASLI}${t.nomor}`, t.nomor);
-
           // Satu komentar per temuan. Tidak lebih.
+          //
+          // DIPASANG SEBELUM PEMBUNGKUSAN, dan itu disengaja. Alasannya sama
+          // dengan yang sudah berlaku untuk penyisipan usulan hijau di atas:
+          // `insertContentControl()` membungkus ulang rentangnya, dan apa pun
+          // yang dikerjakan pada `r` sesudah itu bisa mendarat di tempat yang
+          // bukan lagi rentang semula. Diduga inilah sebab balon komentar
+          // kosong yang dilaporkan 25 Sep 2026.
           if (bisaKomentar) {
-            r.insertComment(susunIsiKomentar(t));
+            komentarBaru.push([t, r.insertComment(susunIsiKomentar(t))]);
             hasil.dikomentari++;
           }
+
+          bungkusContentControl(r, `${TAG_ASLI}${t.nomor}`, t.nomor);
         } catch (err) {
           console.warn(`Tanda T${t.nomor} gagal dipasang:`, err);
           hasil.idTidakDitandai.push(t.id);
         }
       }
       await context.sync();
+
+      // --- Tahap 4: buktikan komentarnya benar-benar berisi ---------------
+      //
+      // Menulis lalu percaya sudah terjadi bukan pembuktian. Yang kosong
+      // dihitung supaya panel bisa mengatakannya; kegagalan yang diam tidak
+      // bisa dibedakan dari alat yang rusak.
+      if (komentarBaru.length > 0) {
+        try {
+          komentarBaru.forEach(([, k]) => k.load("content"));
+          await context.sync();
+          for (const [t, k] of komentarBaru) {
+            if ((k.content ?? "").trim() !== "") continue;
+            hasil.komentarKosong++;
+            console.warn(`Komentar T${t.nomor} terpasang tetapi kosong.`);
+          }
+        } catch (err) {
+          // Gagal membaca ulang bukan alasan menggagalkan penandaan yang
+          // sudah terlanjur benar. Cukup dicatat.
+          console.warn("Gagal memeriksa isi komentar:", err);
+        }
+      }
 
       await kembalikanPelacakan(context, modeAwal);
     });
