@@ -524,6 +524,46 @@ class TestCekKelengkapanStruktur:
         temuan = cek_kelengkapan_struktur(doc)
         assert len(temuan) == 3
 
+    def test_bagian_hilang_menempel_di_anchor_netral_bukan_tanpa_lokasi(self):
+        """Ditambahkan 27 Sep 2026, sesudah F1-003 diubah dari tanpa-lokasi
+
+        jadi ber-anchor-netral. Penelaah menyebut sebelumnya bug: temuan yang
+        tidak punya lokasi tidak pernah dikomentari di Word, jadi tidak bisa
+        Terima/Tolak — padahal komentar itu juga yang dibawa ke rapat
+        pembahasan bersama pemrakarsa.
+        """
+        doc = _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "Menimbang : a. bahwa ...",
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG ...",
+        ])
+        temuan = cek_kelengkapan_struktur(doc)
+        assert len(temuan) == 1
+        assert temuan[0].tanpa_sorot is True
+        assert temuan[0].lokasi.teks_asli != ""
+        assert temuan[0].lokasi.paragraf_index == 0
+
+    def test_bagian_hilang_TIDAK_pernah_menebak_lokasi_kekurangannya(self):
+        """Penjaga anti-regresi.
+
+        Anchor-nya WAJIB baris judul pembuka (posisi yang selalu ada dan
+        selalu aman), BUKAN tebakan "di mana bagian yang hilang seharusnya
+        berada" — menebak itu persis kesalahan yang sudah pernah menimpa
+        naskah (CLAUDE.md butir 6). Di naskah ini "Mengingat" hilang; anchor-nya
+        tetap paragraf 0, bukan disisipkan di antara Menimbang dan MEMUTUSKAN.
+        """
+        doc = _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "Menimbang : a. bahwa ...",
+            "MEMUTUSKAN:",
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG ...",
+        ])
+        temuan = cek_kelengkapan_struktur(doc)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.paragraf_index == 0
+        assert temuan[0].lokasi.teks_asli == "PERATURAN"
+
 
 # ---------------------------------------------------------------------------
 # Tes 4: cek_frasa_baku_menimbang (F1-004)
@@ -1353,16 +1393,26 @@ class TestRegresi18September:
         ]
         assert temuan == []
 
-    # --- Kasus 9: F1-002 jalur cadangan menyorot satu paragraf penuh -------
+    # --- Kasus 9: F1-002 jalur cadangan — anchor netral, bukan tanpa lokasi -
 
-    def test_f1_002_kekurangan_kata_tidak_menyorot_paragraf(self):
-        """Regresi. Judul Menetapkan KEKURANGAN kata dari judul pembuka.
+    def test_f1_002_kekurangan_kata_menempel_di_anchor_netral(self):
+        """Regresi 18 Sep, DIPERBAIKI LAGI 27 Sep 2026.
 
-        Tidak ada frasa beda yang bisa ditunjuk di naskah, karena yang salah
-        justru kata yang TIDAK ADA. Cadangan lama menyorot satu paragraf penuh
-        berikut label Menetapkan yang bukan bagian judul — melanggar bagian 6.5
-        dan CLAUDE.md butir 6. Sekarang temuannya tanpa lokasi, ditampilkan
-        panel sebagai peringatan dokumen.
+        Judul Menetapkan KEKURANGAN kata dari judul pembuka. Tidak ada frasa
+        beda yang bisa ditunjuk di naskah, karena yang salah justru kata yang
+        TIDAK ADA.
+
+        Cadangan MULA-MULA (sebelum 18 Sep) menyorot satu paragraf penuh
+        berikut label "Menetapkan : " yang bukan bagian judul — melanggar
+        CLAUDE.md butir 6, dan itu tidak boleh terulang: masih diuji di sini,
+        temuannya TIDAK BOLEH menyentuh paragraf Menetapkan sama sekali.
+
+        Perbaikan 18 Sep menghapus lokasinya sama sekali (peringatan dokumen)
+        — tapi itu berarti tidak pernah dikomentari di Word dan tidak bisa
+        Terima/Tolak, yang penelaah sebut bug 27 Sep 2026. Sekarang dipakai
+        anchor netral: baris JUDUL PEMBUKA dokumen (bukan Menetapkan), dengan
+        `tanpa_sorot=True` supaya Word tidak mewarnainya seolah teks itu yang
+        salah.
         """
         doc = self._naskah_pmk(
             "MEMUTUSKAN:",
@@ -1370,15 +1420,21 @@ class TestRegresi18September:
         )
         temuan = cek_judul_konsisten(doc, JenisDokumen.PMK)
         assert len(temuan) == 1
-        assert temuan[0].lokasi.teks_asli == ""
-        assert temuan[0].lokasi.panjang == 0
+        assert temuan[0].tanpa_sorot is True
+        # Anchor-nya baris pertama dokumen (indeks 0), BUKAN paragraf
+        # Menetapkan (indeks 11 pada _naskah_pmk) — supaya tidak berulang
+        # jadi "menyorot paragraf Menetapkan" dengan cara lain.
+        assert temuan[0].lokasi.paragraf_index == 0
+        assert temuan[0].lokasi.teks_asli == "PERATURAN"
         assert "PENGELOLAAN DANA" in temuan[0].catatan
 
-    def test_f1_002_tanpa_lokasi_lolos_saringan_jalankan_semua(self):
-        """Temuan tanpa lokasi F1-002 tidak boleh ikut terbuang.
+    def test_f1_002_anchor_netral_lolos_saringan_jalankan_semua(self):
+        """Temuan ber-anchor-netral F1-002 tidak boleh ikut terbuang.
 
-        Saringan di jalankan_semua() membuang temuan ber-teks_asli kosong
-        karena dulu itu selalu tanda cacat. F1-002 dan F1-003 dikecualikan.
+        Saringan di jalankan_semua() membuang temuan ber-teks_asli kosong.
+        Anchor netral punya teks_asli TERISI ("PERATURAN"), jadi lolos
+        saringan itu dengan sendirinya — tes ini menjaga supaya kelak tidak
+        ada yang menyangka F1-002/F1-003 masih perlu pengecualian aktif.
         """
         doc = self._naskah_pmk(
             "MEMUTUSKAN:",
@@ -1387,7 +1443,8 @@ class TestRegresi18September:
         temuan = jalankan_semua(doc, JenisDokumen.PMK, ["F1-002"])
         assert len(temuan) == 1
         assert temuan[0].aturan_id == "F1-002"
-        assert temuan[0].lokasi.teks_asli == ""
+        assert temuan[0].lokasi.teks_asli == "PERATURAN"
+        assert temuan[0].tanpa_sorot is True
 
     # --- Kasus 10: temuan kembar dari aturan yang sama ---------------------
 
@@ -1500,3 +1557,167 @@ class TestRegresi18September:
         temuan = cek_judul_konsisten(doc_beda, JenisDokumen.KMK)
         assert len(temuan) == 1
         assert temuan[0].lokasi.teks_asli == "PENUNJUKAN"
+
+
+class TestFrasaBerulangDisorotDiTempatYangBenar:
+    """PMK 45 Tahun 2026, 27 Sep 2026.
+
+    Judul pada Menetapkan memuat "YANG DIPERGUNAKAN" DUA kali, judul pembuka
+    sekali — jadi yang berlebih kemunculan kedua. Sebelum diperbaiki, sorotan
+    mendarat di kemunculan PERTAMA: penelaah membaca "di sini berbeda" pada
+    kata yang justru sudah benar.
+    """
+
+    def _dok(self, menetapkan: str):
+        return _buat_dokumen([
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 45 TAHUN 2026",
+            "TENTANG",
+            "PEMBEBASAN BEA MASUK ATAS BARANG DAN BAHAN YANG DIPERGUNAKAN "
+            "UNTUK MENGHASILKAN BARANG BAGI KEPERLUAN PERTAHANAN",
+            "DENGAN RAHMAT TUHAN YANG MAHA ESA",
+            "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+            "MEMUTUSKAN:",
+            menetapkan,
+        ])
+
+    def test_yang_disorot_kemunculan_KEDUA(self):
+        teks = (
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG PEMBEBASAN BEA "
+            "MASUK ATAS BARANG DAN BAHAN YANG DIPERGUNAKAN UNTUK MENGHASILKAN "
+            "BARANG YANG DIPERGUNAKAN BAGI KEPERLUAN PERTAHANAN."
+        )
+        temuan = cek_judul_konsisten(self._dok(teks), JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.teks_asli == "YANG DIPERGUNAKAN"
+
+        # Inilah inti tesnya: offsetnya harus menunjuk kemunculan KEDUA.
+        pertama = teks.index("YANG DIPERGUNAKAN")
+        kedua = teks.index("YANG DIPERGUNAKAN", pertama + 1)
+        assert temuan[0].lokasi.offset_mulai == kedua
+
+    def test_frasa_yang_cuma_sekali_tetap_disorot_di_tempatnya(self):
+        """Penjaga sisi sebaliknya — jangan sampai ordinalnya kebablasan."""
+        teks = (
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG PEMBEBASAN CUKAI "
+            "ATAS BARANG DAN BAHAN YANG DIPERGUNAKAN UNTUK MENGHASILKAN "
+            "BARANG BAGI KEPERLUAN PERTAHANAN."
+        )
+        temuan = cek_judul_konsisten(self._dok(teks), JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.teks_asli == "CUKAI"
+        assert temuan[0].lokasi.offset_mulai == teks.index("CUKAI")
+
+
+class TestFrasaRahmatWajibPMK:
+    """Butir 13: "a. Frasa Dengan Rahmat Tuhan Yang Maha Esa (khusus PMK)".
+
+    Kekhususannya disebut butir itu sendiri, jadi KMK tidak boleh ikut
+    diperiksa. Ditambahkan 27 Sep 2026 sesudah PMK 104 Tahun 2025 terbukti
+    tidak memuatnya dan tidak satu aturan pun menangkapnya.
+    """
+
+    _PEMBUKAAN = [
+        "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+        "NOMOR 104 TAHUN 2025",
+        "TENTANG",
+        "MEKANISME PENYALURAN DANA",
+        "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+        "Menimbang : a. bahwa perlu diatur;",
+        "Mengingat : 1. Undang-Undang Nomor 1 Tahun 2004;",
+        "MEMUTUSKAN:",
+        "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG MEKANISME.",
+    ]
+
+    def test_pmk_tanpa_frasa_dilaporkan(self):
+        temuan = cek_kelengkapan_struktur(
+            _buat_dokumen(self._PEMBUKAAN), JenisDokumen.PMK
+        )
+        assert len(temuan) == 1
+        assert "RAHMAT" in temuan[0].catatan
+
+    def test_pmk_dengan_frasa_diam(self):
+        naskah = list(self._PEMBUKAAN)
+        naskah.insert(4, "DENGAN RAHMAT TUHAN YANG MAHA ESA")
+        assert cek_kelengkapan_struktur(
+            _buat_dokumen(naskah), JenisDokumen.PMK
+        ) == []
+
+    def test_KMK_tanpa_frasa_TIDAK_dilaporkan(self):
+        """Salah tandai kalau ikut diperiksa — KMK memang tidak memakainya."""
+        assert cek_kelengkapan_struktur(
+            _buat_dokumen(self._PEMBUKAAN), JenisDokumen.KMK
+        ) == []
+
+    def test_naskah_yang_pembukaannya_TIDAK_TERBACA_memilih_diam(self):
+        """Batas kewajaran, CLAUDE.md butir 2.
+
+        Tidak satu pun bagian pembukaan ketemu — artinya bloknya tidak sampai
+        ke parser. Menambah tuduhan keempat di atas naskah yang memang belum
+        terbaca tidak menolong siapa pun.
+        """
+        temuan = cek_kelengkapan_struktur(
+            _buat_dokumen(["Pasal 1", "Isi pasal satu."]), JenisDokumen.PMK
+        )
+        assert not any("RAHMAT" in t.catatan for t in temuan)
+
+    def test_jenis_dihilangkan_melewati_pemeriksaan_frasa(self):
+        """Pemanggil lama tidak boleh tiba-tiba menghasilkan temuan baru."""
+        assert cek_kelengkapan_struktur(_buat_dokumen(self._PEMBUKAAN)) == []
+
+
+class TestJudulPembukaTanpaFrasaRahmat:
+    """PMK yang tidak memuat "DENGAN RAHMAT TUHAN YANG MAHA ESA".
+
+    Disalin dari PMK 104 Tahun 2025. Naskahnya lompat dari judul langsung ke
+    "MENTERI KEUANGAN REPUBLIK INDONESIA," — dan sampai 27 Sep 2026 itu
+    membuat pengambilan judul pembuka berjalan sampai paragraf TERAKHIR
+    dokumen. F1-002 lalu melapor "judulnya berbeda" sambil mengutip sembilan
+    halaman peraturan ke dalam satu kartu panel.
+    """
+
+    _NASKAH = [
+        "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+        "NOMOR 104 TAHUN 2025",
+        "TENTANG",
+        "MEKANISME PENYALURAN DANA ATAS PENGELUARAN NEGARA",
+        "MENTERI KEUANGAN REPUBLIK INDONESIA,",
+        "Menimbang : a. bahwa dalam rangka memitigasi penyaluran dana;",
+        "Mengingat : 1. Pasal 17 ayat (3) Undang-Undang Dasar Negara;",
+        "MEMUTUSKAN:",
+        "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG MEKANISME "
+        "PENYALURAN DANA ATAS PENGELUARAN NEGARA.",
+        "Pasal 1",
+        "Dalam Peraturan Menteri ini yang dimaksud dengan:",
+        "1. Menteri adalah menteri yang menyelenggarakan urusan keuangan.",
+    ]
+
+    def test_judulnya_terambil_utuh_dan_berhenti_di_tempatnya(self):
+        """Bukan sekadar diam — judulnya memang benar, jadi F1-002 diam."""
+        assert cek_judul_konsisten(_buat_dokumen(self._NASKAH), JenisDokumen.PMK) == []
+
+    def test_perbedaan_NYATA_tetap_ketemu_pada_naskah_yang_sama(self):
+        """Penjaga sisi sebaliknya: jangan diam karena rusak, tapi karena benar."""
+        naskah = list(self._NASKAH)
+        naskah[8] = (
+            "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG MEKANISME "
+            "PENCAIRAN DANA ATAS PENGELUARAN NEGARA."
+        )
+        temuan = cek_judul_konsisten(_buat_dokumen(naskah), JenisDokumen.PMK)
+        assert len(temuan) == 1
+        assert temuan[0].lokasi.teks_asli == "PENCAIRAN"
+
+    def test_kartu_TIDAK_pernah_memuat_seluruh_naskah(self):
+        """Jaring terakhir: batas 60 kata pada judul pembuka.
+
+        Naskah ini tidak punya satu pun penghenti — pengambilannya pasti
+        kebablasan kalau batasnya hilang. Yang diuji: catatannya tidak
+        membengkak, bukan sekadar temuannya ada atau tidak.
+        """
+        naskah = [
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+            "NOMOR 104 TAHUN 2025",
+            "TENTANG",
+        ] + [f"baris isi naskah nomor {i} yang panjang sekali" for i in range(40)]
+        for t in cek_judul_konsisten(_buat_dokumen(naskah), JenisDokumen.PMK):
+            assert len(t.catatan) < 2000, "catatan memuat seluruh naskah"

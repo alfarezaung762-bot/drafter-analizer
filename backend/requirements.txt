@@ -8,3 +8,4 @@ opensearch-py
 openai
 sqlmodel
 psycopg[binary]
+tiktoken

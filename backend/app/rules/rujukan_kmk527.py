@@ -331,7 +331,7 @@ RUJUKAN: dict[str, dict[str, object]] = {
     # -----------------------------------------------------------------------
     "F2-001": {
         "nama_aturan": "Rujukan antar-pasal menunjuk satuan yang ada",
-        "sumber": "KMK 527/KMK.01/2022 Lampiran II — turunan butir 54d dan 54h",
+        "sumber": "KMK 527/KMK.01/2022 Lampiran II",
         "butir": "54d, 54h",
         "kutipan": (
             "54d. Huruf awal kata \"pasal\" yang digunakan sebagai acuan "
@@ -437,9 +437,34 @@ RUJUKAN: dict[str, dict[str, object]] = {
     #                           placeholder, dan itu bukan kelalaian melainkan
     #                           hasil pencarian. Lihat catatan masing-masing.
     # -----------------------------------------------------------------------
+    # F2-101 punya DUA entri, dipilih Langkah 5 menurut letak temuannya.
+    #
+    # Dipisah 27 Sep 2026. Dulu satu entri, butir 66 berstatus "turunan", dan
+    # butir itu muncul di hampir setiap komentar F2-101 di batang tubuh —
+    # padahal butir 66 hanya mengatur DEFINISI di Ketentuan Umum. Penelaah
+    # bertanya apakah itu kesalahan atau pertimbangan; jawabannya
+    # pertimbangan, dan rujukannya membuatnya terlihat seperti kutipan.
     "F2-101": {
         "nama_aturan": "Rumusan tidak berpotensi ditafsirkan dua arah",
-        "sumber": "KMK 527/KMK.01/2022 Lampiran II — turunan butir 66",
+        "sumber": "Prioritas penelaah — rumusan wajib bisa dibaca satu arah",
+        "butir": "...",
+        "kutipan": "...",
+        "halaman_pdf": 0,
+        "status": "placeholder",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "DICARI 27 Sep 2026, TIDAK KETEMU untuk batang tubuh. Lampiran II "
+            "tidak punya bab ragam bahasa; butir 66 melarang pengertian ganda "
+            "HANYA pada definisi di Ketentuan Umum — itu entri F2-101-definisi. "
+            "Butir 54a menuntut pasal 'singkat, jelas, dan lugas', tetapi itu "
+            "mirip, bukan dasar, dan tidak ditambalkan: rujukan yang dikarang "
+            "lebih berbahaya daripada tidak ada rujukan. Temuannya hasil "
+            "penalaran model yang wajib menyebut dua tafsirannya (Langkah 5 ⑧)."
+        ),
+    },
+    "F2-101-definisi": {
+        "nama_aturan": "Definisi tidak menimbulkan pengertian ganda",
+        "sumber": "KMK 527/KMK.01/2022 Lampiran II",
         "butir": "66",
         "kutipan": (
             "66. Karena batasan pengertian atau definisi, singkatan, atau "
@@ -450,15 +475,12 @@ RUJUKAN: dict[str, dict[str, object]] = {
             "ganda."
         ),
         "halaman_pdf": 46,
-        "status": "turunan",
+        "status": "visual",
         "pdf_url": "https://jdih.kemenkeu.go.id/",
         "catatan": (
-            "DIBACA VISUAL 25 Sep 2026, halaman 46. Butir 66 melarang "
-            "pengertian ganda, tetapi HANYA untuk definisi di ketentuan umum. "
-            "Aturan ini memeriksa rumusan di seluruh batang tubuh, jadi di "
-            "luar Pasal 1 ia turunan, bukan kutipan. Temuannya juga hasil "
-            "penalaran model — sudah lewat Langkah 4 dan 5, tetapi penilaian "
-            "'bisa dibaca dua arah' tetap penilaian."
+            "DIBACA VISUAL 25 Sep 2026, halaman 46. Dipakai HANYA untuk temuan "
+            "F2-101 yang letaknya di Pasal 1 (Ketentuan Umum) — di situ butir "
+            "66 kutipan langsung, bukan turunan."
         ),
     },
     "F2-102": {
@@ -498,7 +520,7 @@ RUJUKAN: dict[str, dict[str, object]] = {
     },
     "F2-104": {
         "nama_aturan": "Dua ketentuan tidak saling meniadakan",
-        "sumber": "KMK 527/KMK.01/2022 Lampiran II — turunan butir 54a dan 54g",
+        "sumber": "KMK 527/KMK.01/2022 Lampiran II",
         "butir": "54a, 54g",
         "kutipan": (
             "54a. Pasal merupakan satuan aturan dalam PMK yang memuat satu "
@@ -525,7 +547,7 @@ RUJUKAN: dict[str, dict[str, object]] = {
     },
     "F2-105": {
         "nama_aturan": "Tujuan di Menimbang tercakup batang tubuh",
-        "sumber": "KMK 527/KMK.01/2022 Lampiran II — turunan butir 17 dan 19",
+        "sumber": "KMK 527/KMK.01/2022 Lampiran II",
         "butir": "17, 19",
         "kutipan": (
             "17. Konsiderans memuat uraian singkat mengenai pokok-pokok "
@@ -549,6 +571,37 @@ RUJUKAN: dict[str, dict[str, object]] = {
             "tetap turunan, dan temuannya hasil penalaran model."
         ),
     },
+    "F2-106": {
+        "nama_aturan": "Lampiran dinyatakan di batang tubuh dan berformat baku",
+        "sumber": "KMK 527/KMK.01/2022 Lampiran II",
+        "butir": "120, 121 huruf b, c, dan h",
+        "kutipan": (
+            "120. Dalam hal PMK atau KMK memerlukan lampiran, hal tersebut harus "
+            "dinyatakan dalam batang tubuh dan pernyataan bahwa lampiran "
+            "dimaksud merupakan bagian yang tidak terpisahkan dari Peraturan "
+            "Menteri Keuangan atau Keputusan Menteri Keuangan yang "
+            "bersangkutan. — 121. b. kata \"Lampiran\" ditempatkan di bagian "
+            "kanan margin, semuanya ditulis dengan huruf kapital. Bila Lampiran "
+            "lebih dari satu, maka pada kata Lampiran ditambahkan angka Romawi "
+            "I, II, dan seterusnya; c. di bawah kata \"Lampiran\" ditempatkan "
+            "judul PMK atau KMK yang semuanya ditulis dengan huruf kapital tanpa "
+            "tanda baca; h. pada akhir Lampiran harus dicantumkan nama dan tanda "
+            "tangan pejabat yang menetapkan PMK atau KMK."
+        ),
+        "halaman_pdf": 57,
+        "status": "visual",
+        "pdf_url": "https://jdih.kemenkeu.go.id/",
+        "catatan": (
+            "DIBACA VISUAL 29 Sep 2026, halaman 57 (citra halaman, bukan "
+            "ekstraksi teks). Dinilai MODEL dengan parameter tertulis, bukan "
+            "regex: bentuk lampiran terlalu beragam — PMK 119 memuat \"Lampiran "
+            "Surat\" di tengah contoh format surat. Dua parameternya turunan: "
+            "lampiran yang disebut pasal wajib ada, dan angka-huruf bilangan "
+            "di lampiran wajib cocok (butir 54j, yang tertulis untuk batang "
+            "tubuh). Tata letak (kanan margin, nomor halaman) tidak diperiksa "
+            "karena tidak terlihat di teks."
+        ),
+    },
 
     # -----------------------------------------------------------------------
     # FASE 3 — pembanding dari korpus peraturan.
@@ -568,7 +621,7 @@ RUJUKAN: dict[str, dict[str, object]] = {
     # -----------------------------------------------------------------------
     "F3-002": {
         "nama_aturan": "Dasar hukum di Mengingat masih berlaku",
-        "sumber": "KMK 527/KMK.01/2022 Lampiran II — turunan butir 28 dan 29",
+        "sumber": "KMK 527/KMK.01/2022 Lampiran II",
         "butir": "28, 29",
         "kutipan": (
             "28. Tidak dicantumkan sebagai dasar hukum: a. dalam hal PMK atau "
@@ -713,7 +766,7 @@ def rujukan_turunan(aturan_id: str) -> bool:
 def ambil_rujukan(aturan_id: str) -> dict[str, str]:
     """Ambil rujukan untuk aturan tertentu.
 
-    Returns dict dengan key: sumber, butir, kutipan, pdf_url, status.
+    Returns dict dengan key: sumber, butir, kutipan, pdf_url, halaman, status.
 
     `status` ikut dikirim karena antarmuka TIDAK BOLEH menilai keandalan
     rujukan dari ada-tidaknya isi. Sebelum 18 Sep 2026 gate legal menyala
@@ -729,5 +782,6 @@ def ambil_rujukan(aturan_id: str) -> dict[str, str]:
         "butir": str(entri["butir"]),
         "kutipan": str(entri["kutipan"]),
         "pdf_url": str(entri["pdf_url"]),
+        "halaman": str(entri.get("halaman_pdf", "") or ""),
         "status": str(entri.get("status", "placeholder")),
     }

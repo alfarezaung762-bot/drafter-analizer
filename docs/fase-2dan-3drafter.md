@@ -1,7 +1,8 @@
 # Fase 2 & 3 — Rancangan
 
-> **Rancangan, bukan perintah kerja.** Belum ada kode yang ditulis dari dokumen
-> ini. Acuan: `project-brief.md` 8.7–8.13 dan `fase1 drafter.md` untuk apa pun
+> **Acuan rancangan Fase 2 dan 3.** Alur lima tahap (bagian 3.1) dan
+> susunan foldernya di `telaah/` (bagian 2) sudah dibangun.
+> Acuan lain: `project-brief.md` 8.7–8.13 dan `fase1 drafter.md` untuk apa pun
 > yang menyangkut lapisan penandaan.
 
 ---
@@ -16,111 +17,84 @@ memeriksa apakah ada yang berpotensi bertentangan dengan peraturan lain,
 pembandingnya dari korpus di OpenSearch. Keduanya berdiri di atas satu pondasi:
 **parser** yang mengubah daftar paragraf datar jadi pohon satuan, karena
 pertanyaan seperti *"apakah Pasal 12 yang dirujuk itu ada"* mustahil dijawab
-tanpa tahu struktur dokumen. Dari tujuh langkah alurnya, **tiga dikerjakan kode
+tanpa tahu struktur dokumen. Dari lima tahap alurnya, **tiga dikerjakan kode
 biasa** — gratis, hasilnya pasti, dan kalau salah bisa ditunjukkan barisnya —
-sedangkan empat sisanya dikerjakan model. Karena berjalan menit dan berbayar,
-Fase 2 ditekan **terpisah** dari Fase 1 yang tetap hitungan detik, dan hasilnya
-disimpan per satuan supaya proses yang terputus tidak menghanguskan panggilan
-yang sudah dibayar. Temuannya masuk ke **saluran penandaan yang sama dengan
+sedangkan dua sisanya dikerjakan model yang membaca **naskah utuh**. Karena
+berjalan menit dan berbayar, Fase 2 berjalan sesudah Fase 1 yang tetap
+hitungan detik, dan jawaban model disimpan supaya proses yang terputus tidak
+menghanguskan panggilan yang sudah dibayar. Temuannya masuk ke **saluran penandaan yang sama dengan
 Fase 1** — merah dicoret, usulan hijau di sebelahnya, blok kuning, satu komentar
 per temuan — jadi seluruh pengaman Fase 1 ikut berlaku tanpa dibangun ulang.
 Kaidah yang mengikat semuanya: **tidak ada temuan yang boleh lahir sebelum tahap
-memastikan** — dugaan yang datang dari membaca ringkasan tidak pernah menyentuh
-naskah. Fase 3 sendiri ada di balik gerbang keras, tidak dimulai sebelum Fase 2
+memastikan** — dugaan yang lahir di tahap 3 tidak pernah menyentuh naskah
+sebelum diuji ulang dan dibuktikan kutipannya. Fase 3 sendiri ada di balik gerbang keras, tidak dimulai sebelum Fase 2
 memenuhi definisi selesainya.
 
 ---
 
 ## 2. Struktur folder
 
-Ditata **per fase dan per tahap**, bukan per lapisan teknis. Disetujui
-21 Sep 2026.
-
-Kaidah penamaannya satu: **urutan abjad = urutan jalan.** Begitu foldernya
-dibuka, daftarnya sudah tersusun sesuai alurnya sendiri — tanpa perlu membuka
-apa pun.
+Ditata **per tahap**, bukan per lapisan teknis. Kaidah penamaannya satu:
+**urutan abjad = urutan jalan.** Tahap yang berisi lebih dari satu berkas
+diberi folder sendiri; nama folder tidak boleh diawali angka atau memakai
+titik (batasan Python), jadi `tahap1_parser/`, bukan `1.parser/`.
 
 ```
 backend/app/
+├── __init__.py                PETA SELURUH BACKEND
 │
-├── __init__.py              PETA SELURUH BACKEND — dibaca sekali, tahu semuanya
+├── telaah/                    Fase 2 dan 3 — lima tahap
+│   ├── __init__.py               peta urutan tahap
+│   ├── alur.py                   orkestrator — menjalankan tahap 1 sampai 5
+│   ├── tahap1_parser/            kode
+│   │   ├── struktur.py           pohon BAB › Pasal › ayat › huruf › angka
+│   │   ├── definisi.py           daftar istilah Pasal 1
+│   │   ├── rujukan.py            "sebagaimana dimaksud …" → pasal tujuannya
+│   │   └── lampiran.py           bingkai lampiran + jenis tiap blok
+│   ├── tahap2_persiapan/         kode, tanpa AI
+│   │   ├── bahan.py              naskah utuh + fakta lampiran + ukur token
+│   │   ├── mekanis_konsistensi.py  F2-001/003/004/007, langsung ke tahap 5
+│   │   └── dasar_hukum.py        F3-002 — dasar hukum Mengingat dicek ke OpenSearch
+│   ├── tahap3_cari_dugaan.py     AI · cari dugaan, fokus per jenis pemeriksaan
+│   ├── tahap4_memastikan/        AI
+│   │   ├── memastikan.py         uji tiap dugaan dengan naskah utuh
+│   │   ├── alat.py               cari di naskah, buka tabel, jumlah kolom
+│   │   ├── korpus_cari.py        F3-001 — cari peraturan pembanding
+│   │   ├── korpus_pastikan.py    F3-001 — uji ulang dengan pembanding
+│   │   └── korpus_rumusan.py     F3-003 — usulan dari peraturan berlaku
+│   ├── tahap5_verifikasi.py      kode · gerbang terakhir, temuan lahir di sini
+│   └── ekspor/                   alat pengembang — tahap1.py … tahap5.py
 │
-├── fase2/                   konsistensi + kejelasan rumusan
-│   ├── __init__.py             urutan tahapnya tertulis di sini
-│   ├── tahap0_struktur.py      naskah datar  → pohon satuan
-│   ├── tahap0_definisi.py      pohon satuan  → daftar istilah Pasal 1
-│   ├── tahap1_saring.py        175 satuan    → yang memuat norma saja
-│   ├── tahap2_baca.py          konteks tetap + satuan → satu baris peta
-│   ├── tahap3_menalar.py       peta          → dugaan
-│   ├── tahap4_memastikan.py    dugaan        → temuan, atau gugur
-│   ├── tahap4_tabrakan.py      cabang: dua satuan dibaca sekaligus (3.2)
-│   ├── tahap5_verifikasi.py    empat pemeriksaan sebelum jadi temuan
-│   └── mekanis_konsistensi.py  F2-001…007 — DI LUAR jalur AI, langsung ke tahap5
-│
-├── fase3/                   pertentangan dengan peraturan lain
-│   ├── __init__.py
-│   ├── tahap6_cari.py          embedding → korpus → saring status berlaku
-│   └── tahap6_pastikan_ulang.py  memastikan dengan pembanding di tangan
-│
-├── bersama/                 DIPAKAI LINTAS TAHAP — wajib tetap kecil
+├── bersama/                   DIPAKAI LINTAS TAHAP — wajib tetap kecil
 │   ├── prompt.py               PERAN + seluruh instruksi ke model — satu tempat
-│   ├── llm.py                  SATU-SATUNYA pintu ke Azure OpenAI (chat + embedding)
+│   ├── llm.py                  SATU-SATUNYA pintu ke Azure OpenAI, termasuk alat
 │   └── opensearch.py           SATU-SATUNYA pintu ke OpenSearch — HANYA MEMBACA
 │
-├── models/                  bentuk data, bukan aksi
-│   ├── temuan.py               + satuan_id, skor
-│   ├── satuan.py               BARU — bentuk satu satuan
-│   └── pekerjaan.py            BARU — BarisPeta, Dugaan, CalonTemuan, Pekerjaan
-│
-├── db/
-│   ├── sesi.py                 sambungan Postgres, dan izin untuk tidak ada
-│   ├── tabel.py                dua tabel: pekerjaan dan peta
-│   └── simpanan.py             satu-satunya pintu tulis/baca yang dipakai kode lain
-│
-├── rules/format_baku.py     FASE 1 — TIDAK DISENTUH
-├── api/analisis_lanjut.py   BARU — mulai, tanya status, ambil hasil
-└── core/config.py           + DATABASE_URL dan empat angka penyetelan
+├── models/                  bentuk data, bukan aksi — temuan, satuan, pekerjaan
+├── db/                      pekerjaan dan jawaban tahap 3; boleh tidak ada
+├── rules/                   FASE 1, dan tabel rujukan KMK 527
+├── api/                     analisis.py (Fase 1), analisis_lanjut.py (Fase 2/3 + ekspor)
+└── core/config.py           + DATABASE_URL dan angka penyetelan
 
 frontend/src/
-├── lib/aturan-fase2.ts      BARU — keterangan aturan untuk panel Pengaturan
+├── lib/office.ts            pembacaan naskah dan seluruh penandaan
+├── lib/aturan-fase2.ts      keterangan aturan untuk panel Pengaturan
 ├── lib/types.ts             disamakan dengan temuan.py
-├── lib/office.ts            TIDAK DISENTUH — lapisan penandaan yang sudah terbukti
-└── app/taskpane/page.tsx    + progres, kelompok fase, batas tampil, penandaan per kelompok
+└── app/taskpane/page.tsx    kemajuan per tahap, penandaan per kelompok, ekspor
 ```
 
-### Isi `fase2/__init__.py`
-
-```python
-"""Fase 2 — konsistensi dan kejelasan rumusan.
-
-  tahap0_struktur      naskah datar  → pohon satuan       kode, gratis
-  tahap0_definisi      pohon         → daftar istilah     kode, gratis
-  tahap1_saring        175 satuan    → 135 yang bernorma  kode, gratis
-  tahap2_baca          satuan        → baris peta         model
-  tahap3_menalar       peta          → dugaan             model
-  tahap4_memastikan    dugaan        → temuan / gugur     model
-  tahap4_tabrakan      cabang dua satuan sekaligus        model
-  tahap5_verifikasi    temuan        → lolos / turun      kode, gratis
-
-  mekanis_konsistensi  F2-001…007 — di luar jalur AI, langsung ke tahap5
-"""
-```
-
-**Kenapa masing-masing perlu ada:**
+**Kenapa begini:**
 
 | Berkas / folder | Kenapa begitu |
 |---|---|
-| `fase2/` dan `fase3/` **dipisah** | Fase 3 ada di balik gerbang keras. Memisahkannya secara fisik membuat "Fase 3 belum dibangun" **terlihat sekilas** dari struktur foldernya, bukan cuma tertulis di dokumen |
-| `tahap0_*` dua berkas, bukan satu | **Supaya gagalnya bisa sendiri-sendiri.** Kalau Pasal 1 tidak terbaca, pohonnya tetap sehat — yang diam cuma F2-002 dan F2-003. Kalau disatukan, kegagalan kecil di ekstraksi definisi bisa disalahartikan sebagai kegagalan struktur, dan seluruh Fase 2 mati padahal tidak perlu |
-| `tahap4_tabrakan.py` terpisah dari `tahap4_memastikan.py` | Memastikan tabrakan menuntut **dua satuan dalam satu panggilan** (3.2) — bentuk panggilan yang berbeda dari memastikan biasa |
-| `mekanis_konsistensi.py` **bukan** `tahap*` | Karena ia memang bukan tahap: F2-001…007 melompat langsung dari tahap1 ke tahap5, tanpa menyentuh model. Namanya harus mengatakan itu |
-| `bersama/` | CLAUDE.md: panggilan ke layanan luar dikumpulkan di satu lapisan. `llm.py` dipakai tahap 2, 3, 4, **dan** 6 — menaruhnya di `tahap2_*` membuat tahap 6 meng-import dari tahap 2, yang terbaca mundur. **Aturan tegasnya:** hanya yang memanggil layanan luar atau mendefinisikan bentuk data boleh masuk sini. Tanpa aturan itu, `bersama/` jadi kode yang sebenarnya dan folder tahap cuma jadi kulit |
-| `models/satuan.py`, bukan `fase2/satuan.py` | `Satuan` itu **bentuk data**, bukan aksi — sekelas dengan `temuan.py`. Menaruhnya di antara berkas `tahap*` mencampur dua jenis isi dalam satu folder, dan itulah yang membuat nama jadi susah dibaca sekilas |
-| `db/simpanan.py`, bukan memanggil `sesi.py` langsung | Basis datanya **boleh tidak ada.** Kalau `DATABASE_URL` kosong, simpanan pindah ke memori dan Fase 2 tetap berjalan penuh — yang hilang cuma ketahanan terhadap restart. Penelaah yang mencoba add-in ini di mesinnya sendiri tidak perlu menyiapkan Postgres dulu, dan seluruh tes berjalan tanpa jaringan. Itu cuma mungkin kalau ada satu pintu yang menyembunyikan pilihan itu dari seluruh pemanggil |
-| `db/` menyimpan peta, **bukan temuan** | Peta bagian termahal: Langkah 2 memanggil model puluhan kali. Backend yang mati di satuan ke-68 meninggalkan 68 baris yang sudah dibayar, dan analisis berikutnya meneruskan dari situ. Temuan lahir di Langkah 5 dari bahan yang sudah tersimpan — kehilangannya cuma menuntut penalaran ulang, bukan pembacaan ulang seluruh naskah |
-| `token.py` **tidak jadi dibuat** | Jumlah token dikembalikan Azure di tiap jawaban, jadi menghitungnya sendiri berarti menebak angka yang sudah diberitahukan. Pencatatannya pindah ke `Ongkos` di `llm.py`, tempat angkanya datang |
-| `tahap_konfirmasi` **tidak jadi ditambahkan** ke `Temuan` | Nilainya akan selalu sama untuk seluruh temuan Fase 2/3, karena Langkah 5 tidak punya jalan pintas. Field yang isinya bisa ditebak dari `fase` cuma menambah satu hal lagi yang bisa salah |
-| `office.ts` **tidak disentuh** | Penandaan bertahap per kelompok dikerjakan pemanggilnya — panel memanggil `tandaiSemuaTemuan` sepuluh temuan sekali jalan. Lapisan penandaannya sendiri sudah terbukti di Fase 1 dan tidak punya alasan berubah |
+| `telaah/`, bukan `fase2/` + `fase3/` | OpenSearch kini bagian dari tahap persiapan (F3-002) dan memastikan (F3-001, F3-003), bukan fase tersendiri. Alasan pemisahannya dulu — Fase 3 di balik gerbang — cukup dijaga panel Pengaturan: pemeriksaan korpus mati secara bawaan |
+| `tahap1_parser/` empat berkas, bukan satu parser | **Supaya gagalnya bisa sendiri-sendiri.** Kalau Pasal 1 tidak terbaca, pohonnya tetap sehat — yang diam cuma pemeriksaan definisi. Kalau disatukan, kegagalan kecil bisa disalahartikan sebagai kegagalan struktur, dan seluruh Fase 2 mati padahal tidak perlu |
+| `mekanis_konsistensi.py` di `tahap2_persiapan/` | Ia tidak memanggil model: F2-0xx lahir di tahap 2 dan melompat langsung ke tahap 5 |
+| `bersama/` | CLAUDE.md: panggilan ke layanan luar dikumpulkan di satu lapisan. **Aturan tegasnya:** hanya yang memanggil layanan luar atau mendefinisikan bentuk data boleh masuk sini. Tanpa aturan itu, `bersama/` jadi kode yang sebenarnya dan folder tahap cuma jadi kulit |
+| `models/satuan.py`, bukan `telaah/satuan.py` | `Satuan` itu **bentuk data**, bukan aksi — sekelas dengan `temuan.py` |
+| `db/simpanan.py`, bukan memanggil `sesi.py` langsung | Basis datanya **boleh tidak ada.** Kalau `DATABASE_URL` kosong, simpanan pindah ke memori dan Fase 2 tetap berjalan penuh — yang hilang cuma ketahanan terhadap restart. Penelaah yang mencoba add-in ini tidak perlu menyiapkan Postgres dulu, dan seluruh tes berjalan tanpa jaringan |
+| `db/` menyimpan jawaban tahap 3, **bukan temuan** | Jawaban tahap 3 bagian yang mahal dan bisa dipakai ulang: kuncinya sidik pesan, jadi naskah yang sama tidak dibayar dua kali sesudah restart, sedangkan naskah yang berubah ditanyakan ulang. Temuan lahir di tahap 5 — kehilangannya cuma menuntut pemastian ulang |
+| Penghitung token di `tahap2_persiapan/bahan.py` | Jumlah token sesungguhnya dikembalikan Azure di tiap jawaban dan dicatat `Ongkos`. Tetapi anggaran bahan dan Ekspor Tahap 2 butuh angkanya SEBELUM dikirim — jadi diukur dengan tokenizer gpt-4.1 (`tiktoken`) |
 | `aturan-fase2.ts` | Penelaah harus bisa melihat sendiri apa yang diperiksa dan apa yang **tidak** — kembaran `aturan-fase1.ts` |
 
 ### 2.1 Teknologi
@@ -141,13 +115,13 @@ frontend/src/
 |---|---|
 | `sqlmodel` | satu model dipakai sekaligus sebagai skema validasi dan tabel |
 | `psycopg[binary]` | driver Postgres |
-| penghitung token sederhana | menentukan berapa satuan muat per panggilan. Perkiraan kasar (karakter ÷ 4) dulu |
+| `tiktoken` | mengukur bahan dengan tokenizer gpt-4.1 (o200k_base) sebelum dikirim; cadangannya huruf ÷ 3 kalau tidak tersedia |
 
 **Yang sengaja TIDAK dipakai:**
 
 | | Kenapa tidak |
 |---|---|
-| LangChain dsb. | alurnya sudah tetap tujuh langkah. Tidak ada yang perlu diputuskan model soal langkah mana berikutnya. Menambah lapisan berarti menambah tempat kesalahan bersembunyi |
+| LangChain dsb. | alurnya sudah tetap lima tahap. Tidak ada yang perlu diputuskan model soal langkah mana berikutnya. Menambah lapisan berarti menambah tempat kesalahan bersembunyi |
 | Celery / Redis | satu penelaah, satu dokumen. Proses latar belakang di dalam FastAPI sudah cukup |
 | Basis data vektor terpisah | OpenSearch sudah punya index embedding |
 
@@ -166,12 +140,13 @@ Yang ditambahkan:
 
 ```
 DATABASE_URL                  Postgres (Neon) — lihat 2.3
-FASE2_SATUAN_PER_PANGGILAN    berapa satuan dikelompokkan jadi satu panggilan
+FASE2_PASAL_PER_FOKUS         berapa pasal difokuskan dalam satu panggilan tahap 3
+FASE2_ANGGARAN_TOKEN          di atas ini tabel data lampiran jadi kerangka
 FASE2_PANGGILAN_BERBARENGAN   berapa panggilan jalan sekaligus
 FASE2_AMBANG_SKOR             batas bawah temuan AI
 ```
 
-Keempatnya **angka yang bisa diatur, bukan asumsi tertanam** — nilainya
+Kelimanya **angka yang bisa diatur, bukan asumsi tertanam** — nilainya
 ditetapkan setelah diukur pada dokumen nyata, dan ikut berubah kalau modelnya
 diganti.
 
@@ -183,11 +158,11 @@ Yang disimpan cuma dua tabel:
 
 ```
 Pekerjaan     id, dokumen, jenis, status, mulai, selesai, biaya
-HasilSatuan   pekerjaan_id, satuan_id, ringkasan, dugaan, status
+HasilPanggilan pekerjaan_id, kunci (sidik pesan), jawaban
 ```
 
-**Yang TIDAK disimpan:** isi utuh naskah rancangan. Hanya ringkasan per satuan
-dan temuannya.
+**Yang TIDAK disimpan:** isi utuh naskah rancangan. Hanya jawaban model tiap
+panggilan tahap 3 — yang memang bisa mengutip potongannya.
 
 Satu hal yang perlu diketahui, bukan untuk menghalangi: Neon di-host **di luar
 infrastruktur Kemenkeu**, sedangkan `catatan` dan `usulan_rumusan` hampir pasti
@@ -202,64 +177,120 @@ rancangan sungguhan, tanpa biaya apa pun sekarang.
 
 ---
 
-## 3. Alur — tujuh langkah
+## 3. Alur — lima tahap
 
 ### 3.1 Alur utama
 
+Dibangun 29 Sep 2026 (bug 7, C + D). Menggantikan tujuh langkah lama yang
+menalar di atas peta ringkasan per satuan.
+
 ```
-LANGKAH 0  MEMBUAT PETA                         kode · detik · gratis
-           paragraf datar → parser → pohon satuan
-           sekalian dihitung: berapa satuan, berapa perkiraan token
+TAHAP 1  PARSER                                  kode · detik · gratis
+         paragraf datar → pohon satuan berlabel: BAB › Pasal › (1) › a. › 1.
+         label yang terpisah sel dari teksnya disatukan (naskah bertabel)
+         lampiran → bingkai (kepala, penutup) + jenis fisik tiap blok:
+                    teks / tabel / gambar / rumus / kerangka tabel raksasa
                     │
-LANGKAH 1  MENYARING                            kode · detik · gratis
-           Berlaku HANYA untuk batang tubuh. Judul, Menimbang, Mengingat,
-           dan definisi Pasal 1 TIDAK disaring — mereka masuk KONTEKS TETAP,
-           jadi ikut terkirim di setiap panggilan.
-
-           DILEWATI  "…mulai berlaku pada tanggal diundangkan."
-           DIBACA    "Menteri wajib menetapkan … paling lambat 30 hari."
-           RAGU      → DILOLOSKAN. Boros itu kesalahan yang kelihatan;
-                       melewatkan pasal bermuatan norma tidak kelihatan
+TAHAP 2  PERSIAPAN                               kode · detik · gratis
+         ├─ BAHAN: SELURUH paragraf, satu baris per paragraf, bertanda id
+         │   satuan — pembukaan dan batang tubuh SELALU utuh; tabel lampiran
+         │   per baris sel; gambar dan rumus disebut tidak terbaca
+         ├─ ukur token (tokenizer gpt-4.1): di atas anggaran ±100 rb, kelompok
+         │   tabel DATA sejenis di lampiran jadi kerangka — teks tidak pernah
+         ├─ fakta lampiran dikumpulkan kode: pasal yang menyebut "Lampiran",
+         │   kata mirip "Lampiran", kepala dan penutup tiap lampiran
+         └─ pemeriksaan kode, tanpa AI → langsung ke tahap 5:
+            F2-001/003/004/007, dan F3-002 (korpus)
                     │
-LANGKAH 2  MEMBACA PER SATUAN                   model · berbayar
-           tiap panggilan = KONTEKS TETAP  (judul, Menimbang, Mengingat,
-                                            definisi Pasal 1, kerangka pasal)
-                          + SATUAN INI utuh
-                          + SATUAN YANG DIRUJUKNYA (dicari parser)
-           keluar: satu baris peta per satuan
+TAHAP 3  CARI DUGAAN                             model · beberapa panggilan
+         tiap panggilan = NASKAH UTUH (sama persis, di depan) + tugasnya:
+         ├─ per kelompok pasal (≤6 pasal) — F2-101, 102, 103
+         │   tiap pasal fokus WAJIB dijawab; yang terlewat ditanya ulang
+         ├─ lintas naskah — F2-104, 105, dan keberatan atas temuan Fase 1
+         └─ lampiran — F2-106, dinilai dengan parameter tertulis
+            KMK 527 butir 120–121 dan fakta dari kode
+         keluar: DUGAAN — belum temuan
                     │
-LANGKAH 3  MENALAR DI ATAS PETA                 model · 1–2 panggilan
-           yang dikirim: SELURUH BARIS PETA, bukan teks penuh
-           keluar: DUGAAN — belum temuan
+TAHAP 4  MEMASTIKAN                              model · satu per dugaan
+         naskah utuh + satuan yang diuji, batang induknya, dan isi yang
+         dirujuknya (dicari kode) + ALAT: cari teks di seluruh naskah,
+         buka tabel, jumlah kolom
+         klaim eksternal → korpus OpenSearch (F3-001), lalu usulan rumusan
+         dari peraturan berlaku (F3-003)
                     │
-LANGKAH 4  MEMASTIKAN                           model · beberapa panggilan
-           hanya satuan yang dicurigai, dibaca UTUH
-           dugaan dipilah:  KLAIM INTERNAL  → lanjut ke 5
-                            KLAIM EKSTERNAL → wajib lewat 6 dulu
-                    │
-LANGKAH 5  VERIFIKASI MEKANIS                   kode · detik · gratis
-           GERBANG TERAKHIR sebelum sebuah temuan ada. Urutannya:
-              klaim internal  :  4 → 5 → temuan
-              klaim eksternal :  4 → 6 → 5 → temuan   ← 5 tetap paling akhir
-
-           ✓ teks_asli ada PERSIS di satuan itu?
-           ✓ nomor pasal yang dikutip benar-benar ada?
-           ✓ istilah berdefinisi di usulan ditulis persis?
-           ✓ skor di atas ambang?
-                    │
-LANGKAH 6  MENCARI PEMBANDING                   Fase 3 · hanya klaim eksternal
-           embedding → korpus → saring status berlaku
-           → MEMASTIKAN SEKALI LAGI dengan pembanding di tangan
-           tidak ada hasil pencarian → TIDAK ADA TEMUAN
+TAHAP 5  VERIFIKASI                              kode · detik · gratis
+         GERBANG TERAKHIR — satu-satunya tempat temuan lahir
+         ✓ teks_asli ada di satuan itu (spasi saja yang dilonggarkan)
+         ✓ nomor pasal yang disebut benar-benar ada
+         ✓ istilah berdefinisi di usulan ditulis persis
+         ✓ skor di atas ambang
+         ✗ cuma menandai rujukan yang tujuannya ada?          → gugur
+         ✗ menuduh istilah tak berdefinisi, padahal ada?      → gugur
+         ✗ F2-101 tanpa dua tafsiran yang berbeda?            → gugur
+         ✗ yang diklaim "tidak ada" ternyata ada di naskah?   → gugur
+         ⇒ aturan + teks + tempat perbaikan sama di beberapa satuan
+           → SATU temuan, sisanya di "Juga di"
 ```
 
-Langkah 0, 1, dan 5 sengaja tanpa AI: hasilnya pasti, gratis, dan kalau salah
-bisa ditunjukkan baris mana yang keliru.
+Tahap 1, 2, dan 5 sengaja tanpa AI: hasilnya pasti, gratis, dan kalau salah
+bisa ditunjukkan baris mana yang keliru. "Tidak ketemu di OpenSearch" tidak
+pernah jadi temuan.
 
-### 3.2 Cabang — tabrakan antar-pasal
+**Akurasi bahan di atas efisiensi (CLAUDE.md butir 13–15).** Salah tandai di
+uji 27 Sep 2026 lahir dari teks yang tidak ikut terbawa ke model, bukan dari
+model yang keliru menalar; pada PMK 119 seluruh definisi Pasal 1 tidak pernah
+sampai. Karena itu bahan disusun dari seluruh paragraf, bukan dari teks
+satuan hasil parser — paragraf yang tidak dikenali parser tetap terkirim,
+mentah. Riwayatnya di `docs/perbaiki bug.md`.
 
-Cabang yang kamu tanyakan. Terjadi di **Langkah 3**, karena hanya di situ
-seluruh dokumen terlihat sekaligus.
+**Harganya** tiap panggilan membawa naskah utuh: PMK 45 ±316 rb token masuk di
+tahap 3 saja, jauh di atas peta lama. Kenopnya di `.env` —
+`FASE2_PASAL_PER_FOKUS`, `FASE2_PANGGILAN_BERBARENGAN`, `FASE2_ANGGARAN_TOKEN`.
+
+### 3.2 Di mana tiap fitur sekarang
+
+Arti kode aturan yang disebut di bagian 2 — keterangan lengkapnya di panel
+Pengaturan (`aturan-fase1.ts`, `aturan-fase2.ts`):
+
+| Kode | Yang diperiksa | Oleh |
+|---|---|---|
+| F2-001 | Rujukan "sebagaimana dimaksud dalam Pasal N ayat (n)" menunjuk pasal/ayat yang ada | kode |
+| F2-003 | Istilah yang didefinisikan di Pasal 1 benar dipakai di batang tubuh atau lampiran | kode |
+| F2-004 | Nomor pasal dan ayat berurut, tidak melompat atau berulang | kode |
+| F2-007 | Angka cocok dengan hurufnya — "30 (tiga puluh)" | kode |
+| F2-101–105 | Makna ganda, pemikul kewajiban, wajib/dapat bertabrakan, dua ketentuan bertentangan, tujuan Menimbang tanpa ketentuan | AI |
+| F2-106 | Lampiran dinyatakan di batang tubuh dan berformat baku (butir 120–121) | AI |
+| F3-001 | Berpotensi bertentangan dengan peraturan lain | AI + OpenSearch |
+| F3-002 | Dasar hukum di Mengingat sudah dicabut | kode + OpenSearch, tanpa AI |
+| F3-003 | Usulan rumusan dicontoh dari peraturan yang masih berlaku | AI + OpenSearch |
+
+**Fitur yang wajib tetap ada** — seluruhnya dipertahankan saat logika bug 7
+dibangun dan saat dipindah ke `telaah/`:
+
+| Fitur | Sebelum bug 7 | Sekarang |
+|---|---|---|
+| Pemeriksaan kode F2-001/003/004/007 | `mekanis_konsistensi` | `tahap2_persiapan/mekanis_konsistensi` |
+| Pemeriksaan AI F2-101–105 | `tahap2_baca` → `tahap3_menalar` → `tahap4_*` | `tahap3_cari_dugaan` → `tahap4_memastikan/memastikan` |
+| F3-001, F3-002, F3-003 | `fase3/tahap6_*` | `tahap2_persiapan/dasar_hukum`, `tahap4_memastikan/korpus_*` |
+| Keberatan AI atas temuan Fase 1 ("Catatan AI" di komentar) | `tahap2_baca` | `tahap3_cari_dugaan`, panggilan lintas naskah |
+| Temuan Fase 1 dilampirkan supaya AI tidak mengulangnya | `tahap2_baca` | di bahan tiap panggilan (`tahap2_persiapan/bahan`) |
+| Batas 80 dugaan; id satuan/jenis karangan AI dibuang | `tahap3_menalar` | `tahap3_cari_dugaan` |
+| Satu pasal tidak pernah dibelah antarpanggilan | `tahap2_baca` | `tahap3_cari_dugaan` (kelompok pasal fokus) |
+| Aturan bisa dimatikan satu per satu di Pengaturan | `alur`, `tahap4_memastikan` | `alur`, tahap 3–4 — jenis yang mati tidak ditanyakan sama sekali |
+| Kemajuan "x/y" di panel | per satuan, Langkah 2 | per panggilan (tahap 3) dan per dugaan (tahap 4) |
+| Lanjut sesudah backend mati tanpa bayar ulang | tabel peta | tabel jawaban tahap 3, dikunci sidik pesan |
+| Nomor Fase 2 melanjutkan Fase 1; batas 50 temuan | `alur` | `alur` |
+| Naskah perubahan / KMK: pemeriksaan isi tidak jalan, alasannya disebut | `tahap0_struktur` | `tahap1_parser/struktur` |
+| Seluruh verifikasi: kutipan persis, hijau berbukti, gabung kembar, dll. | `tahap5_verifikasi` | `tahap5_verifikasi` |
+
+**Yang sengaja hilang:** peta ringkasan dan penalaran di atas peta (diganti
+naskah utuh); penyaring Langkah 1 berikut daftar "dibuang penyaring" (tidak
+ada lagi satuan yang dibuang); ekspor peta; cabang "satuan terlalu panjang".
+
+### 3.3 Cabang — tabrakan antar-pasal
+
+Terjadi di **tahap 3, panggilan lintas naskah** — pertanyaan yang memang
+memandang seluruh naskah sekaligus.
 
 Contoh: **Pasal 1 vs Pasal 17.**
 
@@ -268,12 +299,12 @@ Contoh: **Pasal 1 vs Pasal 17.**
 > kalender."
 
 ```
-LANGKAH 3   dari peta terlihat dua baris berbenturan:
+TAHAP 3     panggilan lintas naskah melihat dua satuan berbenturan:
             pasal-1-angka-8   mendefinisikan "Hari" = hari kerja
             pasal-17-ayat-1   memakai "hari kalender"
             → DUGAAN TABRAKAN, menyebut DUA alamat sekaligus
                     │
-LANGKAH 4′  MEMASTIKAN VERSI TABRAKAN
+TAHAP 4     MEMASTIKAN VERSI TABRAKAN
             KEDUA satuan dibaca utuh DALAM SATU PANGGILAN YANG SAMA —
             bukan dua panggilan terpisah. Menilai tabrakan menuntut
             keduanya ada di hadapan model sekaligus.
@@ -288,7 +319,7 @@ LANGKAH 4′  MEMASTIKAN VERSI TABRAKAN
    sah → berhenti,
    tidak ada temuan
                              │
-LANGKAH 4″  MENENTUKAN SISI YANG MENYIMPANG
+TAHAP 4     MENENTUKAN SISI YANG MENYIMPANG
             Yang ditandai satuan yang MENYIMPANG dari yang lain.
             Di sini: Pasal 17, karena Pasal 1 yang memegang definisi.
 
@@ -300,7 +331,7 @@ LANGKAH 4″  MENENTUKAN SISI YANG MENYIMPANG
             SATU temuan, bukan dua. Penelaah mengambil satu keputusan,
             bukan dua yang saling bergantung.
                     │
-LANGKAH 5   teks_asli = "30 (tiga puluh) hari kalender"
+TAHAP 5     teks_asli = "30 (tiga puluh) hari kalender"
             → dicari di paragraf Pasal 17 → ketemu persis
             → nomor "Pasal 1" yang disebut komentar ada di pohon satuan ✓
                     │
@@ -317,22 +348,28 @@ LANGKAH 5   teks_asli = "30 (tiga puluh) hari kalender"
 temuan, menolak salah satunya meninggalkan yang lain menggantung — padahal
 persoalannya satu. Satu temuan, satu keputusan.
 
-### 3.3 Cabang — satuan terlalu panjang
-
-Satu pasal yang teksnya melebihi anggaran satu panggilan.
+### 3.4 Cabang — bahan melewati anggaran
 
 ```
-LANGKAH 2   satuan dipecah menurut ayat, bukan menurut karakter.
-            Kalau satu AYAT pun masih terlalu panjang → dikirim sendirian,
-            tanpa satuan lain, dan konteks tetapnya dipangkas ke
-            definisi + judul saja.
-            Tidak pernah dipotong di tengah kalimat.
+TAHAP 2     naskah + lampiran > ±100 rb token
+                    │
+            pembukaan, batang tubuh, teks lampiran, tabel kecil: TETAP UTUH
+            kelompok tabel DATA sejenis di lampiran — kolomnya sama dan
+            judul kolomnya sama — diringkas dari yang terbesar:
+              judul kolom + jumlah baris + 3 baris contoh
+            berhenti begitu bahan masuk anggaran; isinya tetap bisa
+            dibuka model di tahap 4 lewat alat buka_tabel
 ```
 
-### 3.4 Cabang — rentang temuan tidak ketemu di naskah
+Tabel di atas 1.000 baris (PMK 108/2024: 228 ribu baris) tidak dibaca panel
+per paragraf — dikirim kerangkanya saja, dan isinya TIDAK bisa dibuka.
+Paragraf sesudahnya bernomor urutan baca, bukan nomor Word, jadi temuan di
+sana tampil di panel tanpa ditandai di naskah.
+
+### 3.5 Cabang — rentang temuan tidak ketemu di naskah
 
 ```
-LANGKAH 5   teks_asli TIDAK ketemu persis
+TAHAP 5     teks_asli TIDAK ketemu persis
                     │
             ┌───────┴────────┐
             ▼                ▼
@@ -345,70 +382,26 @@ LANGKAH 5   teks_asli TIDAK ketemu persis
 Tidak pernah diperlebar ke satu paragraf. Itu pelanggaran yang sudah pernah
 terjadi di Fase 1 dan berakhir menimpa naskah.
 
-### 3.5 Cabang — pencarian korpus kosong
+### 3.6 Cabang — pencarian korpus kosong
 
 ```
-LANGKAH 6   klaim eksternal, tapi pencarian tidak menemukan apa pun
+TAHAP 4     klaim eksternal, tapi pencarian korpus tidak menemukan apa pun
                     │
             TEMUAN TIDAK KELUAR SAMA SEKALI.
             Bukan "temuan tanpa rujukan" — brief 8.10: catatan hanya
             boleh menyebut yang ada di hasil pencarian.
 ```
 
-### 3.6 Cabang — parser gagal
+### 3.7 Cabang — parser gagal
 
 ```
-LANGKAH 0   struktur tidak masuk akal (nol pasal padahal dokumen panjang,
+TAHAP 1     struktur tidak masuk akal (nol pasal padahal dokumen panjang,
             ayat di luar pasal, penomoran melompat belasan)
                     │
             SELURUH FASE 2 TIDAK DIJALANKAN, dan panel mengatakannya.
             Fase 1 tetap jalan seperti biasa.
             Diam lebih baik daripada memeriksa struktur yang salah baca.
 ```
-
-### 3.7 Contoh isi peta — 20 pasal
-
-Beginilah peta yang dipegang Langkah 3. Satu baris per satuan, teks penuhnya
-tidak ikut.
-
-| satuan | ringkasan | norma | merujuk | dugaan |
-|---|---|---|---|---|
-| `pasal-1-angka-1` | definisi: Barang Milik Negara | — | — | — |
-| `pasal-1-angka-5` | definisi: Pengelola Barang | — | — | — |
-| `pasal-1-angka-8` | definisi: **Hari = hari kerja** | — | — | — |
-| `pasal-1-angka-9` | definisi: Sistem Informasi | — | — | **tidak pernah dipakai** |
-| `pasal-2` | ruang lingkup pengaturan | — | — | — |
-| `pasal-3` | asas pengelolaan | — | — | — |
-| `pasal-4-ayat-1` | Pengguna Barang mengajukan permohonan | ya | — | — |
-| `pasal-4-ayat-2` | dokumen yang dilampirkan | ya | `pasal-4-ayat-1` | — |
-| `pasal-5` | Pengelola Barang menetapkan status | ya | `pasal-4-ayat-1` | — |
-| `pasal-6` | jangka waktu penetapan | ya | `pasal-5` | — |
-| `pasal-7` | penolakan permohonan | ya | `pasal-5` | — |
-| `pasal-8` | permohonan ulang | ya | `pasal-7` | — |
-| `pasal-9` | tata cara pencatatan | ya | **`pasal-30`** | **Pasal 30 tidak ada** |
-| `pasal-10` | kewajiban pelaporan | ya | — | — |
-| `pasal-11` | pemantauan | ya | — | — |
-| `pasal-12-ayat-1` | permohonan perubahan status | ya | — | — |
-| `pasal-12-ayat-2` | batas 30 hari kerja | ya | `pasal-12-ayat-1` | **tidak menyebut siapa yang menyelesaikan** |
-| `pasal-15` | sanksi administratif | ya | `pasal-10` | — |
-| `pasal-17-ayat-1` | batas **30 hari kalender** | ya | — | **berbenturan dengan `pasal-1-angka-8`** |
-| `pasal-20` | ketentuan penutup | — | — | — |
-
-**Yang disimpulkan Langkah 3 dari peta ini:**
-
-| Dugaan | Jenis | Ditindaklanjuti |
-|---|---|---|
-| `pasal-9` merujuk Pasal 30 yang tidak ada | **mekanis** — sudah ketahuan parser, tanpa model | langsung jadi temuan |
-| `pasal-1-angka-9` definisi tak terpakai | **mekanis** | langsung jadi temuan |
-| `pasal-12-ayat-2` tanpa pemikul | penalaran, internal | Langkah 4 |
-| `pasal-17-ayat-1` vs `pasal-1-angka-8` | penalaran, **tabrakan** | Langkah 4′ (3.2) |
-| `pasal-2` dan `pasal-3` | tanpa norma | dilewati sejak Langkah 1 |
-
-Peta 20 baris ini ukurannya beberapa ratus token. Untuk 175 satuan pun masih
-beberapa ribu — **muat dikirim sekaligus, sementara teks penuhnya tidak.** Itu
-sebabnya peta ada.
-
----
 
 ### 3.8 Yang dipilih penelaah, dan bentuk temuannya di naskah
 
@@ -431,6 +424,20 @@ Yang membedakan: ada-tidaknya **satu pengganti yang pasti**.
 |---|---|---|
 | **Merah dicoret + hijau** | ada satu rumusan pengganti harfiah yang pasti | ya — usulan disisipkan di sebelahnya |
 | **Blok kuning** | tidak ada pengganti tunggal; alat tahu ada yang salah tapi tidak tahu sisi mana yang benar | tidak — hanya disorot |
+
+**Tiga kelompok temuan — cara penelaah menilai hasil.** Milik penelaah
+sendiri, bukan istilah teknis; pola temuan baru wajib masuk salah satunya.
+
+| Kelompok | Di naskah |
+|---|---|
+| **1. Terbukti, bisa diperbaiki di sini** | merah dicoret + **hijau** di sebelahnya |
+| **2. Terbukti, perbaikannya di tempat lain** | tetap ditandai, komentar + tombol Lompat ke Perbaikan (bentuk komentarnya masih pertanyaan terbuka di `fase4-merapikan-backend.md`) |
+| **3. Sisanya** | blok kuning (kemungkinan), atau merah dicoret tanpa hijau (harus dihapus) |
+
+Semua kartu punya Lompat ke Teks dan Terima/Tolak. Dua kejadian jarang di luar
+tiga kelompok ini: *gagal ditandai* (rentang hilang saat mau ditandai — kartu
+tetap ada, tanpa tanda di naskah) dan *keberatan AI* (model menempel catatan
+pada temuan Fase 1 — nyaris tak pernah terjadi).
 
 **Temuan kuning tetap membawa saran.** Alat tidak tahu sisi mana yang harus
 berubah, tetapi tetap bisa menunjukkan jalan keluarnya. Sarannya hidup di
@@ -480,7 +487,7 @@ Fase 3 memang kemungkinan, bukan kesimpulan.
 | F2-002 | Istilah berkapital yang **tidak ada** di daftar definisi Pasal 1 | ⏸ menunggu daftar pengecualian dari naskah nyata ("Menteri Keuangan", "Direktorat Jenderal") |
 | F2-003 | Definisi di Pasal 1 yang **tidak pernah dipakai** | ✅ |
 | F2-004 | Penomoran melompat atau berulang (Pasal 5 → Pasal 7; dua ayat (2)) | ✅ |
-| F2-005 | Lampiran dirujuk tapi tidak ada, atau ada tapi tidak dirujuk | ⏸ parser belum membaca lampiran sama sekali |
+| F2-005 | Lampiran dirujuk tapi tidak ada, atau ada tapi tidak dirujuk | digantikan F2-106 — dinilai AI, karena bentuk lampiran terlalu beragam untuk regex |
 | F2-006 | Urutan "Mengingat" tidak mengikuti hierarki | ⏸ |
 | F2-007 | Bilangan yang angkanya tidak cocok dengan hurufnya — "30 (tiga belas)" | ✅ tambahan, tidak ada di rancangan awal |
 
@@ -493,9 +500,11 @@ Fase 3 memang kemungkinan, bukan kesimpulan.
 | F2-103 | Kata operasional **bertabrakan** dalam satu ketentuan (wajib + dapat) | ✅ |
 | F2-104 | **Dua ketentuan bertabrakan** — tidak bisa berlaku bersamaan. Keduanya dibaca utuh dalam satu panggilan | ✅ |
 | F2-105 | Tujuan di Menimbang yang **tidak tercakup** batang tubuh | ✅ |
+| F2-106 | **Lampiran** tidak dinyatakan di batang tubuh, atau kepala dan penutupnya tidak baku (butir 120–121) | ✅ bug 7 |
 
 Urutan nomornya berubah dari rancangan awal: tabrakan dipindah ke F2-104
-supaya ia bersebelahan dengan cabangnya sendiri (`tahap4_tabrakan.py`), dan
+supaya ia bersebelahan dengan cabangnya sendiri (jalur tabrakan di
+`tahap4_memastikan/memastikan.py`), dan
 F2-101…103 jadi berisi penilaian atas SATU satuan saja. Tidak ada akibatnya
 selain penomoran — tetapi kode, panel, dan tabel rujukan harus sepakat, dan
 sekarang sepakat.
@@ -532,7 +541,7 @@ sama. Penyelesaiannya: **AI membaca, kode yang memutuskan.**
 
 | | Mekanisme | Siapa yang memutuskan |
 |---|---|---|
-| ① | Temuan Fase 1 dilampirkan ke model saat menyusun peta, dengan larangan mengulang | model — duplikat tidak pernah lahir |
+| ① | Temuan Fase 1 ikut di bahan tiap panggilan, dengan larangan mengulang | model — duplikat tidak pernah lahir |
 | ② | Calon yang rentangnya bertindihan dengan temuan yang sudah ada dibuang | **kode**, dengan perbandingan rentang |
 | ③ | Model yang menilai sebuah temuan keliru menempelkan `catatan_ai` | penelaah membaca keduanya |
 
@@ -540,61 +549,33 @@ sama. Penyelesaiannya: **AI membaca, kode yang memutuskan.**
 dibuktikan baris demi baris; keyakinan model tidak bisa. Temuan yang hilang
 diam-diam adalah kegagalan yang paling sulit diketahui penelaah.
 
-### 4.4 Ekspor Tahap 0 — alat pengembang
+### 4.4 Ekspor Tahap 1–5 — alat pengembang
 
-Tombol di **paling bawah panel Pengaturan**. Menghasilkan teks mentah berisi
-apa yang benar-benar akan dibaca model: paragraf apa adanya berikut
-penandanya, pohon satuan, daftar definisi, konteks tetap, dan muatan tiap
-panggilan Langkah 2 persis seperti yang dikirim.
+Lima tombol di **paling bawah panel Pengaturan**, satu per tahap. Isinya apa
+yang BENAR-BENAR dibaca atau diputuskan tahap itu — tanpa kepala, ringkasan,
+atau penjelasan (ditetapkan penelaah 27–28 Sep 2026) — kecuali perkiraan
+token di atas Tahap 2, yang memang diminta.
 
-**Bagian paling atas sengaja daftar satuan yang DIBUANG penyaring Langkah 1,
-berikut teks utuhnya.** Satuan itu tidak pernah sampai ke model dan tidak
-meninggalkan jejak apa pun di panel — ini satu-satunya cara memeriksa apakah
-pembuangannya benar. Penyaringnya berpihak pada meloloskan, tetapi belum
-pernah diperiksa terhadap naskah nyata.
-
-Memanggil kode yang sama dengan jalur sungguhan (`susun_konteks_tetap`,
-`susun_bahan`, `saring`), bukan menyusun ulang: ekspor yang berbohong lebih
-berbahaya daripada tidak ada ekspor, karena ia dipakai memutuskan bahwa
-sesuatu bukan masalah. Tidak memanggil model, tidak berbiaya.
-
-Juga tersedia tanpa Word: `cek_docx.py --tahap0`.
-
-### 4.5 Ekspor Tahap 3 — alat pengembang
-
-Tombol tepat di bawah Ekspor Tahap 0. Pasangannya, dan menjawab pertanyaan
-yang berbeda:
-
-| | Memperlihatkan | Kapan bisa |
+| | Isinya | Sumbernya |
 |---|---|---|
-| **Tahap 0** | apa yang **dibaca** model | kapan saja, gratis |
-| **Tahap 3** | apa yang **ditalar** model | sesudah analisis Fase 2 penalaran pernah berjalan |
+| **Tahap 1** | pohon satuan, definisi Pasal 1, paragraf batang tubuh di luar teks satuan, dan lampiran berikut jenis tiap bloknya | disusun dari naskah saat itu — gratis, kapan saja |
+| **Tahap 2** | perkiraan token per bagian, per panggilan tahap 3, dan per dugaan tahap 4; lalu bahan PERSIS yang ikut di tiap panggilan, dan fakta lampiran | idem |
+| **Tahap 3** | pesan tiap panggilan cari dugaan, termasuk tanya ulang | disimpan saat analisis terakhir berjalan |
+| **Tahap 4** | pesan tiap panggilan memastikan, **berikut tiap alat yang dipanggil model dan hasilnya** — hasil alat itu juga dibaca model | idem |
+| **Tahap 5** | tiap dugaan tahap 3, hasil memastikannya, temuan yang lolos, dan yang gugur berikut alasannya | idem |
 
-**Kenapa perlu ada.** Langkah 2 meringkas tiap satuan jadi satu baris, dan
-Langkah 3 menalar di atas kumpulan baris itu — bukan di atas teks penuh.
-Ringkasan yang meleset membuat seluruh penalaran bertumpu pada gambaran yang
-salah, dan **tidak ada langkah sesudahnya yang bisa mengetahuinya**: Langkah 4
-hanya menguji dugaan yang terlanjur lahir, tidak pernah dugaan yang seharusnya
-lahir tetapi tidak. Satu-satunya cara memeriksa apakah ringkasannya jujur
-adalah membacanya sendiri.
+**Satu penyusun, jadi tidak bisa menyimpang.** Bahan Tahap 2 dirangkai fungsi
+yang sama dengan yang mengirimnya ke model. Tesnya menuntut bahan di ekspor
+SAMA PERSIS dengan yang ada di pesan tahap 3, bukan sekadar memuatnya.
 
-Isinya berurutan: peta terurai per satuan (dibaca lebih dulu), satuan yang
-tidak masuk peta, bahan Langkah 3 persis seperti yang dikirim, lalu dugaan
-yang keluar berikut penanda `eksternal`-nya — penanda itu yang menentukan
-apakah Langkah 6 mencari ke korpus atau diam.
+**Tahap 3–5 tidak disusun ulang.** Sesudah ditandai, naskah di Word sudah
+berisi coretan dan usulan hijau, jadi pesan yang disusun ulang dari naskah
+sekarang bisa berbeda dari yang dulu dikirim. Pesannya disimpan di memori
+backend saat tahapnya berjalan; sesudah backend dimulai ulang, ekspornya cuma
+satu kalimat yang mengatakan pesannya tidak tercatat.
 
-**Membaca peta yang tersimpan, tidak menjalankan ulang.** Model tidak
-deterministik: Langkah 2 yang dijalankan ulang menghasilkan ringkasan yang
-berbeda, dan ekspor yang memperlihatkan peta lain daripada yang dipakai akan
-menyesatkan orang yang sedang mencari bug. Akibatnya ekspor ini kosong sampai
-ada analisis yang pernah berjalan — itu keadaan yang benar, bukan kegagalan.
-
-Satu keadaan dibedakan terang-terangan: **dugaan yang belum pernah tercatat**
-dan **Langkah 3 yang berjalan tanpa menemukan apa pun**. Dugaan tinggal di
-memori sementara peta bertahan di basis data, jadi sesudah backend restart
-keduanya terlihat sama kalau tidak dibedakan.
-
-Juga tersedia tanpa Word: `cek_docx.py --lanjut --tahap3`.
+Juga tersedia tanpa Word: `cek_docx.py --tahap1`, `--tahap2`, dan
+`--lanjut --tahap3`, `--tahap4`, `--tahap5`.
 
 ### 4.2 Hijau berarti terbukti, dan sumber penggantinya bisa ditunjuk
 
@@ -616,7 +597,8 @@ bukan syarat buktinya, melainkan dari mana bukti penggantinya boleh datang:
 Keputusan per aturan tertulis di `tahap5_verifikasi.py`, dan tidak seragam:
 F2-001 terbukti tetapi penggantinya tidak bisa diketahui siapa pun; F2-003
 perbaikannya membuang; F2-007 mana yang benar justru pertanyaan pokoknya;
-F2-1xx boleh hijau **hanya** kalau rumusannya datang dari Langkah 6c;
+F2-1xx boleh hijau **hanya** kalau rumusannya punya sumber — korpus (F3-003)
+atau naskah itu sendiri; F2-106 selalu kuning;
 F3-001 kemungkinan, bukan kesimpulan.
 
 **Syaratnya ditegakkan kode, bukan niat baik.** Penilaian model atas dirinya
@@ -625,7 +607,7 @@ rumusan di komentar — persis seperti sebelum kebijakan ini berubah. Yang
 dibuka bukan izin bagi model menulis ke naskah, melainkan izin bagi rumusan
 yang sudah dipakai peraturan berlaku untuk masuk sebagai usulan.
 
-Dan yang paling menentukan: empat pemeriksaan per-usulan di Langkah 5 —
+Dan yang paling menentukan: empat pemeriksaan per-usulan di tahap 5 —
 `periksa_usulan`, `cari_mirip`, `pasal_karangan`, dan rentang `lokasi` —
 **tidak satu pun dilonggarkan**. Itulah yang sebenarnya mencegah naskah
 rusak, bukan daftar aturan mana yang boleh hijau.
@@ -664,7 +646,7 @@ melainkan keluhan.
 
 Model mengisi `sasaran` dari **daftar tertutup**: `satuan ini`, `judul`,
 `menimbang`, `mengingat`, `menetapkan`, `pasal-1`, atau id satuan mana pun.
-Langkah 5 membuktikan tempat itu ada di pohon; yang tidak terbukti
+Tahap 5 membuktikan tempat itu ada di pohon; yang tidak terbukti
 **dikosongkan**, karena menunjuk Pasal 45 yang tidak ada lebih buruk daripada
 diam soal tempat. Barisnya juga dilewati kalau sasarannya satuan tempat
 komentar itu sendiri menempel.
@@ -706,7 +688,7 @@ jadi tiga, dan pembelahannya ditampilkan ke penelaah apa adanya:
 |---|---|---|
 | Ada butir yang berbunyi persis demikian | tidak ada penanda | F2-003 (butir 61), F2-007 (butir 54j), F3-001 |
 | Ada butir yang **akibatnya** demikian | "dasar turunan" | F2-001 (butir 54d hanya mengatur kapitalisasi acuan) |
-| Tidak ada butirnya, sudah dicari | "rujukan belum diverifikasi" | F2-102, F2-103 |
+| Tidak ada butirnya, sudah dicari | "rujukan belum diverifikasi" | F2-102, F2-103, F2-101 di luar Pasal 1 |
 
 **Dasar F3-001 ternyata di Lampiran III, bukan Lampiran II** — itu sebabnya ia
 tidak ketemu saat butir 1–132 ditelusuri. Huruf C angka 3 dan 4 mewajibkan
@@ -727,6 +709,13 @@ bahwa ini turunan.
 Lampiran II dan tidak ketemu dasarnya. Keduanya tetap berjalan — aturannya
 berguna — tetapi tidak mengaku bersumber KMK 527.
 
+**F2-101 memakai dua dasar menurut letaknya** (sejak 27 Sep 2026). Butir 66
+melarang pengertian ganda hanya pada **definisi** di Ketentuan Umum — untuk
+temuan di Pasal 1 ia kutipan langsung. Di luar Pasal 1 dasarnya prioritas
+penelaah: Lampiran II tidak punya bab ragam bahasa, dan butir 54a ("singkat,
+jelas, dan lugas") cuma mirip. Dulu butir 66 tertulis di hampir setiap komentar
+F2-101 di batang tubuh, sehingga penilaian model terbaca seperti kutipan.
+
 ### 4.1 Batasan
 
 **Dari Word**
@@ -737,7 +726,7 @@ berguna — tetapi tidak mengaku bersumber KMK 527.
 | **Naskah perubahan belum didukung** | lihat di bawah — dulu menghasilkan salah tandai |
 | Tidak ada penghitung kata/karakter | dihitung sendiri dari teks yang sudah dibaca |
 | `Word.search()` ~255 karakter | temuan lebih panjang tidak pernah ketemu → dipotong 120 karakter, warisan Fase 1 |
-| Penandaan butuh teks **cocok persis** | keluaran model wajib diverifikasi kode (Langkah 5) |
+| Penandaan butuh teks **cocok persis** | keluaran model wajib diverifikasi kode (tahap 5) |
 | Panel = halaman web di dalam Word | beban penggambaran jadi titik gagal |
 
 **Dari model**
@@ -909,13 +898,12 @@ daripada ditunda lagi.
 **4. Beban penyamaan keterangan naik jadi tiga berkas per aturan.**
 Tiap aturan `F2-*` harus muncul di `mekanis_konsistensi.py`, `aturan-fase2.ts`, **dan**
 `cek list fase 1.md`. Di Fase 1 sudah dua dan sempat tidak sinkron. Layak
-dipikirkan apakah keterangan aturan sebaiknya dibangkitkan dari satu sumber,
-seperti `KUNCI-UJI.md` yang dibangkitkan skrip.
+dipikirkan apakah keterangan aturan sebaiknya dibangkitkan dari satu sumber.
 
 **5. Temuan AI yang menyisipkan usulan hijau membalik penundaan Fase 1.**
 `fase1 drafter.md` bagian 4 sengaja menunda keputusan itu sampai Fase 1
 terbukti, dan uji Word Fase 1 belum dijalankan. Keputusannya sudah diambil dan
-rancangan ini mengikutinya — dengan tiga syarat di Langkah 4–5. Dicatat di sini
+rancangan ini mengikutinya — dengan tiga syarat di tahap 4–5. Dicatat di sini
 supaya jelas bahwa urutannya memang dibalik, bukan terlewat.
 
 ---
@@ -929,7 +917,7 @@ Tujuh istilah yang dipakai berulang di dokumen ini.
 | **Naskah datar** | Daftar paragraf apa adanya dari Word — potongan teks bernomor, tanpa hubungan antarbagian. Komputer tidak tahu paragraf mana isi pasal mana. Seperti buku tamu: nama berbaris, tidak ada yang tahu siapa keluarga siapa. **Cukup untuk seluruh Fase 1** |
 | **Pohon satuan** dan **satuan** | Naskah yang sama sesudah diberi arti parser: BAB memuat Pasal, Pasal memuat ayat, ayat memuat huruf. Seperti silsilah keluarga. **Isi teksnya sama persis** — parser tidak mengubah satu huruf, ia cuma menambahkan pengetahuan tentang hubungannya. Satu kotak di pohon itu disebut **satuan** — bagian terkecil yang diperiksa, biasanya setingkat ayat. Istilahnya dari brief 8.9: *"Satuan pemeriksaan ayat/butir, bukan pasal"* |
 | **Norma** | Aturan yang mengikat seseorang berbuat atau tidak berbuat. Punya subjek dan perbuatan. *"Pengguna Barang **wajib** melaporkan"* = norma. *"Barang Milik Negara adalah…"* = bukan, itu definisi. *"…mulai berlaku pada tanggal diundangkan"* = bukan, itu administratif |
-| **Peta** | Hasil Langkah 2: satu baris ringkasan per satuan, bukan teks penuhnya. 175 satuan jadi beberapa ribu token — **muat dikirim sekaligus di Langkah 3, sementara teks penuhnya tidak.** Itu seluruh alasan peta ada. Tempatnya: tabel `HasilSatuan` |
-| **Dugaan** ≠ **Temuan** | **Dugaan** keluar dari Langkah 3, dari membaca peta. Belum boleh menyentuh naskah. **Temuan** adalah dugaan yang sudah lolos Langkah 4 (dibaca utuh) dan Langkah 5 (diverifikasi kode). Brief 8.9: *"kejanggalan pada tahap 2 masih berupa dugaan, belum temuan"* |
+| **Bahan** | Naskah utuh yang ikut di depan tiap panggilan tahap 3 dan 4, disusun dari SELURUH paragraf — satu baris per paragraf, bertanda id satuan. Menggantikan **peta** (satu baris ringkasan per satuan), yang dihapus 29 Sep 2026 karena ringkasannya kehilangan detail |
+| **Dugaan** ≠ **Temuan** | **Dugaan** keluar dari tahap 3. Belum boleh menyentuh naskah. **Temuan** adalah dugaan yang sudah lolos tahap 4 (dipastikan dengan naskah utuh) dan tahap 5 (diverifikasi kode). Brief 8.9: *"kejanggalan pada tahap 2 masih berupa dugaan, belum temuan"* |
 | **Klaim internal** ≠ **klaim eksternal** | Menentukan wajib-tidaknya pencarian. **Internal** = bisa dibuktikan dari dokumen ini saja (*"Pasal 47 tidak ada"*) → pencarian tidak perlu. **Eksternal** = menyentuh apa pun di luar dokumen (*"bertentangan dengan PMK 5/2023"*) → pencarian **wajib**, dan tanpa hasil pencarian temuannya tidak keluar |
-| **Konteks tetap** | Bagian prompt yang **sama persis di setiap panggilan** untuk satu dokumen: judul, Menimbang, Mengingat, seluruh definisi Pasal 1, dan kerangka pasal. Kecil dan berulang — ditaruh di paling depan supaya potongan harga awalan prompt berlaku, kalau deployment-nya mendukung |
+| **Awalan tetap** | Bagian pesan yang **sama persis di setiap panggilan** untuk satu dokumen: aturan tetap lalu bahan. Ditaruh di paling depan supaya potongan harga awalan prompt berlaku, kalau deployment-nya mendukung; tugas tiap panggilan di belakangnya |

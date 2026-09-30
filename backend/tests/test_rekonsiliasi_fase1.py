@@ -1,4 +1,4 @@
-"""Rekonsiliasi Fase 1 ↔ Fase 2, dan Ekspor Tahap 0. TANPA jaringan.
+"""Rekonsiliasi Fase 1 ↔ Fase 2. TANPA jaringan.
 
 Ditetapkan penelaah 23 Sep 2026: **AI membaca, KODE yang memutuskan.** Model
 boleh tahu apa yang sudah ditemukan pemeriksaan format, boleh berkeberatan,
@@ -12,11 +12,6 @@ yang membuat model bisa membatalkan temuan, tes itu yang berbunyi.
 import json
 
 from app.bersama.llm import KlienPalsu, Ongkos
-from app.fase2 import tahap2_baca, tahap5_verifikasi
-from app.fase2.ekspor_tahap0 import susun_ekspor
-from app.fase2.tahap0_definisi import ambil_definisi
-from app.fase2.tahap0_struktur import bangun_pohon
-from app.fase2.tahap1_saring import saring
 from app.models.pekerjaan import CalonTemuan
 from app.models.temuan import (
     JenisTanda,
@@ -26,6 +21,10 @@ from app.models.temuan import (
     StatusTemuan,
     Temuan,
 )
+from app.telaah import tahap3_cari_dugaan, tahap5_verifikasi
+from app.telaah.tahap1_parser.definisi import ambil_definisi
+from app.telaah.tahap1_parser.struktur import bangun_pohon
+from app.telaah.tahap2_persiapan.bahan import susun_bahan
 
 _BARIS = [
     "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
@@ -71,43 +70,30 @@ def _temuan(nomor: int, paragraf_index: int, teks_asli: str, aturan="F1-005") ->
 
 
 class TestTemuanIkutKeModel:
-    def test_temuan_fase1_dilampirkan_pada_satuannya(self):
-        pohon = bangun_pohon(_paragraf())
-        pasal2 = pohon.cari("pasal-2")
+    def test_temuan_fase1_ikut_di_bahan_dengan_letak_satuannya(self):
+        paragraf = _paragraf()
+        pohon = bangun_pohon(paragraf)
         t = _temuan(3, 14, "wajib mengajukan permohonan", "F1-008")
-        bahan = tahap2_baca.susun_bahan([pasal2], pohon, "KONTEKS", [t])
-        assert "(SUDAH DITEMUKAN, T3)" in bahan
-        assert "Ejaan tidak baku." in bahan
+        bahan = susun_bahan(paragraf, pohon, [t])
+        assert "(T3) [pasal-2] pada teks 'wajib mengajukan permohonan': Ejaan tidak baku." in bahan.teks
 
-    def test_temuan_di_satuan_LAIN_tidak_ikut(self):
-        """Melampirkan temuan yang bukan miliknya cuma membingungkan model."""
-        pohon = bangun_pohon(_paragraf())
-        pasal2 = pohon.cari("pasal-2")
-        t = _temuan(1, 7, "Undang-undang")  # di Mengingat, jauh dari pasal-2
-        bahan = tahap2_baca.susun_bahan([pasal2], pohon, "KONTEKS", [t])
-        assert "SUDAH DITEMUKAN" not in bahan
-
-    def test_tanpa_temuan_fase1_bahannya_sama_seperti_dulu(self):
-        pohon = bangun_pohon(_paragraf())
-        pasal2 = pohon.cari("pasal-2")
-        assert tahap2_baca.susun_bahan([pasal2], pohon, "K") == tahap2_baca.susun_bahan(
-            [pasal2], pohon, "K", []
-        )
+    def test_tanpa_temuan_fase1_tidak_ada_bloknya(self):
+        paragraf = _paragraf()
+        bahan = susun_bahan(paragraf, bangun_pohon(paragraf))
+        assert "TEMUAN PEMERIKSAAN FORMAT" not in bahan.teks
 
 
 class TestKeberatan:
+    """Keberatan dikumpulkan di panggilan lintas naskah tahap 3."""
+
     def _jalan(self, jawaban_keberatan, temuan_fase1):
         paragraf = _paragraf()
         pohon = bangun_pohon(paragraf)
-        daftar = ambil_definisi(pohon)
-        dibaca = saring(pohon).dibaca
-        jawab = {
-            "baris": [{"satuan_id": s.id, "ringkasan": "r"} for s in dibaca],
-            "keberatan": jawaban_keberatan,
-        }
-        klien = KlienPalsu([json.dumps(jawab, ensure_ascii=False)])
-        tahap2_baca.baca_satuan(
-            pohon, daftar, dibaca, klien, Ongkos(), temuan_fase1=temuan_fase1
+        bahan = susun_bahan(paragraf, pohon, temuan_fase1)
+        pg = tahap3_cari_dugaan.panggilan_lintas(bahan, ["tabrakan"], ada_fase1=True)
+        jawab = json.dumps({"dugaan": [], "keberatan": jawaban_keberatan}, ensure_ascii=False)
+        tahap3_cari_dugaan.cari_dugaan(
+            [pg], pohon, bahan, KlienPalsu([jawab]), Ongkos(), temuan_fase1=temuan_fase1
         )
 
     def test_keberatan_menempel_ke_temuan_yang_benar(self):
@@ -174,58 +160,3 @@ class TestPenyaringTumpangTindih:
     def test_tanpa_temuan_lama_semua_lolos(self):
         lolos, _ = self._jalan(self._calon("wajib mengajukan permohonan"), None)
         assert len(lolos) == 1
-
-
-class TestEksporTahap0:
-    def test_yang_dibuang_ditaruh_paling_atas_dengan_teksnya(self):
-        """Inilah alasan ekspor ini dibuat — satuan yang dibuang tidak
-        meninggalkan jejak apa pun di panel."""
-        teks = susun_ekspor(_paragraf())
-        i_buang = teks.index("YANG DIBUANG")
-        assert i_buang < teks.index("YANG DIBACA")
-        assert i_buang < teks.index("POHON SATUAN")
-        # teks utuh satuan yang dibuang ikut, bukan cuma id-nya
-        assert "Undang-undang Nomor 1 Tahun 2004" in teks
-
-    def test_memuat_muatan_panggilan_apa_adanya(self):
-        teks = susun_ekspor(_paragraf())
-        assert "KONTEKS TETAP" in teks
-        assert "MUATAN LANGKAH 2" in teks
-        assert "== SATUAN YANG DIPERIKSA ==" in teks
-
-    def test_penanda_ikut_ditampilkan(self):
-        paragraf = [
-            ParagrafInput(index=0, teks="", penanda="Pasal 5"),
-            ParagrafInput(index=1, teks="Isi ayat.", penanda="(1)"),
-        ]
-        teks = susun_ekspor(paragraf)
-        assert "'Pasal 5'" in teks
-        assert "2 berpenanda nomor otomatis Word" in teks
-
-    def test_naskah_yang_ditolak_tetap_diekspor_berikut_alasannya(self):
-        """Justru naskah yang ditolak itulah yang paling perlu diperiksa."""
-        kmk = [
-            ParagrafInput(index=i, teks=t)
-            for i, t in enumerate(
-                [
-                    "KEPUTUSAN MENTERI KEUANGAN REPUBLIK INDONESIA",
-                    "TENTANG",
-                    "PEMBENTUKAN TIM",
-                    "MENTERI KEUANGAN REPUBLIK INDONESIA,",
-                    "MEMUTUSKAN:",
-                    "Menetapkan : KEPUTUSAN MENTERI KEUANGAN TENTANG PEMBENTUKAN TIM.",
-                    "KESATU : Membentuk Tim.",
-                ]
-            )
-        ]
-        teks = susun_ekspor(kmk)
-        assert "FASE 2 TIDAK DIJALANKAN" in teks
-        assert "diktum" in teks.lower()
-
-    def test_memakai_kode_yang_sama_dengan_yang_dikirim(self):
-        """Ekspor yang menyusun ulang bisa menyimpang dari yang dikirim."""
-        paragraf = _paragraf()
-        pohon = bangun_pohon(paragraf)
-        daftar = ambil_definisi(pohon)
-        konteks = tahap2_baca.susun_konteks_tetap(pohon, daftar)
-        assert konteks in susun_ekspor(paragraf)

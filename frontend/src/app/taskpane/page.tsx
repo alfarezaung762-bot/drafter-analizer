@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Temuan,
   ParagrafInput,
@@ -11,15 +11,24 @@ import {
   AnalisisLanjutRequest,
   MulaiResponse,
   KemajuanResponse,
+  KeteranganAturan,
+  NaskahTerbaca,
 } from "@/lib/types";
 import {
-  readParagraphs,
+  bacaNaskah,
   selectFindingLocation,
+  lompatKeSasaran,
   tandaiSemuaTemuan,
   perbaruiKomentarTemuan,
   tolakTemuan,
   bersihkanSemuaTanda,
   cakupanTerpilihTersedia,
+  pasangPemantauSeleksi,
+  lepasPemantauSeleksi,
+  hitungTandaAlat,
+  simpanDaftarDiNaskah,
+  bacaDaftarDariNaskah,
+  pulihkanFormatAsli,
   type HasilPenandaan,
 } from "@/lib/office";
 import {
@@ -29,8 +38,9 @@ import {
 } from "@/lib/aturan-fase1";
 import {
   ATURAN_FASE2,
-  ATURAN_FASE2_MEKANIS,
-  ATURAN_FASE2_MODEL,
+  ATURAN_STRUKTURAL_LANJUT,
+  ATURAN_INTERNAL,
+  ATURAN_EKSTERNAL,
   ID_AKTIF_BAWAAN,
 } from "@/lib/aturan-fase2";
 
@@ -46,19 +56,51 @@ const API_BASE =
 const BATAS_KARTU_AWAL = 40;
 const TAMBAH_KARTU = 40;
 
-// Panjang alasan yang masih muat tiga baris di lebar panel Word. Di atasnya
-// tombol "selengkapnya" muncul; di bawahnya tidak, karena tombol yang tidak
-// pernah mengubah apa pun cuma mengajak penelaah menekan sia-sia.
-const BATAS_ALASAN_RINGKAS = 160;
-
 // Jarak antar-pengambilan kemajuan Fase 2. Dua detik: cukup rapat supaya
 // angkanya terasa hidup, cukup renggang supaya panel tidak sibuk sendiri.
 const JEDA_TANYA_MS = 2000;
 
-// Berapa kali bertanya sebelum menyerah. 2 detik x 450 = 15 menit — jauh di
-// atas dokumen 175 satuan, tetapi tetap berujung. Panel yang berputar
-// selamanya tidak bisa dibedakan penelaah dari analisis yang memang lama.
-const BATAS_TANYA = 450;
+// Kapan panel menyerah menunggu. Sejak bug 7 tiap panggilan membawa naskah
+// utuh, jadi naskah besar bisa berjalan lebih dari 15 menit — apalagi kalau
+// kuota token per menit Azure tersentuh dan panggilannya diulang. Yang
+// menandakan macet bukan lamanya, melainkan kemajuan yang DIAM: tidak ada
+// tahap, angka, atau panggilan yang bergerak selama 10 menit. Batas mutlaknya
+// tetap ada, karena panel yang berputar selamanya tidak bisa dibedakan
+// penelaah dari analisis yang memang lama.
+const BATAS_DIAM_MS = 10 * 60_000;
+const BATAS_TOTAL_MS = 90 * 60_000;
+
+/** Ekspor alat pengembang — satu per tahap (bug 7). */
+const EKSPOR_TAHAP: { tahap: number; keterangan: string }[] = [
+  {
+    tahap: 1,
+    keterangan:
+      "hasil parser: pohon satuan, definisi Pasal 1, paragraf di luar satuan, dan lampiran berikut jenis bloknya. Gratis.",
+  },
+  {
+    tahap: 2,
+    keterangan: "perkiraan token, lalu bahan persis yang ikut di tiap panggilan AI. Gratis.",
+  },
+  {
+    tahap: 3,
+    keterangan: "pesan cari dugaan persis seperti dikirim ke AI pada analisis terakhir, termasuk tanya ulang.",
+  },
+  {
+    tahap: 4,
+    keterangan: "pesan memastikan tiap dugaan — tempat temuan lahir — berikut hasil alat yang dibaca AI.",
+  },
+  {
+    tahap: 5,
+    keterangan: "nasib tiap dugaan: lolos jadi temuan atau gugur, berikut alasannya.",
+  },
+];
+
+/** "tahap 3 cari dugaan · 4/12 panggilan" — satuan hitungnya menurut tahap. */
+function uraiKemajuan(k: { tahap: string; selesai: number; total: number }): string {
+  const nomor = k.tahap.split(" ")[0];
+  const satuan = nomor === "3" ? " panggilan" : nomor === "4" ? " dugaan" : "";
+  return `tahap ${k.tahap} · ${k.selesai}/${k.total}${satuan}`;
+}
 
 // Sesudah Track Changes ditinggalkan (17 Sep 2026), seluruh penandaan berjalan
 // di atas WordApi 1.1 — Font.color, Font.strikeThrough, Range.insertText,
@@ -115,7 +157,60 @@ export default function TaskpanePage() {
   const [jenisDokumen, setJenisDokumen] = useState<JenisDokumen | null>(null);
   const [goyangJenis, setGoyangJenis] = useState(false);
   const [selectedTemuanId, setSelectedTemuanId] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  // --- Pesan ke penelaah, dipisah menurut WATAKNYA -------------------------
+  //
+  // Sampai 27 Sep 2026 semuanya tercetak sebagai kotak yang bertumpuk di atas
+  // daftar kartu — enam kotak sekaligus pada satu analisis, dan kartu yang
+  // sedang ditelaah terdorong ke bawah layar. Satu `statusMessage` dulu
+  // dipakai untuk tiga hal yang wataknya berlawanan: konfirmasi aksi, ringkasan
+  // tahap, dan GALAT. Menyamakan ketiganya berarti galat ikut diperlakukan
+  // seperti konfirmasi, atau konfirmasi ikut menetap seperti galat.
+  //
+  // Pembagiannya sekarang:
+  //   pesanGalat   — ada yang GAGAL atau terhalang. Menetap sampai ditutup
+  //                  penelaah atau analisis berikutnya dimulai. Tidak pernah
+  //                  hilang sendiri: galat yang lenyap dalam tiga detik sama
+  //                  saja dengan galat yang tidak dilaporkan.
+  //   peringatan   — tidak gagal, tetapi menuntut perhatian atau tindakan
+  //                  (komentar kosong, Track Changes menyala, Fase 2 dilewati).
+  //                  Menetap, bisa ditutup satu per satu.
+  //   toast        — konfirmasi sekali pakai sesudah sebuah aksi. Hilang
+  //                  sendiri, dan TIDAK menggeser tata letak panel.
+  //   Rincian proses — ringkasan tiap tahap analisis. Tertutup secara bawaan;
+  //                  kepalanya tetap menyebut hasil tiap tahap, jadi hasilnya
+  //                  terbaca tanpa membukanya.
+  const [pesanGalat, setPesanGalat] = useState<{
+    teks: string;
+    // "jenis" = galat karena jenis dokumen belum dipilih — dibersihkan sendiri
+    // begitu penelaah memilihnya, supaya tidak menetap sebagai galat basi.
+    kunci?: "jenis";
+  } | null>(null);
+  const [peringatan, setPeringatan] = useState<string[]>([]);
+  const [toast, setToast] = useState<{ id: number; teks: string } | null>(null);
+  const [hasilFase1, setHasilFase1] = useState<{
+    jumlah: number;
+    baris: number;
+  } | null>(null);
+  const [jumlahFase2, setJumlahFase2] = useState<number | null>(null);
+  const [rincianTerbuka, setRincianTerbuka] = useState(false);
+
+  // --- Naskah yang diperiksa, bukan daftar kartu ---------------------------
+  //
+  // Jumlah tanda dan komentar alat yang MASIH ADA di naskah. null = belum
+  // dihitung. Inilah yang mengunci analisis ulang, bukan daftar kartu: daftar
+  // hilang tiap kali panel ditutup atau Word dimulai ulang, tandanya tidak.
+  // Dulu yang diperiksa daftarnya, dan analisis berikutnya menomori ulang dari
+  // T1 di atas tanda lama — komentar ganda, dan Tolak mencabut tanda milik
+  // temuan lain (PMK 45, 27 Sep 2026; docs/perbaiki bug.md bug 3).
+  const [tandaDiNaskah, setTandaDiNaskah] = useState<number | null>(null);
+  // Daftar yang tersimpan di berkas sudah dicoba dipulihkan. Sebelum itu
+  // daftar panel masih kosong, dan menyimpannya berarti MENGHAPUS simpanan
+  // yang belum sempat dibaca.
+  const [pulihSelesai, setPulihSelesai] = useState(false);
+  // Bersihkan dua langkah — lihat `perluYakin` di dekat tombolnya.
+  const [yakinBersihkan, setYakinBersihkan] = useState(false);
+
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [showPengaturan, setShowPengaturan] = useState(false);
   // Aturan mana saja yang dijalankan. Semula semuanya. Penelaah bisa mematikan
@@ -125,7 +220,11 @@ export default function TaskpanePage() {
     () => new Set(SEMUA_ID_AKTIF)
   );
   const [aturanTerbuka, setAturanTerbuka] = useState<string | null>(null);
-  const [infoPenandaan, setInfoPenandaan] = useState<string | null>(null);
+  // Hitungan netral hasil penandaan Fase 1 ("3 dicoret merah, 2 komentar") —
+  // masuk Rincian proses. Peringatan yang dulu ikut tercampur di sini (komentar
+  // kosong, Track Changes menyala) dipindah ke `peringatan`, karena itu menuntut
+  // tindakan dan tidak boleh ikut tertutup.
+  const [ringkasanPenandaan, setRingkasanPenandaan] = useState<string | null>(null);
   // Temuan yang TIDAK tertandai di naskah. Kartunya harus memuat alasannya
   // sendiri — bagi temuan ini tidak ada komentar di naskah yang bisa dibaca,
   // dan tombol Terima/Tolak tidak punya apa pun untuk dikerjakan.
@@ -144,7 +243,10 @@ export default function TaskpanePage() {
   // keduanya berbagi satu bendera `analyzing`, seluruh panel terkunci selama
   // beberapa menit dan itu persis keluhan terhadap Law Analyzer.
   const [fase2Berjalan, setFase2Berjalan] = useState(false);
+  // Kemajuan per tahap: "3 cari dugaan" menghitung panggilan, "4 memastikan"
+  // menghitung dugaan yang diuji.
   const [fase2Kemajuan, setFase2Kemajuan] = useState<{
+    tahap: string;
     selesai: number;
     total: number;
   } | null>(null);
@@ -167,18 +269,55 @@ export default function TaskpanePage() {
       return baru;
     });
 
-  // Alat pengembang — ekspor Tahap 0 dan Tahap 3.
-  const [mengekspor, setMengekspor] = useState(false);
-  const [pesanEkspor, setPesanEkspor] = useState<string | null>(null);
-  const [mengekspor3, setMengekspor3] = useState(false);
-  const [pesanEkspor3, setPesanEkspor3] = useState<string | null>(null);
+  // Alat pengembang — ekspor Tahap 1 sampai 5. Satu yang disiapkan sekali
+  // waktu; pesan hasilnya per tahap.
+  const [mengeksporTahap, setMengeksporTahap] = useState<number | null>(null);
+  const [pesanEkspor, setPesanEkspor] = useState<Record<number, string>>({});
   const [namaDokumen, setNamaDokumen] = useState("");
 
-  // Nomor pekerjaan Fase 2 terakhir di sesi ini. Dipakai Ekspor Tahap 3 untuk
-  // mengambil peta yang BENAR-BENAR dipakai. Kosong bukan halangan: backend
-  // jatuh ke pekerjaan terbaru untuk dokumen ini, supaya panel yang dimuat
-  // ulang tetap bisa mengekspor.
+  // Nomor pekerjaan Fase 2 terakhir di sesi ini. Dipakai Ekspor Tahap 3–5
+  // untuk mengambil pesan yang BENAR-BENAR dikirim. Kosong bukan halangan:
+  // backend jatuh ke pekerjaan terbaru untuk dokumen ini, supaya panel yang
+  // dimuat ulang tetap bisa mengekspor.
   const [nomorPekerjaan, setNomorPekerjaan] = useState<number | null>(null);
+
+  /**
+   * Kosongkan SELURUH jejak analisis sebelumnya dari Rincian proses dan kotak
+   * pesan — dipanggil tiap kali analisis baru dimulai dan tiap kali daftar
+   * dibersihkan.
+   *
+   * Semuanya sekaligus, di satu tempat, karena sebelumnya tidak: `fase2Kemajuan`
+   * hanya dikosongkan kalau Fase 2 ikut jalan, dan `infoPenandaan` hanya kalau
+   * Fase 1 ikut jalan. Analisis yang cuma menjalankan salah satunya
+   * meninggalkan angka milik analisis SEBELUMNYA di panel — terbaca seolah
+   * milik yang baru. Rincian proses menampilkan tahap-tahap satu analisis;
+   * sisa analisis lain di dalamnya adalah keterangan yang bohong.
+   */
+  const kosongkanTahapan = () => {
+    setPesanGalat(null);
+    setPeringatan([]);
+    setHasilFase1(null);
+    setRingkasanPenandaan(null);
+    setFase2Kemajuan(null);
+    setFase2Pesan(null);
+    setJumlahFase2(null);
+  };
+
+  /** Konfirmasi sekali pakai. Hilang sendiri — lihat efek di bawah. */
+  const tampilkanToast = (teks: string) => {
+    setToast({ id: Date.now() + Math.random(), teks });
+  };
+
+  // Lama tampil mengikuti panjang kalimatnya: konfirmasi pendek tidak perlu
+  // menunggu lama, kalimat panjang tidak boleh hilang sebelum selesai dibaca.
+  // Toast baru menggantikan yang lama, dan pewaktunya ikut diganti — tanpa
+  // `clearTimeout` di sini, pewaktu toast lama bisa menghapus toast baru.
+  useEffect(() => {
+    if (!toast) return;
+    const lama = Math.min(7000, 2500 + toast.teks.length * 35);
+    const pewaktu = window.setTimeout(() => setToast(null), lama);
+    return () => window.clearTimeout(pewaktu);
+  }, [toast]);
 
   useEffect(() => {
     // Office.onReady bisa memanggil balik segera — termasuk sebelum komponen
@@ -234,6 +373,72 @@ export default function TaskpanePage() {
     };
   }, []);
 
+  // --- Daftar temuan ikut tersimpan di dalam berkas Word -------------------
+  //
+  // Ditetapkan penelaah 27 Sep 2026 (K2 di docs/perbaiki bug.md). Saat panel
+  // dibuka, daftar yang tersimpan di berkas dipulihkan — tetapi HANYA kalau
+  // naskahnya masih memuat tanda alat. Simpanan tanpa tanda berarti tandanya
+  // sudah dicabut dengan tangan; kartunya tidak lagi menunjuk apa pun, dan
+  // efek penyimpan di bawah akan menghapusnya.
+  useEffect(() => {
+    if (inWord !== true) return;
+    let aktif = true;
+    void (async () => {
+      const simpanan = bacaDaftarDariNaskah();
+      const { tanda, komentar } = await hitungTandaAlat();
+      if (!aktif) return;
+      const ada = tanda + komentar;
+      if (simpanan && simpanan.temuan.length > 0 && ada > 0) {
+        pulihkanFormatAsli(simpanan.formatAsli);
+        setTemuanList(simpanan.temuan);
+        setIdTidakDitandai(new Set(simpanan.idTidakDitandai));
+        if (simpanan.jenisDokumen === "PMK" || simpanan.jenisDokumen === "KMK") {
+          setJenisDokumen(simpanan.jenisDokumen);
+        }
+        setToast({
+          id: Date.now(),
+          teks: `${simpanan.temuan.length} temuan dari analisis sebelumnya dipulihkan dari berkas ini.`,
+        });
+      }
+      setTandaDiNaskah(ada);
+      setPulihSelesai(true);
+    })();
+    return () => {
+      aktif = false;
+    };
+  }, [inWord]);
+
+  // Tiap perubahan daftar ikut disimpan: hasil analisis, Terima, Tolak,
+  // Bersihkan. Ditunda sebentar supaya penandaan Fase 2 per kelompok tidak
+  // memicu belasan penyimpanan beruntun.
+  useEffect(() => {
+    if (inWord !== true || !pulihSelesai) return;
+    const pewaktu = window.setTimeout(() => {
+      void simpanDaftarDiNaskah({
+        temuan: temuanList,
+        idTidakDitandai: [...idTidakDitandai],
+        jenisDokumen,
+      });
+    }, 500);
+    return () => window.clearTimeout(pewaktu);
+  }, [inWord, pulihSelesai, temuanList, idTidakDitandai, jenisDokumen]);
+
+  // Kepastian Bersihkan kedaluwarsa sendiri: klik kedua yang datang jauh
+  // kemudian bukan lagi jawaban atas pertanyaan yang sama.
+  useEffect(() => {
+    if (!yakinBersihkan) return;
+    const pewaktu = window.setTimeout(() => setYakinBersihkan(false), 6000);
+    return () => window.clearTimeout(pewaktu);
+  }, [yakinBersihkan]);
+
+  /** Hitung ulang tanda alat di naskah. Mengembalikan jumlahnya. */
+  const periksaNaskah = async (): Promise<number> => {
+    if (inWord !== true) return 0;
+    const { tanda, komentar } = await hitungTandaAlat();
+    setTandaDiNaskah(tanda + komentar);
+    return tanda + komentar;
+  };
+
   // Tidak ada penyaringan menurut tingkat keparahan lagi — tingkat itu dihapus
   // dari rancangan. Temuan tampil urut posisi dokumen, dibaca dari atas ke
   // bawah, sama dengan urutan nomornya.
@@ -277,6 +482,59 @@ export default function TaskpanePage() {
     [temuanList]
   );
 
+  // --- Kartu menyala mengikuti kursor di naskah --------------------------
+  //
+  // Kebalikan "Lompat ke Teks". Word TIDAK punya event gulir sama sekali
+  // (alasannya di office.ts), jadi yang dipakai perpindahan SELEKSI — klik,
+  // tombol panah, mengetik.
+  //
+  // Daftarnya dipegang lewat ref, bukan lewat dependency effect: memasang dan
+  // melepas handler Word tiap kali daftar temuan berubah jauh lebih mahal
+  // daripada membaca satu ref, dan pemasangan yang berulang itulah yang paling
+  // mungkin meninggalkan handler yatim di Word.
+  const temuanRef = useRef<Temuan[]>([]);
+  useEffect(() => {
+    temuanRef.current = temuanBerlokasi;
+  }, [temuanBerlokasi]);
+
+  useEffect(() => {
+    if (inWord !== true) return;
+    let aktif = true;
+
+    void pasangPemantauSeleksi((nomor) => {
+      if (!aktif) return;
+      const daftar = temuanRef.current;
+      const urutan = daftar.findIndex((t) => t.nomor === nomor);
+      if (urutan === -1) return;
+      const t = daftar[urutan];
+
+      setSelectedTemuanId(t.id);
+      // Kartu yang belum digambar tidak bisa digulir ke layar. Batasnya
+      // dinaikkan SECUKUPNYA, tidak dibuka semua — batas itu ada karena Law
+      // Analyzer berhenti merespons di 68 kartu (brief 8.7).
+      setBatasTampil((n) => (urutan < n ? n : urutan + TAMBAH_KARTU));
+
+      // Ditunda sebentar: kartunya mungkin baru digambar pada render
+      // berikutnya, dan elemen yang belum ada tidak bisa digulir.
+      //
+      // `block: "center"`, BUKAN "nearest". "nearest" menggulir sesedikit
+      // mungkin, jadi kartunya mendarat menempel di tepi bawah panel —
+      // penelaah melihatnya muncul di paling bawah dan tidak yakin yang mana
+      // yang sedang disorot. Dilaporkan 27 Sep 2026.
+      setTimeout(() => {
+        if (!aktif) return;
+        document
+          .getElementById(`kartu-${t.id}`)
+          ?.scrollIntoView({ block: "center", behavior: "smooth" });
+      }, 60);
+    });
+
+    return () => {
+      aktif = false;
+      lepasPemantauSeleksi();
+    };
+  }, [inWord]);
+
   /** Tidak ada satu pun pemeriksaan dicentang — tombolnya tidak punya kerja. */
   const tidakAdaYangDicentang =
     aturanAktif.size === 0 && aturanFase2Aktif.size === 0;
@@ -289,27 +547,57 @@ export default function TaskpanePage() {
     [temuanBerlokasi, tidakTertandai]
   );
 
+  // ANALISIS ULANG TERKUNCI selama naskah masih memuat tanda alat — dihitung
+  // dari NASKAHNYA (`tandaDiNaskah`), bukan dari daftar kartu. Termasuk tanda
+  // temuan yang sudah diterima: analisis di atas teks yang masih berisi coretan
+  // merah dan usulan hijau membaca keduanya sebagai naskah, lalu menandai
+  // ulang semuanya. Selama naskahnya belum dihitung, terkunci juga — lebih baik
+  // menunggu sepersekian detik daripada menganalisis di atas tanda lama.
+  //
+  // Di luar Word (pratinjau web) tidak ada naskah bertanda; yang dipakai daftar.
+  const naskahBertanda =
+    inWord === true ? tandaDiNaskah === null || tandaDiNaskah > 0 : adaYangBelumDiputuskan;
+  // Tombol Bersihkan hanya kalau tandanya SUDAH terhitung ada — bukan selama
+  // hitungannya belum selesai, supaya ia tidak berkedip saat panel dibuka.
+  const tampilBersihkan =
+    inWord === true ? (tandaDiNaskah ?? 0) > 0 : adaYangBelumDiputuskan;
+
+  // Bersihkan juga mencabut usulan yang SUDAH diterima — keputusan penelaah
+  // sendiri. Kalau ada yang bisa hilang begitu, klik pertama cuma meminta
+  // kepastian. Tanda tanpa daftar (daftar belum/tidak terpulihkan) diperlakukan
+  // sama: isinya tidak diketahui, jadi bisa saja memuat yang sudah diterima.
+  const perluYakin =
+    temuanList.some((t) => t.status === "diterima") ||
+    (inWord === true && temuanList.length === 0);
+
   // Mengosongkan daftar panel SEKALIGUS mencabut seluruh tanda alat dari
   // naskah. Sejak tandanya digambar sendiri (bukan revisi Word), meninggalkan
   // tanda tanpa daftar berarti naskah berisi teks merah-hijau yang tidak ada
   // lagi yang bisa mencabutnya. Yang dicabut hanya yang bertag DA-* — warna
   // dan sorotan milik penyusun sendiri tidak disentuh.
   const handleBersihkanDaftar = async () => {
+    if (perluYakin && !yakinBersihkan) {
+      setYakinBersihkan(true);
+      return;
+    }
+    setYakinBersihkan(false);
     let hasil = { tanda: 0, komentar: 0 };
     if (inWord) {
       hasil = await bersihkanSemuaTanda();
+      // Simpanan di berkas ikut dihapus di sini, tidak menunggu efek penyimpan:
+      // kalau daftarnya memang sudah kosong, efek itu tidak terpicu.
+      await simpanDaftarDiNaskah({ temuan: [], idTidakDitandai: [], jenisDokumen: null });
+      await periksaNaskah();
     }
     setTemuanList([]);
     setSelectedTemuanId(null);
-    setInfoPenandaan(null);
-    setFase2Pesan(null);
-    setFase2Kemajuan(null);
+    kosongkanTahapan();
     setBatasTampil(BATAS_KARTU_AWAL);
     // Ikut dikosongkan — tanpa ini, daftar id dari analisis sebelumnya
     // bertahan dan bisa membuat kartu analisis berikutnya salah dilabeli
     // "tidak ditandai di naskah".
     setIdTidakDitandai(new Set());
-    setStatusMessage(
+    tampilkanToast(
       inWord
         ? `Daftar dikosongkan, ${hasil.tanda} tanda dan ${hasil.komentar}` +
           " komentar dicabut dari naskah. Warna dan sorotan milik penyusun" +
@@ -318,12 +606,33 @@ export default function TaskpanePage() {
     );
   };
 
-  // Gate legal: periksa apakah ada temuan dengan rujukan placeholder
-  const adaRujukanBelumVerifikasi = useMemo(() => {
-    return temuanList.some(
-      (t) => t.rujukan.status !== "visual"
-    );
-  }, [temuanList]);
+  // --- Rincian proses -------------------------------------------------------
+  //
+  // Kepalanya menyebut HASIL tiap tahap, bukan sekadar "Rincian proses".
+  // Rinciannya tertutup secara bawaan, dan tanpa ringkasan di kepalanya
+  // analisis yang selesai tanpa temuan tidak meninggalkan bekas yang terbaca
+  // sama sekali — padahal "sudah diperiksa, tidak ada temuan" adalah hasil,
+  // bukan ketiadaan hasil. Tahap Fase 2 yang sedang berjalan ikut disebut:
+  // penelaah berhak tahu analisisnya sampai di mana, bukan cuma berapa temuan
+  // yang keluar.
+  const adaFase2Kemajuan = !!fase2Kemajuan && fase2Kemajuan.total > 0;
+  const adaRincian =
+    !!hasilFase1 || !!ringkasanPenandaan || adaFase2Kemajuan || !!fase2Pesan;
+  const ringkasTahap = [
+    hasilFase1 ? `Fase 1: ${hasilFase1.jumlah} temuan` : null,
+    jumlahFase2 !== null
+      ? `Fase 2: ${jumlahFase2} temuan`
+      : adaFase2Kemajuan && fase2Kemajuan
+        ? fase2Berjalan
+          ? `Fase 2: ${uraiKemajuan(fase2Kemajuan)}`
+          : // Tidak berjalan dan tidak punya jumlah = berhenti sebelum
+            // selesai. Disebut "berhenti", bukan angka kemajuan telanjang
+            // yang terbaca seolah masih berjalan.
+            `Fase 2: berhenti di ${uraiKemajuan(fase2Kemajuan)}`
+        : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   // ---------------------------------------------------------------------
   // SATU TOMBOL untuk seluruh fase
@@ -334,46 +643,208 @@ export default function TaskpanePage() {
   // Penelaah tidak perlu tahu batas fase untuk memakai alat ini — ia cuma
   // mencentang apa yang ingin diperiksa, lalu menekan sekali.
   //
-  // Paragrafnya dibaca SEKALI dan dipakai kedua fase.
+  // Naskahnya dibaca SEKALI dan dipakai kedua fase.
 
-  const bacaParagrafSekali = async (): Promise<ParagrafInput[]> => {
-    if (inWord) return readParagraphs(scope);
-    return webInputText
-      .split("\n")
-      .map((line, idx) => ({ index: idx, teks: line }));
+  const bacaNaskahSekali = async (): Promise<NaskahTerbaca> => {
+    if (inWord) return bacaNaskah(scope);
+    return {
+      paragraf: webInputText.split("\n").map((line, idx) => ({ index: idx, teks: line })),
+      tabel_raksasa: [],
+    };
   };
 
-  /** Ringkas hasil penandaan jadi kalimat yang dibaca penelaah. */
-  const ringkasPenandaan = (hasil: HasilPenandaan): string => {
+  /**
+   * Paragraf untuk Fase 1: yang letaknya PASTI saja. Sesudah tabel raksasa,
+   * nomor paragraf bukan nomor Word, dan temuan Fase 1 di sana akan ditandai
+   * di paragraf yang salah. Fase 2 menerima semuanya — backend yang menahan
+   * penandaannya.
+   */
+  const paragrafPasti = (naskah: NaskahTerbaca): ParagrafInput[] =>
+    naskah.paragraf.filter((p) => p.letak_pasti !== false);
+
+  /**
+   * Nyalakan atau matikan satu kelompok aturan Fase 2/3 sekaligus.
+   *
+   * Hanya menyentuh id yang ada di `daftar` — sisa centangnya dibiarkan apa
+   * adanya. Itu yang membuat "Kosongkan" pada satu kategori tidak ikut
+   * mematikan kategori lain, padahal ketiganya berbagi satu himpunan state.
+   */
+  const setKelompokFase2 = (daftar: { id: string }[], nyala: boolean) =>
+    setAturanFase2Aktif((prev) => {
+      const next = new Set(prev);
+      daftar.forEach((a) => (nyala ? next.add(a.id) : next.delete(a.id)));
+      return next;
+    });
+
+  /**
+   * Berapa pemeriksaan Kategori 1 yang menyala — dua himpunan state dijumlah.
+   *
+   * F1-001 tidak pernah ikut terhitung karena `dimatikan` di kode, dan
+   * ATURAN_BISA_DIPILIH memang sudah mengeluarkannya dari penyebut.
+   */
+  const jumlahStrukturalAktif =
+    aturanAktif.size +
+    ATURAN_STRUKTURAL_LANJUT.filter((a) => aturanFase2Aktif.has(a.id)).length;
+
+  /**
+   * Satu kartu aturan di panel Pengaturan.
+   *
+   * Dipakai KETIGA kategori. Sebelum 26 Sep 2026 kode ini disalin dua kali —
+   * sekali untuk blok Fase 1, sekali untuk blok Fase 2/3 — dan keduanya sudah
+   * sempat berbeda diam-diam: yang satu bisa menampilkan penanda "dimatikan",
+   * yang lain penanda "Fase 3", dan judul catatan sumbernya pun beda kalimat.
+   * Disatukan supaya perubahan tampilan cukup dikerjakan sekali.
+   *
+   * `aktif` dan `onToggle` sengaja dioper dari luar, bukan dibaca sendiri di
+   * dalam: Kategori 1 memakai DUA himpunan state yang berbeda — jalur cepat
+   * yang tidak butuh pohon satuan, dan jalur yang menunggu pohonnya berhasil
+   * diurai — jadi kartu tidak boleh menebak sendiri ia milik state yang mana.
+   */
+  const kartuAturan = (
+    aturan: KeteranganAturan & { fase?: 2 | 3; denganModel?: boolean },
+    aktif: boolean,
+    onToggle: (nyala: boolean) => void
+  ) => {
+    const mati = !!aturan.dimatikan;
+    const terbuka = aturanTerbuka === aturan.id;
+
+    return (
+      <div
+        key={aturan.id}
+        className={`rounded border bg-white ${
+          mati ? "border-slate-200 opacity-60" : "border-slate-300"
+        }`}
+      >
+        <div className="flex items-start gap-1.5 px-1.5 py-1.5">
+          <input
+            type="checkbox"
+            id={`aturan-${aturan.id}`}
+            checked={aktif && !mati}
+            disabled={mati}
+            onChange={(e) => onToggle(e.target.checked)}
+            className="mt-0.5 accent-blue-700"
+          />
+          <button
+            onClick={() => setAturanTerbuka(terbuka ? null : aturan.id)}
+            className="flex-1 text-left"
+            aria-expanded={terbuka}
+          >
+            <span className="text-[11px] text-slate-800 leading-snug">
+              {aturan.judul}
+            </span>
+            {mati && (
+              <span className="ml-1 text-[8px] bg-slate-300 text-slate-700 px-1 rounded font-bold align-middle">
+                dimatikan
+              </span>
+            )}
+            {aturan.denganModel && (
+              <span className="ml-1 text-[8px] bg-blue-100 text-blue-800 px-1 rounded font-bold align-middle">
+                pakai AI
+              </span>
+            )}
+            <span className="block text-[9px] text-slate-400">
+              {terbuka ? "sembunyikan rincian" : "lihat rincian"}
+            </span>
+          </button>
+        </div>
+
+        {terbuka && (
+          <div className="px-2 pb-2 pt-0.5 space-y-1.5 text-[10px] leading-snug border-t border-slate-100">
+            {mati && (
+              <p className="text-rose-800 bg-rose-50 border border-rose-200 rounded px-1.5 py-1">
+                <span className="font-semibold">Kenapa dimatikan: </span>
+                {aturan.dimatikan}
+              </p>
+            )}
+            <div>
+              <p className="font-semibold text-slate-700">Yang diperiksa</p>
+              <ul className="list-disc ml-3.5 text-slate-600 space-y-0.5">
+                {aturan.diperiksa.map((baris, i) => (
+                  <li key={i}>{baris}</li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <p className="font-semibold text-slate-700">
+                Yang TIDAK diperiksa
+              </p>
+              <ul className="list-disc ml-3.5 text-slate-500 space-y-0.5">
+                {aturan.tidakDiperiksa.map((baris, i) => (
+                  <li key={i}>{baris}</li>
+                ))}
+              </ul>
+            </div>
+            <p className="text-slate-600">
+              <span className="font-semibold text-slate-700">
+                Tandanya di naskah:{" "}
+              </span>
+              {aturan.tanda}
+            </p>
+            {aturan.catatanSumber && (
+              <p className="text-amber-900 bg-amber-50 border border-amber-200 rounded px-1.5 py-1">
+                <span className="font-semibold">
+                  {aturan.denganModel
+                    ? "Perlu diperiksa sendiri: "
+                    : "Dasar aturannya: "}
+                </span>
+                {aturan.catatanSumber}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  /**
+   * Ringkas hasil penandaan jadi dua bagian yang wataknya berbeda:
+   *
+   *   ringkasan  — hitungan netral, masuk Rincian proses (tertutup).
+   *   peringatan — hal yang menuntut tindakan penelaah; tampil terbuka.
+   *
+   * Dipisah 27 Sep 2026. Sebelumnya keduanya dirangkai jadi satu kalimat di
+   * satu kotak; memasukkan kotak itu utuh ke Rincian yang tertutup berarti
+   * peringatan Track Changes dan komentar kosong ikut tersembunyi.
+   */
+  const ringkasPenandaan = (
+    hasil: HasilPenandaan
+  ): { ringkasan: string; peringatan: string[] } => {
     const bagian: string[] = [];
     if (hasil.dicoretMerah > 0) bagian.push(`${hasil.dicoretMerah} dicoret merah`);
     if (hasil.diusulkan > 0) bagian.push(`${hasil.diusulkan} usulan hijau disisipkan`);
     if (hasil.diblokKuning > 0) bagian.push(`${hasil.diblokKuning} diberi blok kuning`);
     if (hasil.dikomentari > 0) bagian.push(`${hasil.dikomentari} komentar`);
 
-    let pesan = bagian.length > 0 ? bagian.join(", ") + "." : "";
+    let ringkasan = bagian.length > 0 ? bagian.join(", ") + "." : "";
+    // Tetap di ringkasan, bukan peringatan: tiap kartunya sendiri sudah
+    // berlencana "tidak ditandai di naskah" berikut tombol Alasan, jadi
+    // penelaah tidak kehilangan apa pun kalau baris ini tertutup.
     if (hasil.idTidakDitandai.length > 0) {
-      pesan +=
+      ringkasan +=
         ` ${hasil.idTidakDitandai.length} temuan TIDAK ditandai di naskah` +
         " karena letak persisnya tidak ketemu — alasannya ada di kartunya" +
         " masing-masing di bawah.";
     }
+
+    const peringatan: string[] = [];
     // Balon komentar kosong tidak menjelaskan apa-apa tetapi tetap menyorot
     // naskah, jadi penelaah melihat tanda yang bisu. Disebut terang-terangan
     // daripada dibiarkan ditemukan sendiri.
     if (hasil.komentarKosong > 0) {
-      pesan +=
-        ` ${hasil.komentarKosong} komentar terpasang tetapi isinya kosong —` +
-        " Word menolak menuliskannya. Isi temuannya tetap terbaca di kartu" +
-        " di bawah. Laporkan ini ke pengembang bila berulang.";
+      peringatan.push(
+        `${hasil.komentarKosong} komentar terpasang tetapi isinya kosong —` +
+          " Word menolak menuliskannya. Isi temuannya tetap terbaca di kartu" +
+          " di bawah. Laporkan ini ke pengembang bila berulang."
+      );
     }
     if (!hasil.pelacakanMati) {
-      pesan +=
-        " Pelacakan perubahan tidak bisa dimatikan, jadi tanda-tanda ini" +
-        " ikut tercatat Word sebagai revisi format. Matikan Track Changes" +
-        " di tab Review lalu jalankan ulang bila margin jadi penuh.";
+      peringatan.push(
+        "Pelacakan perubahan tidak bisa dimatikan, jadi tanda-tanda ini" +
+          " ikut tercatat Word sebagai revisi format. Matikan Track Changes" +
+          " di tab Review lalu jalankan ulang bila margin jadi penuh."
+      );
     }
-    return pesan.trim();
+    return { ringkasan: ringkasan.trim(), peringatan };
   };
 
   /** Fase 1 — detik, gratis. Mengembalikan temuannya untuk dipakai Fase 2. */
@@ -404,23 +875,21 @@ export default function TaskpanePage() {
     if (inWord && data.temuan.length > 0) {
       const hasil = await tandaiSemuaTemuan(data.temuan);
       setIdTidakDitandai(new Set(hasil.idTidakDitandai));
-      setInfoPenandaan(ringkasPenandaan(hasil) || null);
+      const { ringkasan, peringatan: perlu } = ringkasPenandaan(hasil);
+      setRingkasanPenandaan(ringkasan || null);
+      if (perlu.length > 0) setPeringatan((prev) => [...prev, ...perlu]);
     } else {
-      setInfoPenandaan(null);
+      setRingkasanPenandaan(null);
       setIdTidakDitandai(new Set());
     }
 
-    setStatusMessage(
-      data.temuan.length === 0
-        ? "Fase 1 selesai: tidak ditemukan ketidaksesuaian format baku."
-        : `Fase 1 selesai: ${data.temuan.length} temuan pada ${data.jumlah_paragraf} baris.`
-    );
+    setHasilFase1({ jumlah: data.temuan.length, baris: data.jumlah_paragraf });
     return data.temuan;
   };
 
   /** Fase 2/3 — menit, sebagian berbayar. MENAMBAH temuan, tidak mengganti. */
   const jalankanFase2 = async (
-    paragraf: ParagrafInput[],
+    naskah: NaskahTerbaca,
     temuanFase1: Temuan[]
   ): Promise<void> => {
     setFase2Kemajuan(null);
@@ -431,7 +900,13 @@ export default function TaskpanePage() {
     const nomorTerakhir = temuanFase1.reduce((maks, t) => Math.max(maks, t.nomor), 0);
 
     const body: AnalisisLanjutRequest = {
-      paragraf,
+      paragraf: naskah.paragraf,
+      tabel_raksasa: naskah.tabel_raksasa,
+      dokumen: namaDokumen,
+      // Jawaban tahap 3 pekerjaan terakhir dipakai ulang HANYA untuk pesan
+      // yang sama persis — naskah yang sudah berubah ditanyakan ulang. Yang
+      // terputus di tengah jalan tidak dibayar dua kali.
+      lanjutkan: nomorPekerjaan ?? undefined,
       aturan_aktif: [...aturanFase2Aktif],
       mulai_nomor: nomorTerakhir + 1,
       fase3:
@@ -450,13 +925,17 @@ export default function TaskpanePage() {
     const { pekerjaan }: MulaiResponse = await mulai.json();
     setNomorPekerjaan(pekerjaan);
 
-    // Bertanya BERBATAS, bukan selamanya. Backend yang tergantung akan membuat
-    // panel berputar tanpa akhir, dan penelaah tidak punya cara membedakannya
-    // dari analisis yang memang lama.
+    // Bertanya BERBATAS, bukan selamanya. Yang dianggap macet: kemajuan yang
+    // DIAM selama BATAS_DIAM_MS — tahap, angka, dan jumlah panggilan tidak
+    // bergerak sama sekali. Analisis yang lama tetapi bergerak ditunggu.
     let kemajuan: KemajuanResponse | null = null;
     let mandek = false;
-    for (let ke = 0; ; ke++) {
-      if (ke >= BATAS_TANYA) {
+    const mulaiTunggu = Date.now();
+    let terakhirBergerak = Date.now();
+    let jejakTerakhir = "";
+    for (;;) {
+      const kini = Date.now();
+      if (kini - terakhirBergerak > BATAS_DIAM_MS || kini - mulaiTunggu > BATAS_TOTAL_MS) {
         mandek = true;
         break;
       }
@@ -465,29 +944,39 @@ export default function TaskpanePage() {
       if (!res.ok) throw new Error(`Gagal membaca kemajuan (${res.status})`);
       kemajuan = await res.json();
       if (!kemajuan) break;
+      const jejak = `${kemajuan.tahap}|${kemajuan.selesai}|${kemajuan.total}|${kemajuan.panggilan}`;
+      if (jejak !== jejakTerakhir) {
+        jejakTerakhir = jejak;
+        terakhirBergerak = Date.now();
+      }
       setFase2Kemajuan({
-        selesai: kemajuan.satuan_selesai,
-        total: kemajuan.satuan_total,
+        tahap: kemajuan.tahap,
+        selesai: kemajuan.selesai,
+        total: kemajuan.total,
       });
       if (kemajuan.status === "selesai" || kemajuan.status === "gagal") break;
     }
 
+    // Kegagalan Fase 2 masuk `pesanGalat`, BUKAN Rincian proses: Rincian
+    // tertutup secara bawaan, dan kegagalan yang tersimpan di balik tombol
+    // tertutup terbaca seolah analisisnya selesai dengan bersih.
     if (mandek) {
-      setFase2Pesan(
-        `Menyerah menunggu sesudah ${Math.round(
-          (BATAS_TANYA * JEDA_TANYA_MS) / 60000
-        )} menit. Pekerjaan #${pekerjaan} mungkin masih berjalan di backend —` +
-          ` periksa ${API_BASE}/analisis/lanjut/${pekerjaan}. Peta yang sudah` +
-          " selesai tetap tersimpan, jadi analisis ulang tidak mengulang dari nol."
-      );
+      setPesanGalat({
+        teks:
+          `Fase 2 macet — kemajuannya tidak bergerak ${Math.round(
+            BATAS_DIAM_MS / 60000
+          )} menit. Pekerjaan #${pekerjaan} mungkin masih berjalan di backend —` +
+          ` periksa ${API_BASE}/analisis/lanjut/${pekerjaan}. Jawaban tahap 3 yang` +
+          " sudah dibayar tetap tersimpan, jadi analisis ulang tidak mengulang dari nol.",
+      });
       return;
     }
     if (!kemajuan) {
-      setFase2Pesan("Tidak ada jawaban dari backend.");
+      setPesanGalat({ teks: "Fase 2 gagal: tidak ada jawaban dari backend." });
       return;
     }
     if (kemajuan.status === "gagal") {
-      setFase2Pesan(`Fase 2 gagal: ${kemajuan.pesan}`);
+      setPesanGalat({ teks: `Fase 2 gagal: ${kemajuan.pesan}` });
       return;
     }
 
@@ -509,20 +998,37 @@ export default function TaskpanePage() {
     // Fase 2 memilih diam — naskah KMK, naskah perubahan, atau strukturnya
     // tidak terbaca. Itu keadaan yang sah, dan alasannya disampaikan apa
     // adanya supaya penelaah tahu bagian mana yang tetap perlu diperiksa
-    // sendiri.
+    // sendiri. Sebagai PERINGATAN yang terbuka, bukan isi Rincian: Fase 2 yang
+    // diam tanpa kabar terbaca sama dengan Fase 2 yang tidak menemukan apa-apa.
     if (kemajuan.temuan.length === 0 && kemajuan.pesan) {
-      setFase2Pesan(kemajuan.pesan);
+      const alasanDiam = kemajuan.pesan;
+      setPeringatan((prev) => [...prev, alasanDiam]);
       return;
     }
 
     // Ditandai PER KELOMPOK, bukan sekaligus — syarat ke-4 dari brief 8.7.
     if (inWord && kemajuan.temuan.length > 0) {
       const tidakDitandai: string[] = [];
-      for (let i = 0; i < kemajuan.temuan.length; i += 10) {
-        const kelompok = kemajuan.temuan.slice(i, i + 10);
+      // Kelompoknya dipasang dari BAWAH naskah ke atas — sama dengan urutan di
+      // dalam satu kelompok. Dari atas ke bawah, usulan hijau yang sudah
+      // disisipkan kelompok sebelumnya menggeser letak temuan kelompok
+      // berikutnya bila keduanya jatuh di paragraf yang sama, dan tandanya
+      // bisa mendarat di kemunculan kata yang salah.
+      const urut = [...kemajuan.temuan].sort(
+        (a, b) =>
+          a.lokasi.paragraf_index - b.lokasi.paragraf_index ||
+          a.lokasi.offset_mulai - b.lokasi.offset_mulai
+      );
+      const kelompokan: Temuan[][] = [];
+      for (let i = 0; i < urut.length; i += 10) kelompokan.push(urut.slice(i, i + 10));
+      for (const kelompok of kelompokan.reverse()) {
         const hasil = await tandaiSemuaTemuan(kelompok);
         tidakDitandai.push(...hasil.idTidakDitandai);
-        setTemuanList((prev) => [...prev, ...kelompok]);
+        // Diurutkan menurut nomor supaya kartu tetap urut dokumen walaupun
+        // kelompoknya tiba dari bawah.
+        setTemuanList((prev) =>
+          [...prev, ...kelompok].sort((a, b) => a.nomor - b.nomor)
+        );
       }
       if (tidakDitandai.length > 0) {
         setIdTidakDitandai((prev) => new Set([...prev, ...tidakDitandai]));
@@ -546,6 +1052,10 @@ export default function TaskpanePage() {
         : `Fase 2 selesai: ${kemajuan.temuan.length} temuan ditambahkan.${biaya}`) +
         catatanKeberatan
     );
+    // Angka terpisah untuk kepala Rincian proses — kalimat di atas terlalu
+    // panjang untuk satu baris, tetapi jumlahnya wajib tetap terbaca walau
+    // Rinciannya tertutup.
+    setJumlahFase2(kemajuan.temuan.length);
   };
 
   const handleAnalisis = async () => {
@@ -554,7 +1064,10 @@ export default function TaskpanePage() {
     // Menteri Keuangan" atau "Keputusan Menteri Keuangan".
     if (!jenisDokumen) {
       setGoyangJenis(true);
-      setStatusMessage("Pilih dulu PMK atau KMK sebelum menganalisis.");
+      setPesanGalat({
+        teks: "Pilih dulu PMK atau KMK sebelum menganalisis.",
+        kunci: "jenis",
+      });
       window.setTimeout(() => setGoyangJenis(false), 600);
       return;
     }
@@ -562,59 +1075,78 @@ export default function TaskpanePage() {
     const adaFase1 = aturanAktif.size > 0;
     const adaFase2 = aturanFase2Aktif.size > 0;
     if (!adaFase1 && !adaFase2) {
-      setStatusMessage(
-        "Semua pemeriksaan dimatikan di Pengaturan — tidak ada yang bisa" +
-          " diperiksa. Nyalakan setidaknya satu."
-      );
+      setPesanGalat({
+        teks:
+          "Semua pemeriksaan dimatikan di Pengaturan — tidak ada yang bisa" +
+          " diperiksa. Nyalakan setidaknya satu.",
+      });
       setShowPengaturan(true);
       return;
     }
 
+    // Naskahnya dihitung ULANG di sini, tidak cukup percaya hitungan terakhir:
+    // penelaah bisa saja mencabut atau menambah tanda dengan tangan sejak itu.
+    if (inWord === true && (await periksaNaskah()) > 0) {
+      tampilkanToast(
+        "Naskah ini masih memuat tanda dari analisis sebelumnya. Bersihkan dulu," +
+          " supaya komentarnya tidak menumpuk."
+      );
+      return;
+    }
+
     setAnalyzing(true);
-    setStatusMessage(null);
-    setFase2Pesan(null);
+    kosongkanTahapan();
 
     try {
-      const paragraf = await bacaParagrafSekali();
-      if (paragraf.length === 0) {
-        setStatusMessage("Tidak ada teks atau paragraf yang dapat dibaca.");
+      const naskah = await bacaNaskahSekali();
+      if (naskah.paragraf.length === 0) {
+        setPesanGalat({ teks: "Tidak ada teks atau paragraf yang dapat dibaca." });
         return;
+      }
+      if (naskah.tabel_raksasa.length > 0) {
+        tampilkanToast(
+          `${naskah.tabel_raksasa.length} tabel lebih dari 1.000 baris hanya dibaca` +
+            " kerangkanya. Temuan sesudah tabel itu tampil di panel tanpa ditandai di naskah."
+        );
       }
 
       const temuanFase1 = adaFase1
-        ? await jalankanFase1(paragraf, jenisDokumen)
+        ? await jalankanFase1(paragrafPasti(naskah), jenisDokumen)
         : [];
       if (adaFase2) {
         setFase2Berjalan(true);
         try {
-          await jalankanFase2(paragraf, temuanFase1);
+          await jalankanFase2(naskah, temuanFase1);
         } finally {
           setFase2Berjalan(false);
         }
       }
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      setStatusMessage(`Gagal menjalankan analisis: ${errorMsg}`);
+      setPesanGalat({ teks: `Gagal menjalankan analisis: ${errorMsg}` });
     } finally {
       setAnalyzing(false);
+      await periksaNaskah();
     }
   };
 
   // ---------------------------------------------------------------------
-  // ALAT PENGEMBANG — Ekspor Tahap 0 dan Tahap 3
+  // ALAT PENGEMBANG — Ekspor Tahap 1 sampai 5
   // ---------------------------------------------------------------------
   //
-  // Bukan fitur penelaah. Alat ini masih dalam pengembangan, dan kedua ekspor
-  // ini dipakai melihat apa yang benar-benar sampai ke model. Keduanya
-  // menjawab pertanyaan yang berbeda:
+  // Bukan fitur penelaah. Isinya apa yang BENAR-BENAR dibaca dan diputuskan
+  // tiap tahap, tanpa tambahan (ditetapkan penelaah 27–28 Sep 2026):
   //
-  //   Tahap 0   apa yang DIBACA model   — gratis, kapan saja
-  //   Tahap 3   apa yang DITALAR model  — peta dari analisis yang sudah jalan
+  //   Tahap 1   hasil parser — disusun dari naskah saat ini, gratis
+  //   Tahap 2   perkiraan token, lalu bahan persis untuk AI — idem
+  //   Tahap 3   pesan cari dugaan — yang disimpan analisis terakhir
+  //   Tahap 4   pesan memastikan, berikut hasil alat — idem
+  //   Tahap 5   nasib tiap dugaan, lolos atau gugur — idem
   //
   // Jalur unduhannya satu dan dipakai bersama: Blob + <a download>, dengan
   // jendela baru sebagai cadangan karena WebView2 Word kadang memblokir
   // unduhan. CLAUDE.md butir 9: didukung bukan berarti diizinkan.
-  const unduhTeks = (teks: string, berkas: string, petunjuk: string): string => {
+  const unduhTeks = (teks: string, berkas: string): string => {
     const url = URL.createObjectURL(
       new Blob([teks], { type: "text/plain;charset=utf-8" })
     );
@@ -625,10 +1157,7 @@ export default function TaskpanePage() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      return (
-        `${berkas} diunduh — ${teks.length.toLocaleString("id-ID")} huruf. ` +
-        petunjuk
-      );
+      return `${berkas} diunduh — ${teks.length.toLocaleString("id-ID")} huruf.`;
     } catch {
       window.open(url, "_blank");
       return "Unduhan diblokir Word, jadi dibuka di jendela baru. Salin dari sana.";
@@ -640,90 +1169,53 @@ export default function TaskpanePage() {
   const namaBerkas = (awalan: string) =>
     `${awalan}-${(namaDokumen || "naskah").replace(/\W+/g, "-")}.txt`;
 
-  // Yang paling penting di sini: daftar satuan yang DIBUANG penyaring Langkah
-  // 1. Satuan itu tidak pernah sampai ke model dan tidak meninggalkan jejak
-  // apa pun di panel, jadi ini satu-satunya cara memeriksanya.
-  const handleEksporTahap0 = async () => {
-    setMengekspor(true);
-    setPesanEkspor(null);
+  const eksporTahap = async (tahap: number) => {
+    const catat = (pesan: string) =>
+      setPesanEkspor((prev) => ({ ...prev, [tahap]: pesan }));
+    setMengeksporTahap(tahap);
+    setPesanEkspor((prev) => {
+      const baru = { ...prev };
+      delete baru[tahap];
+      return baru;
+    });
     try {
-      const paragraf = await bacaParagrafSekali();
-      if (paragraf.length === 0) {
-        setPesanEkspor("Tidak ada paragraf yang dapat dibaca.");
-        return;
-      }
-
-      const res = await fetch(`${API_BASE}/analisis/tahap0`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paragraf,
+      let body: object;
+      if (tahap <= 2) {
+        // Tahap 1–2 disusun dari naskah SAAT INI.
+        const naskah = await bacaNaskahSekali();
+        if (naskah.paragraf.length === 0) {
+          catat("Tidak ada paragraf yang dapat dibaca.");
+          return;
+        }
+        body = {
+          paragraf: naskah.paragraf,
+          tabel_raksasa: naskah.tabel_raksasa,
           dokumen: namaDokumen,
           temuan_fase1: temuanList.filter((t) => t.fase === 1),
-        }),
-      });
-      if (!res.ok) throw new Error(`Server merespons status ${res.status}`);
-      const teks = await res.text();
-
-      setPesanEkspor(
-        unduhTeks(
-          teks,
-          namaBerkas("tahap0"),
-          "Baca bagian YANG DIBUANG paling atas."
-        )
-      );
-    } catch (err: unknown) {
-      setPesanEkspor(
-        `Gagal mengekspor: ${err instanceof Error ? err.message : String(err)}`
-      );
-    } finally {
-      setMengekspor(false);
-    }
-  };
-
-  // Memperlihatkan peta yang BENAR-BENAR dipakai analisis terakhir, bukan peta
-  // baru. Model tidak deterministik: menjalankan ulang Langkah 2 menghasilkan
-  // ringkasan yang berbeda, dan ekspor yang memperlihatkan peta lain daripada
-  // yang dipakai justru menyesatkan orang yang sedang mencari bug. Karena itu
-  // tombol ini TIDAK menjalankan apa pun dan tidak berbiaya — dan karena itu
-  // pula ia kosong sampai analisis Fase 2 penalaran pernah dijalankan.
-  const handleEksporTahap3 = async () => {
-    setMengekspor3(true);
-    setPesanEkspor3(null);
-    try {
-      const paragraf = await bacaParagrafSekali();
-      if (paragraf.length === 0) {
-        setPesanEkspor3("Tidak ada paragraf yang dapat dibaca.");
-        return;
+          aturan_aktif: [...aturanFase2Aktif],
+        };
+      } else {
+        // Tahap 3–5: yang DISIMPAN backend saat analisis terakhir berjalan —
+        // tidak disusun ulang dari naskah, yang sesudah ditandai sudah berisi
+        // coretan dan usulan hijau. Karena itu naskahnya tidak dibaca di sini.
+        body = { dokumen: namaDokumen, pekerjaan: nomorPekerjaan };
       }
-
-      const res = await fetch(`${API_BASE}/analisis/tahap3`, {
+      const res = await fetch(`${API_BASE}/analisis/tahap${tahap}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paragraf,
-          dokumen: namaDokumen,
-          pekerjaan: nomorPekerjaan,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`Server merespons status ${res.status}`);
       const teks = await res.text();
-
-      setPesanEkspor3(
-        unduhTeks(
-          teks,
-          namaBerkas("tahap3"),
-          teks.includes("PETA KOSONG")
-            ? "Petanya masih kosong — jalankan analisis dengan aturan F2-1xx dulu."
-            : "Baca bagian PETA paling atas, satu ringkasan per satuan."
-        )
+      // Jawaban yang bukan ekspor (tidak diawali garis "=====") adalah satu
+      // kalimat keterangan — ditampilkan, tidak diunduh.
+      catat(
+        teks.startsWith("=====") ? unduhTeks(teks, namaBerkas(`tahap${tahap}`)) : teks.trim()
       );
     } catch (err: unknown) {
-      setPesanEkspor3(
-        `Gagal mengekspor: ${err instanceof Error ? err.message : String(err)}`
-      );
+      catat(`Gagal mengekspor: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setMengekspor3(false);
+      setMengeksporTahap(null);
     }
   };
 
@@ -745,7 +1237,7 @@ export default function TaskpanePage() {
   // dari kartu di panel ini; itu keputusan penelaah, 17 Sep 2026.
   const handleTerima = async (temuan: Temuan) => {
     updateStatus(temuan.id, "diterima");
-    setStatusMessage(
+    tampilkanToast(
       `T${temuan.nomor} diterima. Coretan dan usulannya tetap di naskah kerja` +
         " — akan diterapkan saat ekspor versi bersih."
     );
@@ -756,16 +1248,21 @@ export default function TaskpanePage() {
   const handleTolak = async (temuan: Temuan) => {
     updateStatus(temuan.id, "ditolak");
     if (!inWord) {
-      setStatusMessage(`Status temuan T${temuan.nomor} diubah menjadi 'Ditolak'.`);
+      tampilkanToast(`Status temuan T${temuan.nomor} diubah menjadi 'Ditolak'.`);
       return;
     }
     const berhasil = await tolakTemuan(temuan);
-    setStatusMessage(
+    // Toast, BUKAN kotak peringatan yang menetap. Ditetapkan penelaah 27 Sep
+    // 2026: kotak "tandanya tidak ditemukan" yang bertumpuk menenggelamkan
+    // kartu. Penyebab utamanya — analisis di atas tanda lama — sudah ditutup
+    // oleh kunci `naskahBertanda`, jadi kalimat ini mestinya nyaris tak pernah
+    // muncul lagi.
+    tampilkanToast(
       berhasil
         ? `T${temuan.nomor} ditolak. Naskah kembali seperti sebelum ditandai.`
-        : `T${temuan.nomor} ditolak di daftar, tetapi tandanya tidak ditemukan` +
-          " lagi di naskah — mungkin sudah diubah manual. Periksa sendiri."
+        : `T${temuan.nomor} ditolak, tetapi tandanya tidak ketemu lagi di naskah — periksa sendiri.`
     );
+    await periksaNaskah();
   };
 
   // Ubah status temuan
@@ -788,8 +1285,13 @@ export default function TaskpanePage() {
           80%      { transform: translateX(3px); }
         }
         .da-goyang { animation: da-goyang 0.45s ease-in-out; }
+        @keyframes da-muncul {
+          from { opacity: 0; transform: translateY(4px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        .da-muncul { animation: da-muncul 0.18s ease-out; }
         @media (prefers-reduced-motion: reduce) {
-          .da-goyang { animation: none; }
+          .da-goyang, .da-muncul { animation: none; }
         }
       `}</style>
 
@@ -856,25 +1358,45 @@ export default function TaskpanePage() {
           </div>
         </div>
 
-        {/* Panel Pengaturan — daftar pemeriksaan Fase 1.
+        {/* Panel Pengaturan — TIGA KATEGORI, disusun menurut urutan KMK 527.
+
             Dua gunanya sekaligus: mematikan aturan yang salah tandai tanpa
             menunggu kode diperbaiki, DAN memperlihatkan apa yang sebenarnya
-            diperiksa tiap aturan supaya penelaah bisa mengecek manual. */}
+            diperiksa tiap aturan supaya penelaah bisa mengeceknya manual.
+
+            URUTANNYA MENGIKUTI NASKAH DARI ATAS KE BAWAH — judul, Menimbang,
+            Mengingat, Menetapkan, baru batang tubuh — karena itulah urutan
+            nomor butir KMK 527. Penelaah menelaah naskah dari atas ke bawah
+            juga, jadi daftar ini bisa diikuti sambil membaca. */}
         {showPengaturan && (
           <div className="mt-2.5 p-2 bg-slate-100 rounded border border-slate-200 space-y-2">
+            {/* KATEGORI 1 — Format Struktural.
+
+                Berada di DUA himpunan state, dan itu disengaja. F1-001 s/d
+                F1-012 lewat jalur cepat yang tidak butuh pohon satuan, jadi
+                tetap berjalan pada KMK berdiktum dan naskah perubahan yang
+                pohonnya gagal diurai. Empat sisanya menunggu pohon berhasil.
+                Penelaah melihatnya sebagai SATU kategori; jalur pemanggilan
+                di belakang layar tetap dua. */}
             <div className="flex items-center justify-between">
               <span className="font-semibold text-slate-700 text-[11px]">
-                Fase 1 — Koreksi Format Baku
+                Kategori 1 — Format Struktural
               </span>
               <div className="flex items-center gap-2 text-[10px]">
                 <button
-                  onClick={() => setAturanAktif(new Set(SEMUA_ID_AKTIF))}
+                  onClick={() => {
+                    setAturanAktif(new Set(SEMUA_ID_AKTIF));
+                    setKelompokFase2(ATURAN_STRUKTURAL_LANJUT, true);
+                  }}
                   className="text-blue-700 hover:underline"
                 >
                   Pilih semua
                 </button>
                 <button
-                  onClick={() => setAturanAktif(new Set())}
+                  onClick={() => {
+                    setAturanAktif(new Set());
+                    setKelompokFase2(ATURAN_STRUKTURAL_LANJUT, false);
+                  }}
                   className="text-slate-500 hover:underline"
                 >
                   Kosongkan
@@ -883,132 +1405,57 @@ export default function TaskpanePage() {
             </div>
 
             <p className="text-[10px] text-slate-500 leading-snug">
-              Seluruh pemeriksaan di bawah deterministik — tanpa AI. Klik nama
+              Deterministik — tanpa AI, gratis, dan hasilnya pasti. Klik nama
               pemeriksaan untuk melihat rinciannya.
             </p>
 
-            {ATURAN_FASE1.map((aturan) => {
-              const mati = !!aturan.dimatikan;
-              const dipilih = aturanAktif.has(aturan.id);
-              const terbuka = aturanTerbuka === aturan.id;
+            {ATURAN_FASE1.map((aturan) =>
+              kartuAturan(aturan, aturanAktif.has(aturan.id), (nyala) =>
+                setAturanAktif((prev) => {
+                  const next = new Set(prev);
+                  if (nyala) next.add(aturan.id);
+                  else next.delete(aturan.id);
+                  return next;
+                })
+              )
+            )}
 
-              return (
-                <div
-                  key={aturan.id}
-                  className={`rounded border bg-white ${
-                    mati ? "border-slate-200 opacity-60" : "border-slate-300"
-                  }`}
-                >
-                  <div className="flex items-start gap-1.5 px-1.5 py-1.5">
-                    <input
-                      type="checkbox"
-                      id={`aturan-${aturan.id}`}
-                      checked={dipilih && !mati}
-                      disabled={mati}
-                      onChange={(e) =>
-                        setAturanAktif((prev) => {
-                          const next = new Set(prev);
-                          if (e.target.checked) next.add(aturan.id);
-                          else next.delete(aturan.id);
-                          return next;
-                        })
-                      }
-                      className="mt-0.5 accent-blue-700"
-                    />
-                    <button
-                      onClick={() =>
-                        setAturanTerbuka(terbuka ? null : aturan.id)
-                      }
-                      className="flex-1 text-left"
-                      aria-expanded={terbuka}
-                    >
-                      <span className="text-[11px] text-slate-800 leading-snug">
-                        {aturan.judul}
-                      </span>
-                      {mati && (
-                        <span className="ml-1 text-[8px] bg-slate-300 text-slate-700 px-1 rounded font-bold align-middle">
-                          dimatikan
-                        </span>
-                      )}
-                      <span className="block text-[9px] text-slate-400">
-                        {terbuka ? "sembunyikan rincian" : "lihat rincian"}
-                      </span>
-                    </button>
-                  </div>
-
-                  {terbuka && (
-                    <div className="px-2 pb-2 pt-0.5 space-y-1.5 text-[10px] leading-snug border-t border-slate-100">
-                      {mati && (
-                        <p className="text-rose-800 bg-rose-50 border border-rose-200 rounded px-1.5 py-1">
-                          <span className="font-semibold">
-                            Kenapa dimatikan:{" "}
-                          </span>
-                          {aturan.dimatikan}
-                        </p>
-                      )}
-                      <div>
-                        <p className="font-semibold text-slate-700">
-                          Yang diperiksa
-                        </p>
-                        <ul className="list-disc ml-3.5 text-slate-600 space-y-0.5">
-                          {aturan.diperiksa.map((baris, i) => (
-                            <li key={i}>{baris}</li>
-                          ))}
-                        </ul>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-700">
-                          Yang TIDAK diperiksa
-                        </p>
-                        <ul className="list-disc ml-3.5 text-slate-500 space-y-0.5">
-                          {aturan.tidakDiperiksa.map((baris, i) => (
-                            <li key={i}>{baris}</li>
-                          ))}
-                        </ul>
-                      </div>
-                      <p className="text-slate-600">
-                        <span className="font-semibold text-slate-700">
-                          Tandanya di naskah:{" "}
-                        </span>
-                        {aturan.tanda}
-                      </p>
-                      {aturan.catatanSumber && (
-                        <p className="text-amber-900 bg-amber-50 border border-amber-200 rounded px-1.5 py-1">
-                          <span className="font-semibold">
-                            Dasar aturannya belum pasti:{" "}
-                          </span>
-                          {aturan.catatanSumber}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {ATURAN_STRUKTURAL_LANJUT.map((aturan) =>
+              kartuAturan(aturan, aturanFase2Aktif.has(aturan.id), (nyala) =>
+                setAturanFase2Aktif((prev) => {
+                  const next = new Set(prev);
+                  if (nyala) next.add(aturan.id);
+                  else next.delete(aturan.id);
+                  return next;
+                })
+              )
+            )}
 
             <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
-              {aturanAktif.size} dari {ATURAN_BISA_DIPILIH.length} pemeriksaan
-              dinyalakan.
-              {aturanAktif.size === 0 && " Analisis tidak akan menemukan apa pun."}
+              {jumlahStrukturalAktif} dari{" "}
+              {ATURAN_BISA_DIPILIH.length + ATURAN_STRUKTURAL_LANJUT.length}{" "}
+              pemeriksaan format struktural dinyalakan.
+              {jumlahStrukturalAktif === 0 &&
+                " Tidak ada pemeriksaan format yang akan dijalankan."}
             </p>
 
-            {/* Fase 2 dan 3 — dipisah dari Fase 1 dengan pembatas tebal.
-                Bukan kerapian: yang di bawah ini berbeda sifatnya. Sebagian
-                memanggil model, berjalan menit, dan berbiaya. */}
+            {/* KATEGORI 2 — Analisis Antar-Pasal (internal).
+                Dipisah garis tebal karena sifatnya berbeda: memanggil model,
+                berjalan menit, dan berbiaya. */}
             <div className="pt-2 mt-1 border-t-2 border-slate-300 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-slate-700 text-[11px]">
-                  Fase 2 &amp; 3 — Pemeriksaan Isi
+                  Kategori 2 — Analisis Antar-Pasal
                 </span>
                 <div className="flex items-center gap-2 text-[10px]">
                   <button
-                    onClick={() => setAturanFase2Aktif(new Set(ID_AKTIF_BAWAAN))}
+                    onClick={() => setKelompokFase2(ATURAN_INTERNAL, true)}
                     className="text-blue-700 hover:underline"
                   >
-                    Bawaan
+                    Pilih semua
                   </button>
                   <button
-                    onClick={() => setAturanFase2Aktif(new Set())}
+                    onClick={() => setKelompokFase2(ATURAN_INTERNAL, false)}
                     className="text-slate-500 hover:underline"
                   >
                     Kosongkan
@@ -1017,113 +1464,70 @@ export default function TaskpanePage() {
               </div>
 
               <p className="text-[10px] text-slate-500 leading-snug">
-                Empat pemeriksaan pertama deterministik seperti Fase 1 — gratis
-                dan hasilnya pasti. Sisanya memakai AI: berjalan beberapa menit
-                dan berbiaya. Fase 3 mati secara bawaan karena bergantung pada
-                korpus peraturan yang isinya belum diverifikasi langsung.
+                Makna kalimatnya harus dibaca, tidak bisa dibuktikan pola —
+                jadi seluruhnya memakai AI: berjalan beberapa menit dan
+                berbiaya. Temuannya penilaian, bukan kesalahan yang bisa
+                ditunjuk barisnya; periksa sendiri sebelum menerima.
               </p>
 
-              {[
-                { judul: "Tanpa AI — gratis, hasilnya pasti", daftar: ATURAN_FASE2_MEKANIS },
-                { judul: "Dengan AI — berjalan menit, berbiaya", daftar: ATURAN_FASE2_MODEL },
-              ].map((kelompok) => (
-                <div key={kelompok.judul} className="space-y-1.5">
-                  <p className="text-[9px] uppercase tracking-wide text-slate-400 font-semibold">
-                    {kelompok.judul}
-                  </p>
-                  {kelompok.daftar.map((aturan) => {
-                    const dipilih = aturanFase2Aktif.has(aturan.id);
-                    const terbuka = aturanTerbuka === aturan.id;
-                    return (
-                      <div
-                        key={aturan.id}
-                        className="rounded border border-slate-300 bg-white"
-                      >
-                        <div className="flex items-start gap-1.5 px-1.5 py-1.5">
-                          <input
-                            type="checkbox"
-                            id={`aturan-${aturan.id}`}
-                            checked={dipilih}
-                            onChange={(e) =>
-                              setAturanFase2Aktif((prev) => {
-                                const next = new Set(prev);
-                                if (e.target.checked) next.add(aturan.id);
-                                else next.delete(aturan.id);
-                                return next;
-                              })
-                            }
-                            className="mt-0.5 accent-blue-700"
-                          />
-                          <button
-                            onClick={() =>
-                              setAturanTerbuka(terbuka ? null : aturan.id)
-                            }
-                            className="flex-1 text-left"
-                            aria-expanded={terbuka}
-                          >
-                            <span className="text-[11px] text-slate-800 leading-snug">
-                              {aturan.judul}
-                            </span>
-                            {aturan.fase === 3 && (
-                              <span className="ml-1 text-[8px] bg-violet-200 text-violet-900 px-1 rounded font-bold align-middle">
-                                Fase 3
-                              </span>
-                            )}
-                            <span className="block text-[9px] text-slate-400">
-                              {terbuka ? "sembunyikan rincian" : "lihat rincian"}
-                            </span>
-                          </button>
-                        </div>
+              {ATURAN_INTERNAL.map((aturan) =>
+                kartuAturan(aturan, aturanFase2Aktif.has(aturan.id), (nyala) =>
+                  setAturanFase2Aktif((prev) => {
+                    const next = new Set(prev);
+                    if (nyala) next.add(aturan.id);
+                    else next.delete(aturan.id);
+                    return next;
+                  })
+                )
+              )}
+            </div>
 
-                        {terbuka && (
-                          <div className="px-2 pb-2 pt-0.5 space-y-1.5 text-[10px] leading-snug border-t border-slate-100">
-                            <div>
-                              <p className="font-semibold text-slate-700">
-                                Yang diperiksa
-                              </p>
-                              <ul className="list-disc ml-3.5 text-slate-600 space-y-0.5">
-                                {aturan.diperiksa.map((baris, i) => (
-                                  <li key={i}>{baris}</li>
-                                ))}
-                              </ul>
-                            </div>
-                            <div>
-                              <p className="font-semibold text-slate-700">
-                                Yang TIDAK diperiksa
-                              </p>
-                              <ul className="list-disc ml-3.5 text-slate-500 space-y-0.5">
-                                {aturan.tidakDiperiksa.map((baris, i) => (
-                                  <li key={i}>{baris}</li>
-                                ))}
-                              </ul>
-                            </div>
-                            <p className="text-slate-600">
-                              <span className="font-semibold text-slate-700">
-                                Tandanya di naskah:{" "}
-                              </span>
-                              {aturan.tanda}
-                            </p>
-                            {aturan.catatanSumber && (
-                              <p className="text-amber-900 bg-amber-50 border border-amber-200 rounded px-1.5 py-1">
-                                <span className="font-semibold">
-                                  {aturan.denganModel
-                                    ? "Perlu diperiksa sendiri: "
-                                    : "Dasar aturannya belum pasti: "}
-                                </span>
-                                {aturan.catatanSumber}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+            {/* KATEGORI 3 — Analisis Eksternal.
+                Pembedanya SUMBER DATA, bukan mekanisme — F3-002 ada di sini
+                walau tidak memakai AI sama sekali, karena yang ditanyainya
+                tetap korpus di luar naskah. */}
+            <div className="pt-2 mt-1 border-t-2 border-slate-300 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-700 text-[11px]">
+                  Kategori 3 — Analisis Eksternal
+                </span>
+                <div className="flex items-center gap-2 text-[10px]">
+                  <button
+                    onClick={() => setKelompokFase2(ATURAN_EKSTERNAL, true)}
+                    className="text-blue-700 hover:underline"
+                  >
+                    Pilih semua
+                  </button>
+                  <button
+                    onClick={() => setKelompokFase2(ATURAN_EKSTERNAL, false)}
+                    className="text-slate-500 hover:underline"
+                  >
+                    Kosongkan
+                  </button>
                 </div>
-              ))}
+              </div>
+
+              <p className="text-[10px] text-slate-500 leading-snug">
+                Dibandingkan ke korpus peraturan JDIH. MATI secara bawaan
+                karena isi korpusnya belum diverifikasi langsung —
+                menyalakannya keputusan sadar penelaah, bukan bawaan yang
+                tidak disadari.
+              </p>
+
+              {ATURAN_EKSTERNAL.map((aturan) =>
+                kartuAturan(aturan, aturanFase2Aktif.has(aturan.id), (nyala) =>
+                  setAturanFase2Aktif((prev) => {
+                    const next = new Set(prev);
+                    if (nyala) next.add(aturan.id);
+                    else next.delete(aturan.id);
+                    return next;
+                  })
+                )
+              )}
 
               <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
                 {aturanFase2Aktif.size} dari {ATURAN_FASE2.length} pemeriksaan
-                Fase 2/3 dinyalakan.
+                Kategori 1 lanjutan, 2, dan 3 dinyalakan.
                 {aturanFase2Aktif.size === 0 &&
                   " Tidak ada pemeriksaan isi yang akan dijalankan."}
               </p>
@@ -1133,64 +1537,35 @@ export default function TaskpanePage() {
                 ALAT PENGEMBANG — paling bawah, dipisah garis tebal.
                 Bukan fitur penelaah: alat ini masih dalam pengembangan, dan
                 ekspor ini dipakai programer melihat apa yang benar-benar
-                dibaca model sebagai acuan memperbaiki bug.
+                dibaca dan diputuskan tiap tahap, sebagai acuan memperbaiki bug.
                 --------------------------------------------------------- */}
             <div className="pt-2 mt-1 border-t-2 border-slate-300 space-y-1.5">
               <span className="font-semibold text-slate-700 text-[11px]">
                 Alat pengembang
               </span>
-              <p className="text-[10px] text-slate-500 leading-snug">
-                <strong>Tahap 0 — apa yang dibaca AI.</strong> Paragraf apa
-                adanya, pohon satuan, dan muatan tiap panggilan. Di paling atas
-                ada daftar satuan yang <strong>dibuang penyaring</strong>{" "}
-                berikut teks utuhnya — itulah yang perlu dibaca dulu untuk
-                memastikan tidak ada bagian penting yang terlewat. Tidak
-                memanggil AI, tidak berbiaya.
-              </p>
-              <button
-                onClick={handleEksporTahap0}
-                disabled={mengekspor}
-                className={`w-full py-1.5 px-2 rounded text-[11px] font-medium border transition ${
-                  mengekspor
-                    ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
-                    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
-                }`}
-              >
-                {mengekspor ? "Menyiapkan…" : "Ekspor Tahap 0 (.txt)"}
-              </button>
-              {pesanEkspor && (
-                <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
-                  {pesanEkspor}
-                </p>
-              )}
-
-              <p className="text-[10px] text-slate-500 leading-snug pt-1.5">
-                <strong>Tahap 3 — apa yang ditalar AI.</strong> Langkah 2
-                meringkas tiap satuan jadi <strong>satu baris</strong>, dan
-                Langkah 3 menalar di atas kumpulan baris itu — bukan di atas
-                teks penuh. Ringkasan yang meleset membuat seluruh penalaran
-                bertumpu pada gambaran yang salah, dan tidak ada langkah
-                sesudahnya yang bisa mengetahuinya. Ekspor ini memperlihatkan
-                peta yang <strong>benar-benar dipakai</strong> analisis
-                terakhir, jadi ia kosong sampai analisis Fase 2 dengan aturan
-                F2-1xx pernah dijalankan. Tidak memanggil AI, tidak berbiaya.
-              </p>
-              <button
-                onClick={handleEksporTahap3}
-                disabled={mengekspor3}
-                className={`w-full py-1.5 px-2 rounded text-[11px] font-medium border transition ${
-                  mengekspor3
-                    ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
-                    : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
-                }`}
-              >
-                {mengekspor3 ? "Menyiapkan…" : "Ekspor Tahap 3 (.txt)"}
-              </button>
-              {pesanEkspor3 && (
-                <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
-                  {pesanEkspor3}
-                </p>
-              )}
+              {EKSPOR_TAHAP.map(({ tahap, keterangan }) => (
+                <div key={tahap} className="space-y-1 pt-1">
+                  <p className="text-[10px] text-slate-500 leading-snug">
+                    <strong>Tahap {tahap}</strong> — {keterangan}
+                  </p>
+                  <button
+                    onClick={() => eksporTahap(tahap)}
+                    disabled={mengeksporTahap !== null}
+                    className={`w-full py-1.5 px-2 rounded text-[11px] font-medium border transition ${
+                      mengeksporTahap !== null
+                        ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                        : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    {mengeksporTahap === tahap ? "Menyiapkan…" : `Ekspor Tahap ${tahap} (.txt)`}
+                  </button>
+                  {pesanEkspor[tahap] && (
+                    <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
+                      {pesanEkspor[tahap]}
+                    </p>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -1289,7 +1664,13 @@ export default function TaskpanePage() {
                 <button
                   key={jenis}
                   type="button"
-                  onClick={() => setJenisDokumen(jenis)}
+                  onClick={() => {
+                    setJenisDokumen(jenis);
+                    // Galat "pilih dulu PMK atau KMK" sudah terjawab — jangan
+                    // biarkan menetap sebagai galat basi. Galat lain tidak
+                    // disentuh.
+                    setPesanGalat((g) => (g?.kunci === "jenis" ? null : g));
+                  }}
                   className={`px-3 py-1 text-[10px] font-semibold border ${
                     i === 0 ? "rounded-l" : "rounded-r border-l-0"
                   } ${
@@ -1353,22 +1734,22 @@ export default function TaskpanePage() {
               penelaah mencentang apa yang ingin diperiksa, alat yang mengurus
               urutan fasenya.
 
-              Analisis ulang ditolak selama masih ada temuan yang belum
-              diputuskan: tiap analisis memasang komentar baru, dan pada
-              pengujian 17 Sep 2026 dokumen contoh berakhir dengan ~18 komentar
-              untuk 5 temuan. Lihat docs/fase1 drafter.md bagian 6.5. */}
+              Analisis ulang ditolak selama NASKAHNYA masih memuat tanda alat:
+              tiap analisis memasang komentar baru, dan pada pengujian 17 Sep
+              2026 dokumen contoh berakhir dengan ~18 komentar untuk 5 temuan.
+              Lihat docs/fase1 drafter.md bagian 6.5 dan `naskahBertanda`. */}
           <button
             onClick={handleAnalisis}
-            disabled={analyzing || adaYangBelumDiputuskan || tidakAdaYangDicentang}
+            disabled={analyzing || naskahBertanda || tidakAdaYangDicentang}
             title={
               tidakAdaYangDicentang
                 ? "Tidak ada pemeriksaan yang dicentang di Pengaturan"
-                : adaYangBelumDiputuskan
-                  ? "Selesaikan dulu temuan yang belum diputuskan — analisis ulang akan menumpuk komentar"
+                : naskahBertanda
+                  ? "Naskah masih memuat tanda dari analisis sebelumnya — bersihkan dulu, supaya komentarnya tidak menumpuk"
                   : undefined
             }
             className={`w-full py-2 px-3 rounded font-semibold text-white transition flex items-center justify-center gap-1.5 shadow-xs ${
-              analyzing || adaYangBelumDiputuskan || tidakAdaYangDicentang
+              analyzing || naskahBertanda || tidakAdaYangDicentang
                 ? "bg-blue-400 cursor-not-allowed"
                 : "bg-blue-700 hover:bg-blue-800 active:scale-[0.99]"
             }`}
@@ -1383,7 +1764,7 @@ export default function TaskpanePage() {
                   {!fase2Berjalan
                     ? "Memeriksa format baku…"
                     : fase2Kemajuan && fase2Kemajuan.total > 0
-                      ? `Membaca ${fase2Kemajuan.selesai}/${fase2Kemajuan.total} satuan…`
+                      ? `Tahap ${uraiKemajuan(fase2Kemajuan).replace(/^tahap /, "")}…`
                       : "Membaca struktur naskah…"}
                 </span>
               </>
@@ -1429,75 +1810,156 @@ export default function TaskpanePage() {
             )}
           </div>
 
-          {/* Angka kemajuan tetap terlihat sesudah selesai. Penelaah berhak
-              tahu berapa satuan yang benar-benar dibaca — bukan cuma berapa
-              temuan yang keluar. */}
-          {fase2Kemajuan && fase2Kemajuan.total > 0 && (
-            <div className="space-y-1">
-              <div className="h-1 w-full bg-slate-200 rounded overflow-hidden">
-                <div
-                  className="h-full bg-blue-600 transition-all"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      Math.round(
-                        (fase2Kemajuan.selesai / fase2Kemajuan.total) * 100
-                      )
-                    )}%`,
-                  }}
-                />
-              </div>
-              <div className="text-[10px] text-slate-500">
-                {fase2Kemajuan.selesai} dari {fase2Kemajuan.total} satuan dibaca
-              </div>
-            </div>
-          )}
-
-          {fase2Pesan && (
-            <div className="text-[10px] text-blue-900 bg-blue-50 px-2 py-1.5 rounded border border-blue-200">
-              {fase2Pesan}
-            </div>
-          )}
-
-          {adaYangBelumDiputuskan && (
-            <div className="text-[10px] text-amber-900 bg-amber-50 px-2 py-1.5 rounded border border-amber-200 space-y-1">
-              <div>
-                Masih ada temuan yang belum diputuskan. Selesaikan dulu sebelum
-                menganalisis ulang, supaya komentarnya tidak menumpuk.
-              </div>
+          {/* RINCIAN PROSES — tertutup secara bawaan (ditetapkan penelaah
+              27 Sep 2026). Tahap yang sedang berjalan sudah terbaca di tombol
+              Analisis; yang di sini cuma rinciannya. Kepalanya tetap menyebut
+              hasil tiap tahap, jadi rinciannya boleh tertutup tanpa ada hasil
+              yang hilang dari pandangan. */}
+          {adaRincian && (
+            <div className="text-[10px]">
               <button
-                onClick={handleBersihkanDaftar}
-                className="underline font-medium hover:text-amber-950"
+                type="button"
+                onClick={() => setRincianTerbuka((v) => !v)}
+                aria-expanded={rincianTerbuka}
+                aria-controls="rincian-proses"
+                className="w-full text-left text-slate-500 hover:text-slate-800 leading-snug"
               >
-                Bersihkan daftar dan mulai dari awal
+                <span aria-hidden="true" className="inline-block w-2.5">
+                  {rincianTerbuka ? "▾" : "▸"}
+                </span>
+                <span className="font-medium">Rincian proses</span>
+                {ringkasTahap && (
+                  <span className="text-slate-400"> &middot; {ringkasTahap}</span>
+                )}
+              </button>
+
+              {rincianTerbuka && (
+                <ol
+                  id="rincian-proses"
+                  className="mt-1.5 ml-1 space-y-1.5 border-l-2 border-slate-200 pl-2 text-slate-600 leading-snug"
+                >
+                  {hasilFase1 && (
+                    <li>
+                      <span className="font-medium text-slate-700">
+                        Format baku (Fase 1):
+                      </span>{" "}
+                      {hasilFase1.jumlah === 0
+                        ? `tidak ditemukan ketidaksesuaian pada ${hasilFase1.baris} baris.`
+                        : `${hasilFase1.jumlah} temuan pada ${hasilFase1.baris} baris.`}
+                    </li>
+                  )}
+                  {ringkasanPenandaan && (
+                    <li>
+                      <span className="font-medium text-slate-700">
+                        Penandaan di naskah (Fase 1):
+                      </span>{" "}
+                      {ringkasanPenandaan}
+                    </li>
+                  )}
+                  {adaFase2Kemajuan && fase2Kemajuan && (
+                    <li className="space-y-1">
+                      <div>
+                        <span className="font-medium text-slate-700">
+                          Pemeriksaan isi (Fase 2):
+                        </span>{" "}
+                        {uraiKemajuan(fase2Kemajuan)}.
+                      </div>
+                      <div className="h-1 w-full bg-slate-200 rounded overflow-hidden">
+                        <div
+                          className="h-full bg-blue-600 transition-all"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.round(
+                                (fase2Kemajuan.selesai / fase2Kemajuan.total) * 100
+                              )
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    </li>
+                  )}
+                  {fase2Pesan && <li className="wrap-break-word">{fase2Pesan}</li>}
+                </ol>
+              )}
+            </div>
+          )}
+
+          {/* GALAT — tidak pernah hilang sendiri. Ditutup penelaah, atau
+              dikosongkan saat analisis berikutnya dimulai. */}
+          {pesanGalat && (
+            <div
+              role="alert"
+              className="text-[10px] text-rose-900 bg-rose-50 px-2 py-1.5 rounded border border-rose-200 flex items-start gap-1.5"
+            >
+              <span className="flex-1 min-w-0 wrap-break-word">{pesanGalat.teks}</span>
+              <button
+                type="button"
+                onClick={() => setPesanGalat(null)}
+                aria-label="Tutup pesan galat"
+                title="Tutup"
+                className="shrink-0 text-rose-400 hover:text-rose-700 leading-none text-sm -mt-0.5"
+              >
+                &times;
               </button>
             </div>
           )}
 
-          {statusMessage && (
-            <div className="text-[10px] text-slate-600 bg-slate-50 px-2 py-1.5 rounded border border-slate-200">
-              {statusMessage}
+          {/* PERINGATAN — hal yang menuntut tindakan. Menetap, bisa ditutup
+              satu per satu. */}
+          {peringatan.map((teks, i) => (
+            <div
+              key={`${i}:${teks}`}
+              role="status"
+              className="text-[10px] text-amber-900 bg-amber-50 px-2 py-1.5 rounded border border-amber-200 flex items-start gap-1.5"
+            >
+              <span aria-hidden="true" className="text-amber-600 font-bold leading-none">
+                &#9888;
+              </span>
+              <span className="flex-1 min-w-0 wrap-break-word">{teks}</span>
+              <button
+                type="button"
+                onClick={() =>
+                  setPeringatan((prev) => prev.filter((_, j) => j !== i))
+                }
+                aria-label="Tutup peringatan"
+                title="Tutup"
+                className="shrink-0 text-amber-500 hover:text-amber-800 leading-none text-sm -mt-0.5"
+              >
+                &times;
+              </button>
             </div>
+          ))}
+
+          {/* Cukup TOMBOLNYA — ditetapkan penelaah 27 Sep 2026. Kalimat
+              penjelasnya dulu ikut menumpuk di atas kartu; alasan kuncinya
+              kini dibaca di tooltip tombol Analisis. Tampil selama naskah
+              masih bertanda, juga ketika daftarnya kosong (panel baru dibuka
+              di atas naskah bertanda) — dulu justru saat itu tombol ini
+              hilang, dan tanda lama tidak bisa dicabut dari panel. */}
+          {tampilBersihkan && !analyzing && (
+            <button
+              type="button"
+              onClick={handleBersihkanDaftar}
+              className={`w-full text-[10px] py-1 px-2 rounded border font-medium transition ${
+                yakinBersihkan
+                  ? "border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100"
+                  : "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+              }`}
+            >
+              {yakinBersihkan
+                ? temuanList.length === 0
+                  ? "Semua tanda alat di naskah ikut dicabut — klik sekali lagi"
+                  : "Usulan yang sudah diterima ikut dicabut — klik sekali lagi"
+                : "Bersihkan daftar dan mulai dari awal"}
+            </button>
           )}
         </div>
 
-        {/* Gate Legal Warning Banner */}
-        {adaRujukanBelumVerifikasi && (
-          <div className="bg-amber-50 border border-amber-300 text-amber-900 px-2.5 py-2 rounded-lg flex items-start gap-1.5 text-[11px] leading-snug">
-            <span className="text-amber-600 font-bold text-sm leading-none">&#9888;</span>
-            <div>
-              <span className="font-bold">Penanda Gate Legal:</span> Sebagian rujukan butir KMK 527 belum dibaca dan diketik ulang manusia dari naskah aslinya — isinya berasal dari ekstraksi teks yang OCR-nya rusak. Periksa butirnya sendiri sebelum memakai temuan ini sebagai dasar koreksi.
-            </div>
-          </div>
-        )}
-
-        {/* Catatan keterbatasan penandaan di dokumen (mis. Critique terkunci lisensi) */}
-        {infoPenandaan && (
-          <div className="bg-sky-50 border border-sky-300 text-sky-900 px-2.5 py-2 rounded-lg flex items-start gap-1.5 text-[11px] leading-snug">
-            <span className="text-sky-600 font-bold text-sm leading-none">&#9432;</span>
-            <div>{infoPenandaan}</div>
-          </div>
-        )}
+        {/* Kotak Gate Legal dibuang 27 Sep 2026 atas permintaan penelaah —
+            ia ikut menenggelamkan kartu, dan uraiannya keliru menyebut OCR.
+            CLAUDE.md butir 3 tetap terpenuhi lewat lencana "rujukan belum
+            diverifikasi" dan "dasar turunan" di TIAP kartu yang bersangkutan. */}
 
         {/* Ringkasan hasil */}
         {temuanList.length > 0 && (
@@ -1531,7 +1993,30 @@ export default function TaskpanePage() {
                 <span className="text-rose-600 font-bold leading-none">
                   &#9888;
                 </span>
-                <span>{t.catatan}</span>
+                {/* Dipotong dua baris, dibentangkan lewat tombol.
+
+                    Blok ini menggambar `catatan` apa adanya, dan pada
+                    27 Sep 2026 sebuah F1-002 yang pengambilan judulnya
+                    kebablasan mengisinya dengan SEMBILAN HALAMAN peraturan.
+                    Akarnya sudah ditambal di backend (batas 60 kata pada
+                    judul pembuka), tetapi jalur gambarnya sendiri tetap tidak
+                    boleh tak berbatas — aturan lain bisa meledak dengan cara
+                    yang sama, dan panel tidak boleh ikut hancur karenanya. */}
+                <span className="min-w-0">
+                  <span
+                    className={
+                      alasanTerbuka.has(t.id) ? "" : "line-clamp-2 block"
+                    }
+                  >
+                    {t.catatan}
+                  </span>
+                  <button
+                    onClick={() => bentangkanAlasan(t.id)}
+                    className="mt-0.5 text-rose-700 hover:text-rose-900 underline underline-offset-2"
+                  >
+                    {alasanTerbuka.has(t.id) ? "ringkas" : "selengkapnya"}
+                  </button>
+                </span>
               </div>
             ))}
           </div>
@@ -1563,6 +2048,8 @@ export default function TaskpanePage() {
             return (
               <div
                 key={temuan.id}
+                // Dipakai pemantau seleksi untuk menggulir kartunya ke layar.
+                id={`kartu-${temuan.id}`}
                 className={`bg-white rounded border border-slate-200 px-2.5 py-2 space-y-1.5 transition ${
                   isSelected ? "ring-2 ring-blue-500/40" : ""
                 } ${temuan.status !== "belum_ditinjau" ? "opacity-60" : ""}`}
@@ -1571,19 +2058,36 @@ export default function TaskpanePage() {
                   <span className="font-mono font-bold text-slate-800 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
                     T{temuan.nomor}
                   </span>
+                  {/* TIGA label, bukan dua. Sampai 27 Sep 2026 kartunya cuma
+                      mengenal "usulan" dan "catatan", sehingga temuan
+                      `penghapusan` — merah dicoret TANPA sisipan hijau —
+                      dilabeli "catatan" berikut keterangan "diberi blok
+                      kuning". Keterangan yang bohong: penelaah membaca kartu
+                      yang menjanjikan sorotan kuning lalu menemukan coretan
+                      merah di naskahnya. */}
                   <span
                     className={`text-[9px] font-medium px-1.5 py-0.5 rounded border ${
                       temuan.jenis_tanda === "penggantian"
                         ? "bg-sky-50 text-sky-700 border-sky-200"
-                        : "bg-amber-50 text-amber-800 border-amber-200"
+                        : temuan.jenis_tanda === "penghapusan"
+                          ? "bg-rose-50 text-rose-700 border-rose-200"
+                          : "bg-amber-50 text-amber-800 border-amber-200"
                     }`}
                     title={
                       temuan.jenis_tanda === "penggantian"
                         ? "Teks lama merah dicoret, usulan penggantinya hijau di sebelahnya"
-                        : "Diberi blok kuning sebagai peringatan — perbaikannya ditentukan penelaah"
+                        : temuan.jenis_tanda === "penghapusan"
+                          ? "Teks lama merah dicoret TANPA pengganti — perbaikannya membuang. Yang menghapus tetap penelaah."
+                          : temuan.tanpa_sorot
+                            ? "Kesalahannya adalah KETIADAAN sesuatu, bukan kata tertentu — komentar menempel di baris judul dokumen sebagai anchor netral, TIDAK diberi warna sorot"
+                            : "Diberi blok kuning sebagai peringatan — perbaikannya ditentukan penelaah"
                     }
                   >
-                    {temuan.jenis_tanda === "penggantian" ? "usulan" : "catatan"}
+                    {temuan.jenis_tanda === "penggantian"
+                      ? "usulan"
+                      : temuan.jenis_tanda === "penghapusan"
+                        ? "dibuang"
+                        : "catatan"}
                   </span>
                   {/* Fase ditunjukkan, bukan dipakai menomori ulang. Penelaah
                       berhak tahu temuan mana yang kesalahannya bisa dibuktikan
@@ -1608,6 +2112,17 @@ export default function TaskpanePage() {
                   {tanpaTanda && (
                     <span className="text-[8px] bg-slate-200 text-slate-700 px-1 rounded font-bold">
                       tidak ditandai di naskah
+                    </span>
+                  )}
+                  {/* Satu kesalahan yang terulang = satu kartu (27 Sep 2026).
+                      Cukup lencana; daftar tempatnya ada di tooltip dan di
+                      baris "Juga di" komentar Word — kartu tetap ringkas. */}
+                  {(temuan.juga_di?.length ?? 0) > 0 && (
+                    <span
+                      className="text-[8px] bg-sky-100 text-sky-800 px-1 rounded font-bold"
+                      title={`Kesalahan yang sama juga di: ${temuan.juga_di!.join("; ")}`}
+                    >
+                      +{temuan.juga_di!.length} tempat lain
                     </span>
                   )}
                   {isPlaceholderRujukan && (
@@ -1647,38 +2162,47 @@ export default function TaskpanePage() {
                   &ldquo;{ringkas}&rdquo;
                 </div>
 
-                {/* Alasan HANYA muncul di kartu temuan yang tidak tertandai.
-                    Bagi temuan itu tidak ada komentar di naskah yang bisa
-                    dibaca, jadi kalau kartunya juga bisu penelaah cuma melihat
-                    cuplikan tanpa tahu apa yang dipersoalkan — persis kartu
-                    hampa yang dilaporkan pada PMK 119. Temuan yang tertandai
-                    tetap tidak mengulang penjelasan komentarnya (bagian 6.9). */}
-                {tanpaTanda && (
+                {/* Alasan TERTUTUP secara bawaan, dan hanya ada pada temuan
+                    yang tidak tertandai — temuan itu tidak punya komentar di
+                    naskah yang bisa dibaca, jadi kartunya satu-satunya tempat.
+
+                    Ditutup karena kartu panel wajib ringkas: kartu dan tombol,
+                    bukan tempat menaruh paragraf (ditetapkan penelaah, ditegur
+                    dua kali). Percobaan sebelumnya memotongnya tiga baris
+                    dengan line-clamp, dan itu pun ditolak — tiga baris kali
+                    empat puluh kartu tetap mendorong kartu berikutnya keluar
+                    layar, dan kartu yang sebagian bertumpuk teks sebagian
+                    tidak terbaca sebagai daftar yang rusak. */}
+                {tanpaTanda && alasanTerbuka.has(temuan.id) && (
                   <div className="text-[10px] text-slate-700 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 leading-snug">
-                    {/* Dipotong tiga baris supaya satu alasan panjang tidak
-                        mendorong kartu-kartu berikutnya keluar layar. Yang
-                        dipotong cuma TAMPILANNYA — teksnya utuh, sekali klik. */}
-                    <p
-                      className={
-                        alasanTerbuka.has(temuan.id) ? "" : "line-clamp-3"
-                      }
-                    >
-                      {temuan.catatan}
-                    </p>
-                    {temuan.catatan.length > BATAS_ALASAN_RINGKAS && (
-                      <button
-                        onClick={() => bentangkanAlasan(temuan.id)}
-                        className="mt-0.5 text-slate-500 hover:text-slate-800 underline underline-offset-2"
-                      >
-                        {alasanTerbuka.has(temuan.id)
-                          ? "ringkas"
-                          : "selengkapnya"}
-                      </button>
-                    )}
+                    {temuan.catatan}
                   </div>
                 )}
 
-                <div className="flex items-center justify-between gap-1">
+                {/* Tombol kedua muncul HANYA kalau perbaikannya ada di tempat
+                    lain — mis. temuan di Pasal 2, tetapi definisinya harus
+                    ditulis di Pasal 1. Kalau perbaikannya di tempat temuan itu
+                    sendiri, backend mengosongkan sasarannya dan tombol ini
+                    tidak digambar: tombol yang melompat ke tempat yang sedang
+                    dibaca cuma membingungkan. */}
+                {/* Sasarannya ditulis sebagai KETERANGAN, bukan di dalam
+                    tombolnya. Sebelum 26 Sep 2026 seluruh kalimat panjang itu
+                    jadi isi tombol, dan hasilnya tidak terbaca sebagai tombol
+                    sama sekali — melebar sebaris penuh, beda bentuk dari
+                    "Lompat ke Teks" di sebelahnya. */}
+                {temuan.sasaran && temuan.sasaran_paragraf != null && (
+                  <p className="text-[10px] text-slate-600 leading-snug">
+                    <span className="font-semibold text-slate-700">
+                      Perbaiki di:{" "}
+                    </span>
+                    {temuan.sasaran}
+                  </p>
+                )}
+
+                {/* flex-wrap, bukan satu baris: lebar panel Word cuma ~320 px
+                    dan sebuah kartu bisa memuat empat tombol. Tanpa ini yang
+                    paling kanan terpotong. */}
+                <div className="flex flex-wrap items-center justify-between gap-1">
                   <button
                     onClick={() => handleLompatKeLokasi(temuan)}
                     className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-[10px] transition"
@@ -1686,6 +2210,30 @@ export default function TaskpanePage() {
                   >
                     Lompat ke Teks
                   </button>
+
+                  {temuan.sasaran && temuan.sasaran_paragraf != null && (
+                    <button
+                      onClick={() => lompatKeSasaran(temuan)}
+                      className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-[10px] transition"
+                      title={`Arahkan kursor dokumen ke ${temuan.sasaran}`}
+                    >
+                      Lompat ke Perbaikan
+                    </button>
+                  )}
+
+                  {/* Satu-satunya jalan membaca alasan temuan yang tidak
+                      tertandai. Berupa tombol, bukan teks yang tergelar, supaya
+                      kartunya tetap setinggi kartu lain sampai penelaah memang
+                      memintanya. */}
+                  {tanpaTanda && (
+                    <button
+                      onClick={() => bentangkanAlasan(temuan.id)}
+                      className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-[10px] transition"
+                      title="Kenapa ini ditemukan — temuan ini tidak punya komentar di naskah"
+                    >
+                      {alasanTerbuka.has(temuan.id) ? "Tutup" : "Alasan"}
+                    </button>
+                  )}
 
                   {/* Semua temuan diputuskan dari sini — termasuk yang berupa
                       usulan penggantian. Daftar yang separuh kartunya bisa
@@ -1761,6 +2309,36 @@ export default function TaskpanePage() {
         <span>Biro Bantuan Hukum &bull; Kemenkeu</span>
         <span>Drafter Analiser v0.1</span>
       </footer>
+
+      {/* TOAST — konfirmasi sekali pakai, hilang sendiri.
+
+          `fixed`, BUKAN bagian dari aliran halaman. Toast yang muncul di atas
+          daftar kartu mendorong seluruh daftar turun, lalu menariknya naik
+          lagi beberapa detik kemudian — dan penelaah yang sedang menekan
+          Terima berturut-turut akan menekan tombol kartu yang SALAH karena
+          kartunya bergeser di bawah jarinya.
+
+          `pointer-events-none`: toast menutupi sepotong bawah panel, jadi klik
+          wajib tembus ke tombol di bawahnya — kalau tidak, tombol Terima/Tolak
+          kartu paling bawah mati selama toast tampil.
+
+          Wadah `aria-live` selalu ada di DOM, isinya saja yang berganti —
+          pembaca layar hanya mengumumkan perubahan di dalam wadah yang sudah
+          ada sejak awal. */}
+      <div
+        role="status"
+        aria-live="polite"
+        className="fixed bottom-3 left-3 right-3 z-40 pointer-events-none flex justify-center"
+      >
+        {toast && (
+          <div
+            key={toast.id}
+            className="da-muncul max-w-sm bg-slate-800 text-white text-[11px] leading-snug px-3 py-2 rounded-lg shadow-lg wrap-break-word"
+          >
+            {toast.teks}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

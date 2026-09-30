@@ -83,7 +83,10 @@ Yang dianggap "judul": seluruh paragraf **sesudah** baris yang isinya persis
   — dibandingkan kata per kata. *(F1-002, butir 39)*
   Yang ditandai hanya **kata yang berbeda**, diblok kuning, di sisi Menetapkan.
   Alat tidak menentukan mana dari dua judul itu yang benar — itu keputusan
-  penelaah.
+  penelaah. Kalau yang salah justru kata yang **hilang** dari Menetapkan
+  (tidak ada yang bisa disorot), komentarnya menempel di baris judul pembuka
+  dokumen — anchor netral, **tidak diwarnai**, tetap dengan Terima/Tolak
+  (27 Sep 2026).
 
 ### Yang TIDAK diperiksa
 
@@ -272,11 +275,21 @@ Rentangnya: dari paragraf yang diawali `Mengingat` sampai bertemu
 
 - **Ada tidaknya bagian `Menimbang`, `Mengingat`, dan `Menetapkan`.**
   *(F1-003, butir 13/16/23/37/38)*
+- **Ada tidaknya frasa `DENGAN RAHMAT TUHAN YANG MAHA ESA` — khusus PMK.**
+  *(F1-003, butir 13)* Butir 13 merinci pembukaan sebagai "a. Frasa Dengan
+  Rahmat Tuhan Yang Maha Esa (khusus PMK); b. Jabatan pembentuk; c.
+  Konsiderans; d. Dasar Hukum; dan e. Diktum". KMK tidak diperiksa untuk butir
+  a ini. Alat **memilih diam** kalau tidak satu pun bagian pembukaan terbaca —
+  itu pertanda bloknya belum sampai ke pembaca naskah, bukan pertanda cacat.
 
-Temuan ini **tidak ditandai di naskah** dan tidak menghasilkan komentar —
-ketiadaan sebuah bagian memang tidak punya teks untuk ditunjuk. Ditampilkan
-sebagai **peringatan berlatar merah muda** di atas daftar temuan, tanpa tombol
-Terima/Tolak.
+Ketiadaan sebuah bagian memang tidak punya teks sendiri untuk ditunjuk —
+tetapi **tetap berkomentar** (27 Sep 2026, sebelumnya tidak). Komentarnya
+menempel di baris judul pembuka dokumen, dipilih semata karena selalu ada dan
+aman disentuh — **bukan klaim bahwa judul itu sendiri salah**, karena itu
+baris judulnya sengaja **tidak diwarnai**. Kartunya tetap punya Terima/Tolak
+seperti temuan lain, supaya bisa didiskusikan lewat komentar Word saat naskah
+dibawa ke rapat pembahasan — sebelumnya, temuan begini cuma tampil sebagai
+peringatan di panel dan hilang begitu add-in ditutup.
 
 **Yang tidak diperiksa:** isi maupun urutan ketiganya, dan bagian pembukaan
 lain yang disebut butir 13 (frasa Dengan Rahmat, jabatan pembentuk, diktum).
@@ -304,6 +317,8 @@ Termasuk judul lampiran, penomorannya, kesesuaiannya dengan yang dirujuk
 batang tubuh, maupun ejaan di dalamnya. Ini **disengaja**: butir 32 dan 33
 yang mendasari pemeriksaan ejaan berbicara tentang dasar hukum, dan
 memberlakukannya di Lampiran sudah pernah menghasilkan salah tandai.
+
+Sebagiannya diperiksa Fase 2 lewat F2-106 — lihat bagian Fase 2 dan 3.
 
 ---
 
@@ -435,12 +450,23 @@ memutuskan.
 yang menghapus tetap Anda.
 
 Temuan Fase 2 yang **hasil penalaran** (F2-101 sampai F2-105) berwarna hijau
-hanya kalau rumusan penggantinya dicontoh dari peraturan yang masih berlaku
-lewat F3-003 — dan peraturannya disebut di komentar supaya bisa Anda periksa.
-Tanpa itu tetap kuning: penilaian AI atas dirinya sendiri bukan bukti. F2-003
+hanya kalau penggantinya punya sumber yang bisa Anda periksa sendiri. Ada dua,
+dan komentarnya selalu menyebut yang mana:
+
+- **Dari naskah Anda sendiri** — tiap kata yang ditambahkan usulan sudah ada di
+  pasal yang sama, atau sudah berdefinisi di Pasal 1. Komentarnya berbunyi
+  "Sumber usulan: …". Tidak perlu jaringan.
+- **Dari peraturan lain** — rumusannya dicontoh dari peraturan yang masih
+  berlaku lewat F3-003. Komentarnya berbunyi "Rumusan serupa: …". Perlu korpus
+  JDIH.
+
+Tanpa satu pun dari keduanya tetap kuning: penilaian AI atas dirinya sendiri
+bukan bukti, dan **satu** kata yang tidak ada di naskah sudah cukup untuk
+membatalkan seluruh usulan — termasuk menukar "dapat" jadi "wajib". F2-003
 satu-satunya yang merah saja, karena definisi yang tidak terpakai memang
 dibuang, bukan diganti. F3-001 selalu kuning — "berpotensi bertentangan" itu
-kemungkinan, bukan kesimpulan.
+kemungkinan, bukan kesimpulan. F2-106 juga selalu kuning — perbaikan lampiran
+jarang berupa pengganti satu frasa di tempat yang dicoret.
 
 Komentarnya bisa sampai empat bagian:
 
@@ -472,7 +498,7 @@ begitu saja.
 | Kode | Yang diperiksa | Yang TIDAK diperiksa | Kapan diam | Dasar KMK 527 |
 |---|---|---|---|---|
 | F2-001 | Rujukan bentuk baku "sebagaimana dimaksud dalam/pada Pasal N ayat (n)" menunjuk satuan yang ada | Rujukan ke peraturan lain ("Pasal 12 Undang-Undang Nomor 1 Tahun 2004"); kata "Pasal" tanpa frasa baku | Pohon satuan tidak sehat | butir 54d, 54h — **turunan** |
-| F2-003 | Tiap istilah berdefinisi Pasal 1 dipakai di batang tubuh, **termasuk Pasal 10–19** | Lampiran — belum dibaca parser sama sekali, padahal butir 67 menghitungnya | Pasal 1 tidak ada, atau tidak memuat satu pun definisi | butir 61, pengecualian butir 64 |
+| F2-003 | Tiap istilah berdefinisi Pasal 1 dipakai di batang tubuh atau lampiran (butir 67), **termasuk Pasal 10–19** | Istilah yang dipakai cuma sekali — lihat butir 64 di bawah | Pasal 1 tidak ada, atau tidak memuat satu pun definisi | butir 61, pengecualian butir 64 |
 | F2-004 | Deret nomor Pasal, ayat, huruf, angka tidak melompat atau berulang | Pasal sisipan berhuruf (Pasal 5A) dianggap sah; penomoran di lampiran | Rentang paragrafnya tidak ketemu | butir 54c, 54f, 54k-7 |
 | F2-007 | Bilangan "30 (tiga puluh)" — angka dan hurufnya cocok | Kurung yang isinya bukan bilangan ("Pengguna Barang (PB)"); bilangan di atas ribuan | Hurufnya tidak bisa dibaca jadi angka yang pasti | butir 54j |
 
@@ -488,19 +514,26 @@ disengaja.
 ## Dengan AI — berjalan menit, berbiaya
 
 Semua temuan di bawah **hasil penalaran**, bukan kesalahan yang bisa
-ditunjukkan barisnya. Semuanya sudah dibaca ulang pada teks utuh pasalnya dan
-kutipannya sudah dibuktikan kode ada di naskah — tetapi penilaiannya tetap
-penilaian. Periksa sendiri sebelum menerima.
+ditunjukkan barisnya. Semuanya sudah dipastikan ulang oleh AI yang membaca
+naskah utuh — berikut isi pasal yang dirujuknya — dan kutipannya sudah
+dibuktikan kode ada di naskah, tetapi penilaiannya tetap penilaian. Periksa sendiri sebelum
+menerima.
+
+Kesalahan yang sama di beberapa tempat (aturan sama, teks sama, tempat
+perbaikan sama) muncul sebagai **satu kartu dan satu komentar** di kemunculan
+pertamanya. Tempat lainnya disebut di baris "Juga di" komentarnya dan di
+lencana "+N tempat lain" kartunya — tidak disorot, jadi periksa sendiri.
 
 | Kode | Yang diperiksa | Kapan gugur |
 |---|---|---|
-| F2-101 | Rumusan yang bisa dibaca dua arah | Kutipannya tidak ketemu persis; menyebut Pasal yang tidak ada; skor di bawah ambang |
-| F2-102 | Kewajiban tanpa pemikul yang tegas | sda |
+| F2-101 | Rumusan yang bisa dibaca dua arah — kedua tafsirannya ditulis di komentar. Di Pasal 1 berdasar butir 66; di luar Pasal 1 prioritas penelaah | Kutipannya tidak ketemu persis; menyebut Pasal yang tidak ada; skor di bawah ambang; kutipannya cuma sebuah rujukan yang tujuannya ada; menuduh istilah tidak berdefinisi padahal istilahnya tertulis di Pasal 1. Khusus F2-101: tidak menyebut dua tafsiran yang berbeda ("terlalu umum" bukan dua tafsiran) |
+| F2-102 | Kewajiban tanpa pemikul yang tegas | sda, kecuali syarat dua tafsiran |
 | F2-103 | wajib / harus / dapat / dilarang bertabrakan dalam satu ketentuan | sda |
 | F2-104 | Dua ketentuan yang tidak bisa berlaku bersamaan | sda, ditambah: pengecualian yang sah bukan tabrakan |
 | F2-105 | Tujuan di Menimbang yang tidak ada ketentuannya di batang tubuh | sda |
+| F2-106 | **Lampiran** — butir 120, 121 huruf b, c, h: tiap lampiran disebut pasal berikut pernyataan "bagian tidak terpisahkan"; lampiran yang disebut memang ada; salah ketik "Lampiran"; kepala lampiran (LAMPIRAN kapital, Romawi bila lebih dari satu, judul sama dengan halaman pertama); nama dan tanda tangan pejabat di akhirnya; bilangan angka-huruf. **Tidak memeriksa** tata letak, isi dan kebijakan lampiran, isi tabel di atas 1.000 baris. Selalu kuning | sda. Tidak dijalankan kalau naskah tidak punya lampiran dan tidak menyebutnya |
 | F3-001 | Berpotensi bertentangan dengan peraturan lain — **KMK 527 Lampiran III huruf C angka 3–4 dan huruf E Syarat Substantif 2b** | Tidak ada pembanding yang status berlakunya terbaca; peraturan yang disebut tidak ada di hasil pencarian; kalimatnya tidak memakai "berpotensi bertentangan" |
-| F3-003 | **Bukan mencari temuan** — melengkapi temuan F2-1xx dengan usulan rumusan yang dicontoh dari peraturan yang masih berlaku, lalu menyebut peraturannya di komentar. Satu-satunya jalan temuan penalaran bisa jadi hijau | Temuan sudah punya usulan; kutipannya lebih dari 200 huruf; sudah 15 temuan dicarikan di dokumen ini; peraturan yang disebut tidak ada di hasil pencarian |
+| F3-003 | **Bukan mencari temuan** — melengkapi temuan F2-1xx dengan usulan rumusan yang dicontoh dari peraturan yang masih berlaku, lalu menyebut peraturannya di komentar. Jalan hijau **dari luar naskah**; sejak 26 Sep 2026 bukan lagi satu-satunya — usulan yang kata-katanya sudah ada di naskah sendiri juga boleh hijau, tanpa korpus | Temuan sudah punya usulan; kutipannya lebih dari 200 huruf; sudah 15 temuan dicarikan di dokumen ini; peraturan yang disebut tidak ada di hasil pencarian |
 
 ## Fase 3 tanpa AI — gratis
 
@@ -517,11 +550,12 @@ korpus bisa tertinggal dari keadaan sebenarnya — pastikan sendiri sebelum
 mengganti dasar hukum.
 
 **Yang belum dibangun di Fase 2:** F2-002 (istilah berkapital yang tidak
-berdefinisi — menunggu daftar pengecualian dari naskah nyata), F2-005
-(lampiran), F2-006 (urutan hierarki Mengingat).
+berdefinisi — menunggu daftar pengecualian dari naskah nyata), F2-006
+(urutan hierarki Mengingat). F2-005 (lampiran) digantikan F2-106.
 
-**Yang tetap tidak disentuh siapa pun:** seluruh Lampiran, bagian penutup dan
-tanda tangan, kelengkapan Lembaran Negara.
+**Yang tetap tidak disentuh siapa pun:** tata letak Lampiran berikut isi dan
+kebijakannya, bagian penutup naskah (Ditetapkan, Diundangkan, tanda tangan),
+kelengkapan Lembaran Negara.
 
 ---
 
@@ -530,32 +564,41 @@ tanda tangan, kelengkapan Lembaran Negara.
 Berkas ini bisa usang tanpa ada yang sadar. Dua cara memeriksanya, keduanya
 bisa dijalankan sendiri:
 
-**1. Lewat naskah uji yang kesalahannya sudah diketahui.**
+**1. Lewat tes dan naskah PMK sungguhan.**
 
 ```bash
-cd backend && python tools/cek_docx.py tools/contoh/uji-pmk-lengkap.docx --jenis PMK
-cd backend && python tools/cek_docx.py tools/contoh/uji-kmk-lengkap.docx --jenis KMK
+cd backend && python -m pytest tests/ -q
 ```
 
-Cocokkan dengan `backend/tools/contoh/KUNCI-UJI.md`. Hasil yang benar saat
-ini: **PMK 13 temuan, KMK 1 temuan.** Angka yang berbeda berarti ada yang
-berubah dan berkas ini perlu ditinjau.
+Tiap aturan punya tes berisi kesalahan yang sengaja dibuat dan jebakan yang
+tidak boleh ditandai. Tes yang gagal berarti ada aturan yang berubah dan
+berkas ini perlu ditinjau.
 
-Untuk Fase 2 tanpa AI, naskah ujinya berbeda dan jawabannya juga sudah
-diketahui:
+Lalu naskah yang sudah diundangkan di `backend/tools/contoh/tempat pmk/`,
+satu naskah per perintah:
 
 ```bash
-cd backend && python tools/cek_docx.py tools/contoh/uji-fase2-batangtubuh.docx --fase2
+cd backend && python tools/cek_docx.py "tools/contoh/tempat pmk/<berkas>.docx" --jenis PMK
+cd backend && python tools/cek_docx.py "tools/contoh/tempat pmk/<berkas>.docx" --fase2
 ```
 
-Hasil yang benar saat ini: **4 temuan** — F2-003 pada "Sistem Informasi",
-F2-007 pada "30 (tiga belas)", F2-001 pada "Pasal 25", dan F2-004 pada
-lompatan Pasal 3 ke 5.
+Hasil yang benar saat ini:
 
-Jalur AI-nya diperiksa dengan `--lanjut`, dan itu **memanggil model sungguhan
-serta berbiaya**. Yang dicetaknya bukan cuma temuan melainkan juga daftar yang
-GUGUR di Langkah 5 berikut alasannya — daftar itu yang membuktikan gerbangnya
-benar-benar bekerja.
+| Naskah | Fase 1 | Fase 2 tanpa AI |
+|---|---|---|
+| PMK 17/2026 | 0 | 0 |
+| PMK 45/2026 | 1 — F1-002: judul pada Menetapkan memang berbeda dari judul pembuka | 0 |
+| PMK 104/2025 | 1 — F1-003: "DENGAN RAHMAT TUHAN YANG MAHA ESA" memang tidak ada di berkasnya | 0 |
+| PMK 119/2025 | 1 — F1-002: judul pada Menetapkan di berkasnya tertimpa teks tautan penetapan digital | 0 |
+
+Angka yang berbeda berarti ada yang berubah — salah tandai baru, atau aturan
+yang jadi diam. PMK 108/2024 tidak dipakai: tabelnya 228 ribu baris, terlalu
+berat untuk laptop pengembang.
+
+Jalur AI-nya diperiksa dengan `--lanjut --tahap5`, dan itu **memanggil model
+sungguhan serta berbiaya**. Yang dicetaknya bukan cuma temuan melainkan juga
+daftar yang GUGUR di tahap 5 berikut alasannya — daftar itu yang membuktikan
+gerbangnya benar-benar bekerja.
 
 **2. Lewat panel Pengaturan di add-in.** Tombol gerigi di header membuka
 daftar seluruh aturan Fase 1 dan Fase 2/3 berikut rincian "yang diperiksa" dan
@@ -563,6 +606,6 @@ daftar seluruh aturan Fase 1 dan Fase 2/3 berikut rincian "yang diperiksa" dan
 
 Kalau ketiga sumber bertentangan, yang berlaku kodenya:
 `backend/app/rules/format_baku.py` untuk Fase 1,
-`backend/app/fase2/mekanis_konsistensi.py` dan
-`backend/app/fase2/tahap4_memastikan.py` untuk Fase 2/3. Riwayat lengkap tiap salah tandai yang
+`backend/app/telaah/tahap2_persiapan/mekanis_konsistensi.py` dan `JENIS` di
+`backend/app/bersama/prompt.py` untuk Fase 2/3. Riwayat lengkap tiap salah tandai yang
 pernah terjadi ada di `fase1 drafter.md` bagian 6.10.

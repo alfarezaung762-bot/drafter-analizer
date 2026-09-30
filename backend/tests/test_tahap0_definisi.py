@@ -1,8 +1,8 @@
 """Tes ekstraksi definisi — Fase 2 Langkah 0, tahap kedua."""
 
-from app.fase2.tahap0_definisi import ambil_definisi
-from app.fase2.tahap0_struktur import bangun_pohon
 from app.models.temuan import ParagrafInput
+from app.telaah.tahap1_parser.definisi import ambil_definisi
+from app.telaah.tahap1_parser.struktur import bangun_pohon
 
 
 def _dok(baris):
@@ -97,3 +97,33 @@ class TestCariMirip:
 
     def test_kata_lain_yang_jauh_berbeda_tidak_dilaporkan(self):
         assert self._d().cari_mirip("Menteri Keuangan menetapkan besaran.") == []
+
+
+class TestIstilahBernamaPanjang:
+    """Regresi PMK 104 Tahun 2025, 27 Sep 2026.
+
+    Nama panjang istilah ini ±130 huruf. Pola definisi dulu membatasinya 120
+    huruf SEBELUM bentuk pendeknya diambil, jadi definisinya lenyap dari bahan
+    model — dan model menuduh "RPKBUNP SPAN" tidak berdefinisi di setiap
+    kemunculannya. Lihat docs/perbaiki bug.md bug 5.
+    """
+
+    _PASAL_1 = [
+        "Pasal 1",
+        "Dalam Peraturan Menteri ini yang dimaksud dengan:",
+        "1. Hari adalah hari kerja.",
+        "2. Rekening Pengeluaran Kuasa Bendahara Umum Negara Pusat Sistem "
+        "Perbendaharaan dan Anggaran Negara yang selanjutnya disingkat RPKBUNP "
+        "SPAN adalah rekening yang dibuka oleh Kuasa BUN Pusat pada BO.",
+    ]
+
+    def test_nama_di_atas_120_huruf_tetap_terbaca(self):
+        d = _daftar(self._PASAL_1)
+        assert d.ada("RPKBUNP SPAN")
+        assert d.tak_terbaca == []
+
+    def test_butir_yang_tidak_terbaca_dicatat_bukan_dibuang(self):
+        """Butir tanpa "adalah" gagal dibaca — tetapi id-nya tercatat."""
+        d = _daftar(self._PASAL_1 + ["3. Istilah yang ditulis tanpa kata kunci baku."])
+        assert d.ada("Hari") and d.ada("RPKBUNP SPAN")
+        assert d.tak_terbaca == ["pasal-1-angka-3"]

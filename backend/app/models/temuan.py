@@ -105,6 +105,15 @@ class RujukanTemuan(BaseModel):
     pdf_url: str = Field(
         ..., description="URL PDF di JDIH"
     )
+    halaman: str = Field(
+        default="",
+        description=(
+            "Nomor halaman butirnya di PDF KMK 527. Inilah yang benar-benar "
+            "menolong penelaah membuka butirnya; `pdf_url` seluruhnya menunjuk "
+            "beranda jdih, bukan peraturannya — jadi komentar menyebut halaman "
+            "ini dan membuang tautannya (ditetapkan penelaah 26 Sep 2026)."
+        ),
+    )
     status: str = Field(
         default="placeholder",
         description=(
@@ -190,6 +199,40 @@ class Temuan(BaseModel):
             "sendiri mana pernyataan dan mana anjuran."
         ),
     )
+    sumber_usulan: str = Field(
+        default="",
+        description=(
+            "DARI MANA rumusan hijau itu datang, dalam bentuk yang dibaca "
+            "manusia — 'istilah berdefinisi Pasal 1: Pengguna Barang', atau "
+            "'PMK 40 TAHUN 2024 (masih berlaku)'.\n"
+            "\n"
+            "Medan sendiri, TIDAK dilebur ke `saran`. Alasannya: komentar "
+            "temuan hijau sengaja melewati blok Saran — penggantinya sudah "
+            "terbaca hijau di naskah, jadi mengulangnya cuma memanjangkan "
+            "balon. Tetapi sumbernya WAJIB tetap terbaca, karena itulah syarat "
+            "kebijakan hijau: penelaah harus bisa memeriksa sendiri bahwa ini "
+            "bukan asal klaim. Selama ia menumpang di `saran`, melewati blok "
+            "itu ikut membuang sumbernya.\n"
+            "\n"
+            "Hanya terisi pada temuan `penggantian`."
+        ),
+    )
+    juga_di: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Tempat LAIN di naskah yang memuat kesalahan yang sama persis — "
+            "aturan sama, teks sama, tempat perbaikan sama — dalam bentuk "
+            "yang dibaca manusia: 'Pasal 13 ayat (2)'.\n"
+            "\n"
+            "Satu kesalahan yang terulang di banyak tempat menjadi SATU kartu "
+            "dan SATU komentar di kemunculan pertamanya; kemunculan lainnya "
+            "tidak disorot, cuma disebut di sini. Ditetapkan penelaah 27 Sep "
+            "2026, sesudah PMK 104 mendapat satu komentar untuk tiap baris "
+            "yang memuat 'RPKBUNP SPAN'. Berlaku juga untuk temuan hijau: "
+            "hijaunya hanya di kemunculan pertama, sisanya diperbaiki penelaah "
+            "sendiri dengan panduan daftar ini."
+        ),
+    )
     sasaran: str = Field(
         default="",
         description=(
@@ -203,6 +246,18 @@ class Temuan(BaseModel):
             "Juga kosong bila tempatnya sama dengan satuan tempat temuan ini "
             "menempel: menulis 'Perbaiki di: Pasal 5' pada komentar yang "
             "memang ada di Pasal 5 menambah baris tanpa menambah keterangan."
+        ),
+    )
+    sasaran_paragraf: Optional[int] = Field(
+        default=None,
+        description=(
+            "Nomor paragraf tempat `sasaran` berada, supaya panel bisa "
+            "melompat ke sana — tombol 'Lompat ke Perbaikan' di kartu.\n"
+            "\n"
+            "Nomor paragraf, BUKAN id satuan: panel tidak memegang pohon "
+            "satuan, dan Word mengalamati isinya dengan nomor paragraf. "
+            "Kosong berarti sasarannya bukan satuan yang bisa ditunjuk "
+            "(mis. bagian Menimbang) atau tidak terbukti ada."
         ),
     )
     usulan_rumusan: Optional[str] = Field(
@@ -232,6 +287,33 @@ class Temuan(BaseModel):
             "temuan yang kesalahannya sudah terbukti. Keyakinan tidak "
             "menghapus bukti, dan temuan yang hilang diam-diam adalah "
             "kegagalan yang paling sulit diketahui penelaah."
+        ),
+    )
+    tanpa_sorot: bool = Field(
+        default=False,
+        description=(
+            "True HANYA untuk temuan yang kesalahannya adalah KETIADAAN "
+            "sesuatu (bagian wajib hilang, atau frasa hilang dari judul "
+            "Menetapkan) — bukan kata tertentu yang salah. `lokasi` di sini "
+            "menunjuk anchor NETRAL (baris judul pembuka dokumen), dipilih "
+            "hanya karena selalu ada dan aman disentuh — BUKAN klaim bahwa "
+            "teks di situ salah.\n"
+            "\n"
+            "Panel tetap memasang komentar dan content control seperti "
+            "temuan lain (sehingga dapat Terima/Tolak seperti biasa), tetapi "
+            "MELEWATI pewarnaan sorot/highlight supaya anchor netral itu "
+            "tidak terlihat seolah teksnya sendiri yang bermasalah.\n"
+            "\n"
+            "Ditambahkan 27 Sep 2026. Sebelum ini, temuan begini (F1-002 "
+            "jalur cadangan, F1-003) tidak punya lokasi sama sekali — sehingga "
+            "tidak pernah dikomentari di Word, dan tidak bisa Terima/Tolak. "
+            "Penelaah menyebutnya bug: temuan yang sudah dilaporkan wajib "
+            "bisa didiskusikan lewat komentar dan diputuskan, sekalipun "
+            "letak persisnya tidak ada. CLAUDE.md butir 6 tetap berlaku —"
+            "yang berubah bukan menyorot rentang yang tidak presisi, "
+            "melainkan memasang komentar pada rentang PRESISI yang memang "
+            "aman (anchor netral), bukan menandai teks yang belum tentu "
+            "salah."
         ),
     )
     rujukan: RujukanTemuan
@@ -296,6 +378,46 @@ class ParagrafInput(BaseModel):
         ),
     )
 
+    # --- Letak fisik di Word (bug 7 dan 11) ------------------------------
+    #
+    # Tabel tidak selalu berarti data: PMK 119 menulis hampir seluruh batang
+    # tubuhnya di tabel tata letak, nomor "1." di satu sel dan teksnya di sel
+    # sebelahnya. Tanpa letak ini parser tidak tahu keduanya satu butir, dan
+    # seluruh definisi Pasal 1 tidak pernah sampai ke model.
+    tabel: int = Field(
+        default=-1,
+        description=(
+            "Nomor urut tabel TERDALAM yang memuat paragraf ini, menurut urutan "
+            "kemunculan di naskah (mulai 0). -1 bila bukan di tabel."
+        ),
+    )
+    baris: int = Field(default=-1, description="Nomor baris di tabel itu (mulai 0); -1 bila bukan di tabel.")
+    sel: int = Field(default=-1, description="Nomor sel di baris itu (mulai 0); -1 bila bukan di tabel.")
+    gambar: int = Field(
+        default=0,
+        description=(
+            "Jumlah gambar sebaris di paragraf ini. Isinya tidak bisa dibaca "
+            "model — bahan menyebutnya terang-terangan, bukan diam."
+        ),
+    )
+    rumus: int = Field(
+        default=0,
+        description=(
+            "Jumlah rumus (persamaan Word) di paragraf ini. Hanya terisi dari "
+            "alat uji: Office.js tidak punya API untuk rumus."
+        ),
+    )
+    letak_pasti: bool = Field(
+        default=True,
+        description=(
+            "False untuk paragraf SESUDAH tabel raksasa. Panel tidak membaca isi "
+            "tabel itu, jadi tidak bisa menghitung nomor paragraf sesudahnya — "
+            "`index`-nya urutan baca, bukan nomor paragraf Word. Temuan di sini "
+            "tetap dilaporkan di panel tetapi TIDAK PERNAH ditandai di naskah "
+            "(CLAUDE.md butir 6)."
+        ),
+    )
+
     @property
     def utuh(self) -> str:
         """Paragraf seperti TERBACA MATA — nomornya ikut, dipisah satu spasi.
@@ -308,6 +430,28 @@ class ParagrafInput(BaseModel):
         if not self.penanda:
             return self.teks
         return f"{self.penanda} {self.teks}".strip()
+
+
+class KerangkaTabel(BaseModel):
+    """Tabel raksasa yang TIDAK dibaca per paragraf — cuma kerangkanya.
+
+    PMK 108/2024 memuat 228 ribu baris tabel (609 ribu paragraf). Membacanya
+    paragraf demi paragraf lewat Office.js membuat Word macet, jadi tabel
+    tingkat teratas di atas 1.000 baris dikirim sebagai kerangka: jumlah baris
+    dan kolom, dan beberapa baris pertama (judul kolom biasanya di sana).
+    Ditetapkan penelaah 29 Sep 2026. Isi lengkapnya tidak pernah sampai ke
+    backend, jadi model diberi tahu terang-terangan bahwa isinya tidak dibaca.
+    """
+
+    tabel: int = Field(..., description="Nomor urut tabel, sama dengan ParagrafInput.tabel.")
+    sesudah_paragraf: int = Field(
+        ..., description="index paragraf terakhir SEBELUM tabel ini; -1 bila tabel di awal naskah."
+    )
+    jumlah_baris: int
+    jumlah_kolom: int
+    contoh: list[list[str]] = Field(
+        default_factory=list, description="Beberapa baris pertama, teks tiap sel."
+    )
 
 
 class AnalisisRequest(BaseModel):

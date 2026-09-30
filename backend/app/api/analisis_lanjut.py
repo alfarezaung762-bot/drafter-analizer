@@ -6,7 +6,8 @@ Fase 2 berjalan menit, jadi permintaannya dijawab SEGERA dengan nomor
 pekerjaan, dan hasilnya diambil panel secara berkala.
 
     POST /analisis/lanjut          mulai — balas nomor pekerjaan, tidak menunggu
-    GET  /analisis/lanjut/{nomor}  kemajuan + temuan yang sudah ada
+    GET  /analisis/lanjut/{nomor}  kemajuan per tahap + temuan yang sudah ada
+    POST /analisis/tahap1 … tahap5 ekspor alat pengembang
 
 Kenapa tidak menunggu: panel yang menunggu satu permintaan selama tiga menit
 akan dianggap macet oleh Word, dan penelaah tidak bisa membaca temuan Fase 1
@@ -14,7 +15,7 @@ sementara Fase 2 berjalan. Brief 8.7 mencatat persis kegagalan itu di Law
 Analyzer.
 
 Handler tetap setipis Fase 1: parse input → panggil fungsi → kembalikan JSON.
-Seluruh logikanya di `fase2/alur.py`, yang bisa dites tanpa server.
+Seluruh logikanya di `telaah/alur.py`, yang bisa dites tanpa server.
 """
 
 from __future__ import annotations
@@ -30,17 +31,27 @@ from app.bersama.llm import KlienAzure, PerapalAzure
 from app.bersama.opensearch import KorpusOpenSearch, PencariOpenSearch
 from app.core.config import settings
 from app.db import simpanan
-from app.fase2.alur import jalankan_lanjut
-from app.fase2.ekspor_tahap0 import susun_ekspor
-from app.fase2.ekspor_tahap3 import susun_ekspor_tahap3
-from app.models.pekerjaan import BarisPeta, StatusPekerjaan
-from app.models.temuan import ParagrafInput, Temuan
+from app.models.pekerjaan import StatusPekerjaan
+from app.models.temuan import KerangkaTabel, ParagrafInput, Temuan
+from app.telaah.alur import jalankan_lanjut
+from app.telaah.ekspor.tahap1 import susun_ekspor_tahap1
+from app.telaah.ekspor.tahap2 import susun_ekspor_tahap2
+from app.telaah.ekspor.tahap3 import susun_ekspor_tahap3
+from app.telaah.ekspor.tahap4 import susun_ekspor_tahap4
+from app.telaah.ekspor.tahap5 import susun_ekspor_tahap5
 
 router = APIRouter(prefix="/analisis", tags=["analisis lanjut"])
 
 
 class AnalisisLanjutRequest(BaseModel):
     paragraf: list[ParagrafInput]
+    tabel_raksasa: list[KerangkaTabel] = Field(
+        default_factory=list,
+        description=(
+            "Kerangka tabel di atas 1.000 baris yang tidak dibaca panel per "
+            "paragraf — PMK 108/2024 memuat 228 ribu baris tabel."
+        ),
+    )
     dokumen: str = Field(default="", description="Nama berkas, untuk catatan pekerjaan")
     aturan_aktif: Optional[list[str]] = Field(
         default=None,
@@ -61,26 +72,26 @@ class AnalisisLanjutRequest(BaseModel):
     fase3: bool = Field(
         default=False,
         description=(
-            "Nyalakan Fase 3. F3-001 (pembanding) butuh OpenSearch dan deployment "
-            "embedding; F3-002 (dasar hukum dicabut) cuma butuh OpenSearch dan "
-            "tidak memanggil model sama sekali."
+            "Nyalakan korpus OpenSearch. F3-001 (pembanding) butuh OpenSearch dan "
+            "deployment embedding; F3-002 (dasar hukum dicabut) cuma butuh "
+            "OpenSearch dan tidak memanggil model sama sekali."
         ),
     )
     temuan_fase1: list[Temuan] = Field(
         default_factory=list,
         description=(
             "Temuan Fase 1 yang SUDAH terpasang di naskah. Dipakai dua kali: "
-            "dilampirkan ke model saat menyusun peta supaya ia tidak "
-            "mengulangnya, dan dipakai kode di Langkah 5 untuk membuang calon "
-            "yang rentangnya bertindihan. Model boleh menempelkan keberatan "
-            "pada temuan ini, tetapi TIDAK PERNAH menghapusnya."
+            "dilampirkan ke model supaya ia tidak mengulangnya, dan dipakai kode "
+            "di tahap 5 untuk membuang calon yang rentangnya bertindihan. Model "
+            "boleh menempelkan keberatan pada temuan ini, tetapi TIDAK PERNAH "
+            "menghapusnya."
         ),
     )
     lanjutkan: Optional[int] = Field(
         default=None,
         description=(
-            "Nomor pekerjaan lama yang petanya mau dipakai ulang. Satuan yang "
-            "sudah pernah dibaca tidak dibayar dua kali."
+            "Nomor pekerjaan lama yang jawabannya mau dipakai ulang. Panggilan "
+            "tahap 3 yang pesannya sama persis tidak dibayar dua kali."
         ),
     )
 
@@ -94,8 +105,9 @@ class MulaiResponse(BaseModel):
 class KemajuanResponse(BaseModel):
     pekerjaan: int
     status: str
-    satuan_total: int = 0
-    satuan_selesai: int = 0
+    tahap: str = Field(default="", description="Tahap yang sedang berjalan, mis. '3 cari dugaan'.")
+    selesai: int = 0
+    total: int = 0
     panggilan: int = 0
     token_masuk: int = 0
     token_keluar: int = 0
@@ -138,11 +150,13 @@ def _jalankan(nomor: int, req: AnalisisLanjutRequest) -> None:
             if cari.siap:
                 pencari = cari
 
-        def lapor(selesai: int, total: int, baru: list[BarisPeta]) -> None:
-            simpanan.simpan_peta(nomor, baru)
-            simpanan.perbarui(nomor, satuan_total=total, satuan_selesai=selesai)
+        def lapor(tahap: str, selesai: int, total: int) -> None:
+            simpanan.perbarui(nomor, tahap=tahap, selesai=selesai, total=total)
 
-        lama = simpanan.ambil_peta(req.lanjutkan) if req.lanjutkan else None
+        def simpan(kunci: str, jawaban: str) -> None:
+            simpanan.simpan_jawaban(nomor, kunci, jawaban)
+
+        tersimpan = simpanan.ambil_jawaban(req.lanjutkan) if req.lanjutkan else {}
 
         hasil = jalankan_lanjut(
             req.paragraf,
@@ -152,12 +166,16 @@ def _jalankan(nomor: int, req: AnalisisLanjutRequest) -> None:
             pencari=pencari,
             aturan_aktif=req.aturan_aktif,
             ambang=req.ambang if req.ambang is not None else settings.FASE2_AMBANG_SKOR,
-            per_panggilan=settings.FASE2_SATUAN_PER_PANGGILAN,
             mulai_nomor=req.mulai_nomor,
             batas_temuan=req.batas_temuan,
             lapor=lapor,
-            peta_tersimpan=lama,
+            jawaban_tersimpan=tersimpan,
+            simpan_jawaban=simpan,
             temuan_fase1=req.temuan_fase1,
+            tabel_raksasa=req.tabel_raksasa,
+            anggaran=settings.FASE2_ANGGARAN_TOKEN,
+            pasal_per_fokus=settings.FASE2_PASAL_PER_FOKUS,
+            berbarengan=settings.FASE2_PANGGILAN_BERBARENGAN,
         )
 
         # Temuan Fase 1 yang dapat keberatan model ikut dikembalikan, supaya
@@ -165,16 +183,20 @@ def _jalankan(nomor: int, req: AnalisisLanjutRequest) -> None:
         # panel sudah memegangnya, dan mengirim ulang cuma menggandakan.
         berkeberatan = [t for t in req.temuan_fase1 if t.catatan_ai]
         simpanan.tambah_temuan(nomor, hasil.temuan)
-        # Dicatat SELALU, termasuk saat kosong: "tidak menemukan apa-apa" dan
-        # "belum pernah jalan" adalah dua hal berbeda, dan Ekspor Tahap 3 harus
+        # Dicatat SELALU, termasuk saat kosong: "tidak mengirim apa-apa" dan
+        # "belum pernah jalan" adalah dua hal berbeda, dan ekspornya harus
         # bisa membedakannya.
-        simpanan.simpan_dugaan(nomor, hasil.dugaan)
+        if hasil.pesan_tahap3 is not None:
+            simpanan.simpan_pesan_tahap3(nomor, hasil.pesan_tahap3)
+        if hasil.pesan_tahap4 is not None:
+            simpanan.simpan_pesan_tahap4(nomor, hasil.pesan_tahap4)
+        simpanan.simpan_ekspor_tahap5(nomor, susun_ekspor_tahap5(hasil))
         if berkeberatan:
             simpanan.tambah_keberatan(nomor, berkeberatan)
         simpanan.perbarui(
             nomor,
             status=StatusPekerjaan.SELESAI,
-            satuan_selesai=len(hasil.peta),
+            tahap="5 verifikasi",
             panggilan=hasil.ongkos.panggilan,
             token_masuk=hasil.ongkos.token_masuk,
             token_keluar=hasil.ongkos.token_keluar,
@@ -186,87 +208,89 @@ def _jalankan(nomor: int, req: AnalisisLanjutRequest) -> None:
         )
 
 
-# Keduanya `def`, BUKAN `async def`, dan itu disengaja.
+# Seluruhnya `def`, BUKAN `async def`, dan itu disengaja.
 #
-# Keduanya memanggil Postgres secara memblokir lewat `simpanan`. Di dalam
-# `async def`, panggilan memblokir menahan seluruh event loop — artinya satu
-# panel yang bertanya kemajuan tiap dua detik ikut menahan permintaan analisis
-# Fase 1 penelaah lain. Ditulis `def`, FastAPI menjalankannya di threadpool
-# dan event loop-nya bebas.
+# Ada yang memanggil Postgres secara memblokir lewat `simpanan`, dan ekspor
+# tahap 1–2 menyusun bahan naskah utuh. Di dalam `async def`, pekerjaan
+# memblokir menahan seluruh event loop — satu panel yang bertanya kemajuan
+# tiap dua detik ikut menahan permintaan Fase 1 penelaah lain. Ditulis `def`,
+# FastAPI menjalankannya di threadpool dan event loop-nya bebas.
 @router.post("/lanjut", response_model=MulaiResponse)
 def mulai(request: AnalisisLanjutRequest) -> MulaiResponse:
     """Mulai analisis Fase 2/3. Membalas segera, tidak menunggu selesai."""
-    nomor = simpanan.buat(request.dokumen, satuan_total=0)
+    nomor = simpanan.buat(request.dokumen)
     utas = threading.Thread(target=_jalankan, args=(nomor, request), daemon=True)
     utas.start()
     return MulaiResponse(pekerjaan=nomor, status=StatusPekerjaan.BERJALAN.value)
 
 
-class Tahap0Request(BaseModel):
+class NaskahRequest(BaseModel):
+    """Permintaan ekspor tahap 1 dan 2 — disusun dari naskah saat ini, gratis."""
+
     paragraf: list[ParagrafInput]
+    tabel_raksasa: list[KerangkaTabel] = Field(default_factory=list)
     dokumen: str = ""
     temuan_fase1: list[Temuan] = Field(default_factory=list)
+    aturan_aktif: Optional[list[str]] = None
 
 
-@router.post("/tahap0", response_class=PlainTextResponse)
-def ekspor_tahap0(request: Tahap0Request) -> str:
-    """ALAT PENGEMBANG — teks mentah berisi apa yang akan dibaca model.
+@router.post("/tahap1", response_class=PlainTextResponse)
+def ekspor_tahap1(request: NaskahRequest) -> str:
+    """ALAT PENGEMBANG — hasil parser: pohon satuan, definisi, lampiran. Gratis."""
+    return susun_ekspor_tahap1(request.paragraf, request.tabel_raksasa)
 
-    Tidak memanggil model, tidak berbiaya. Yang paling penting di dalamnya
-    daftar satuan yang DIBUANG penyaring Langkah 1 berikut teks utuhnya:
-    satuan itu tidak pernah sampai ke model dan tidak meninggalkan jejak di
-    panel, jadi ini satu-satunya cara memeriksa apakah pembuangannya benar.
-    """
-    return susun_ekspor(
+
+@router.post("/tahap2", response_class=PlainTextResponse)
+def ekspor_tahap2(request: NaskahRequest) -> str:
+    """ALAT PENGEMBANG — perkiraan token, lalu bahan persis untuk AI. Gratis."""
+    return susun_ekspor_tahap2(
         request.paragraf,
-        per_panggilan=settings.FASE2_SATUAN_PER_PANGGILAN,
-        temuan_fase1=request.temuan_fase1,
-        dokumen=request.dokumen,
+        request.tabel_raksasa,
+        request.temuan_fase1,
+        anggaran=settings.FASE2_ANGGARAN_TOKEN,
+        aturan_aktif=request.aturan_aktif,
+        pasal_per_fokus=settings.FASE2_PASAL_PER_FOKUS,
     )
 
 
-class Tahap3Request(BaseModel):
-    paragraf: list[ParagrafInput]
+class TersimpanRequest(BaseModel):
     dokumen: str = ""
     pekerjaan: Optional[int] = Field(
         default=None,
         description=(
-            "Pekerjaan yang petanya diekspor. None berarti pakai yang TERBARU "
-            "untuk dokumen ini — supaya panel yang baru dimuat ulang, dan "
-            "karena itu lupa nomornya, tetap bisa mengekspor."
+            "Pekerjaan yang diekspor. None berarti pakai yang TERBARU untuk "
+            "dokumen ini — supaya panel yang baru dimuat ulang, dan karena itu "
+            "lupa nomornya, tetap bisa mengekspor."
         ),
     )
 
 
+def _nomor(request: TersimpanRequest) -> Optional[int]:
+    return request.pekerjaan or simpanan.pekerjaan_terakhir(request.dokumen)
+
+
 @router.post("/tahap3", response_class=PlainTextResponse)
-def ekspor_tahap3(request: Tahap3Request) -> str:
-    """ALAT PENGEMBANG — peta Langkah 2 dan dugaan Langkah 3 yang SUDAH ada.
+def ekspor_tahap3(request: TersimpanRequest) -> str:
+    """ALAT PENGEMBANG — pesan tahap 3 (cari dugaan) persis seperti dikirim. Gratis."""
+    nomor = _nomor(request)
+    return susun_ekspor_tahap3(simpanan.ambil_pesan_tahap3(nomor) if nomor is not None else None)
 
-    Tidak menjalankan apa pun dan tidak berbiaya. Yang diperlihatkan peta yang
-    BENAR-BENAR dipakai, bukan peta baru yang kebetulan mirip: model tidak
-    deterministik, dan ekspor yang memperlihatkan peta lain daripada yang
-    dipakai akan menyesatkan orang yang sedang mencari bug.
-    """
-    nomor = request.pekerjaan or simpanan.pekerjaan_terakhir(request.dokumen)
-    if nomor is None:
-        return susun_ekspor_tahap3([], [], dokumen=request.dokumen)
 
-    p = simpanan.ambil(nomor)
-    keterangan = ""
-    if p is not None:
-        keterangan = (
-            f"({p.status.value}) — {p.panggilan} panggilan, "
-            f"{p.token_masuk:,} token masuk, {p.token_keluar:,} keluar"
-        ).replace(",", ".")
+@router.post("/tahap4", response_class=PlainTextResponse)
+def ekspor_tahap4(request: TersimpanRequest) -> str:
+    """ALAT PENGEMBANG — pesan tahap 4 berikut hasil alat, persis seperti dibaca AI."""
+    nomor = _nomor(request)
+    return susun_ekspor_tahap4(simpanan.ambil_pesan_tahap4(nomor) if nomor is not None else None)
 
-    return susun_ekspor_tahap3(
-        request.paragraf,
-        simpanan.ambil_peta(nomor),
-        simpanan.ambil_dugaan(nomor),
-        dokumen=request.dokumen,
-        pekerjaan=nomor,
-        keterangan=keterangan,
-        per_panggilan=settings.FASE2_SATUAN_PER_PANGGILAN,
+
+@router.post("/tahap5", response_class=PlainTextResponse)
+def ekspor_tahap5(request: TersimpanRequest) -> str:
+    """ALAT PENGEMBANG — nasib tiap dugaan: lolos atau gugur, berikut alasannya."""
+    nomor = _nomor(request)
+    teks = simpanan.ambil_ekspor_tahap5(nomor) if nomor is not None else None
+    return teks or (
+        "Hasil tahap 5 tidak tercatat — analisis dengan AI belum berjalan pada "
+        "dokumen ini, atau backend sudah dimulai ulang sejak itu.\n"
     )
 
 
@@ -279,8 +303,9 @@ def kemajuan(nomor: int) -> KemajuanResponse:
     return KemajuanResponse(
         pekerjaan=nomor,
         status=p.status.value,
-        satuan_total=p.satuan_total,
-        satuan_selesai=p.satuan_selesai,
+        tahap=p.tahap,
+        selesai=p.selesai,
+        total=p.total,
         panggilan=p.panggilan,
         token_masuk=p.token_masuk,
         token_keluar=p.token_keluar,

@@ -42,7 +42,12 @@ class Settings(BaseSettings):
 
     # Fase 2 — angka penyetelan. Nilainya ditetapkan setelah diukur pada
     # dokumen nyata, dan ikut berubah kalau modelnya diganti.
-    FASE2_SATUAN_PER_PANGGILAN: int = 6
+    #
+    # PASAL_PER_FOKUS   pasal yang difokuskan dalam satu panggilan tahap 3
+    # ANGGARAN_TOKEN    bahan di atas ini: tabel data lampiran jadi kerangka
+    # BERBARENGAN       panggilan tahap 3/4 yang berjalan sekaligus
+    FASE2_PASAL_PER_FOKUS: int = 6
+    FASE2_ANGGARAN_TOKEN: int = 100_000
     FASE2_PANGGILAN_BERBARENGAN: int = 4
     FASE2_AMBANG_SKOR: float = 0.7
 

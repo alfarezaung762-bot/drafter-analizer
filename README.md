@@ -43,7 +43,8 @@ cd backend
 python -m pytest tests/ -q
 
 # Menjalankan seluruh aturan terhadap sebuah .docx tanpa membuka Word
-python tools/cek_docx.py tools/contoh/contoh-rancangan-uji.docx --jenis PMK
+# (naskah uji: tools/contoh/tempat pmk/, satu naskah per perintah)
+python tools/cek_docx.py "tools/contoh/tempat pmk/Naskah Pengundangan PMK 17 Tahun 2026.docx" --jenis PMK
 ```
 
 ## Dokumentasi

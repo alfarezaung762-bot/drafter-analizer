@@ -1,4 +1,4 @@
-"""Tes simpanan pekerjaan dan peta — JALUR MEMORI SAJA.
+"""Tes simpanan pekerjaan dan jawaban — JALUR MEMORI SAJA.
 
 `DATABASE_URL` sengaja dikosongkan di tiap tes. Dua alasan, dan keduanya
 mengikat:
@@ -9,13 +9,13 @@ mengikat:
      proyek ini sendiri.
 
 Yang diuji di sini perilaku yang DIJANJIKAN pemanggil: nomor pekerjaan naik,
-kemajuan tersimpan, dan peta tidak pernah dibayar dua kali. Jalur Postgres
-memakai kode yang sama persis, tinggal ditukar tempat simpannya.
+kemajuan per tahap tersimpan, dan jawaban tahap 3 tidak pernah dibayar dua
+kali. Jalur Postgres memakai kode yang sama, tinggal ditukar tempat simpannya.
 """
 
 from app.db import sesi as db_sesi
 from app.db import simpanan
-from app.models.pekerjaan import BarisPeta, StatusPekerjaan
+from app.models.pekerjaan import StatusPekerjaan
 
 
 # Fixture `tanpa_basis_data` hidup di tests/conftest.py dan berlaku otomatis
@@ -23,31 +23,31 @@ from app.models.pekerjaan import BarisPeta, StatusPekerjaan
 
 
 def test_pekerjaan_baru_dapat_nomor_dan_berstatus_berjalan():
-    nomor = simpanan.buat("uji.docx", satuan_total=12)
+    nomor = simpanan.buat("uji.docx")
     p = simpanan.ambil(nomor)
     assert p is not None
     assert p.status == StatusPekerjaan.BERJALAN
-    assert p.satuan_total == 12
 
 
 def test_nomor_tidak_pernah_dipakai_ulang():
     assert simpanan.buat("a.docx") != simpanan.buat("b.docx")
 
 
-def test_kemajuan_tersimpan_dan_terbaca():
+def test_kemajuan_per_tahap_tersimpan_dan_terbaca():
     nomor = simpanan.buat("uji.docx")
-    simpanan.perbarui(nomor, satuan_total=175, satuan_selesai=68, panggilan=30)
+    simpanan.perbarui(nomor, tahap="3 cari dugaan", selesai=4, total=12, panggilan=4)
     p = simpanan.ambil(nomor)
-    assert p.kemajuan == "68/175"
-    assert p.panggilan == 30
+    assert p.tahap == "3 cari dugaan"
+    assert p.kemajuan == "4/12"
+    assert p.panggilan == 4
 
 
 def test_field_yang_tidak_disebut_tidak_ikut_berubah():
     nomor = simpanan.buat("uji.docx")
-    simpanan.perbarui(nomor, satuan_selesai=5)
+    simpanan.perbarui(nomor, selesai=5)
     simpanan.perbarui(nomor, panggilan=2)
     p = simpanan.ambil(nomor)
-    assert p.satuan_selesai == 5
+    assert p.selesai == 5
     assert p.panggilan == 2
 
 
@@ -55,43 +55,34 @@ def test_pekerjaan_yang_tidak_ada_mengembalikan_none():
     assert simpanan.ambil(9999) is None
 
 
-def test_peta_tersimpan_utuh():
+def test_jawaban_tersimpan_menurut_sidik_pesannya():
     nomor = simpanan.buat("uji.docx")
-    simpanan.simpan_peta(
-        nomor,
-        [
-            BarisPeta(
-                satuan_id="pasal-2",
-                ringkasan="kewajiban",
-                memuat_norma=True,
-                istilah_dipakai=["Pengguna Barang"],
-                merujuk=["pasal-1"],
-            )
-        ],
-    )
-    peta = simpanan.ambil_peta(nomor)
-    assert len(peta) == 1
-    assert peta[0].istilah_dipakai == ["Pengguna Barang"]
-    assert peta[0].merujuk == ["pasal-1"]
+    simpanan.simpan_jawaban(nomor, "sidik-a", '{"hasil": []}')
+    assert simpanan.ambil_jawaban(nomor) == {"sidik-a": '{"hasil": []}'}
 
 
-def test_satuan_yang_sama_tidak_disimpan_dua_kali():
-    """Inilah yang membuat analisis yang diteruskan tidak dibayar dua kali."""
+def test_jawaban_yang_sama_tidak_ditimpa():
+    """Jawaban yang sudah dibayar tidak diganti jawaban berikutnya untuk pesan yang sama."""
     nomor = simpanan.buat("uji.docx")
-    baris = BarisPeta(satuan_id="pasal-2", ringkasan="pertama")
-    simpanan.simpan_peta(nomor, [baris])
-    simpanan.simpan_peta(nomor, [BarisPeta(satuan_id="pasal-2", ringkasan="kedua")])
-    peta = simpanan.ambil_peta(nomor)
-    assert len(peta) == 1
-    assert peta[0].ringkasan == "pertama"
+    simpanan.simpan_jawaban(nomor, "sidik-a", "pertama")
+    simpanan.simpan_jawaban(nomor, "sidik-a", "kedua")
+    assert simpanan.ambil_jawaban(nomor)["sidik-a"] == "pertama"
 
 
-def test_peta_pekerjaan_lain_tidak_bercampur():
+def test_jawaban_pekerjaan_lain_tidak_bercampur():
     a, b = simpanan.buat("a.docx"), simpanan.buat("b.docx")
-    simpanan.simpan_peta(a, [BarisPeta(satuan_id="pasal-1")])
-    simpanan.simpan_peta(b, [BarisPeta(satuan_id="pasal-9")])
-    assert [x.satuan_id for x in simpanan.ambil_peta(a)] == ["pasal-1"]
-    assert [x.satuan_id for x in simpanan.ambil_peta(b)] == ["pasal-9"]
+    simpanan.simpan_jawaban(a, "k1", "milik a")
+    simpanan.simpan_jawaban(b, "k2", "milik b")
+    assert simpanan.ambil_jawaban(a) == {"k1": "milik a"}
+    assert simpanan.ambil_jawaban(b) == {"k2": "milik b"}
+
+
+def test_rekaman_ekspor_kosong_berbeda_dari_tidak_tercatat():
+    """"Tahap 3 tidak mengirim apa pun" dan "belum pernah jalan" dua hal berbeda."""
+    nomor = simpanan.buat("uji.docx")
+    assert simpanan.ambil_pesan_tahap3(nomor) is None
+    simpanan.simpan_pesan_tahap3(nomor, [])
+    assert simpanan.ambil_pesan_tahap3(nomor) == []
 
 
 def test_tanpa_database_url_simpanan_tetap_jalan():

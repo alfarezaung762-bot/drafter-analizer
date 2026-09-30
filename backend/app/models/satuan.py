@@ -4,7 +4,7 @@ Satuan = satu bagian terkecil naskah yang diperiksa. Istilahnya dari
 project-brief.md bagian 8.9: "Satuan pemeriksaan ayat/butir, bukan pasal."
 
 BERKAS INI TIDAK MENGERJAKAN APA PUN. Ia cuma menetapkan bentuknya — sekelas
-dengan temuan.py. Yang membangun pohonnya fase2/tahap0_struktur.py.
+dengan temuan.py. Yang membangun pohonnya telaah/tahap1_parser/struktur.py.
 
 Dua field yang membuat seluruh Fase 2 bisa menandai naskah:
 `paragraf_mulai` dan `paragraf_akhir`. Temuan pada sebuah satuan diterjemahkan
@@ -93,6 +93,26 @@ class Satuan(BaseModel):
         return self.paragraf_akhir > self.paragraf_mulai >= 0
 
 
+def label_satuan(s: Satuan) -> str:
+    """Label penomoran satuan seperti tertulis di naskah: "(1)", "a.", "Pasal 3".
+
+    Kosong untuk BAB, Bagian, dan Paragraf — teks mereka sudah memuat
+    labelnya sendiri ("BAB II PEMBEBASAN BEA MASUK").
+    """
+    if not s.nomor:
+        return ""
+    if s.jenis == JenisSatuan.PASAL:
+        return f"Pasal {s.nomor}"
+    if s.jenis == JenisSatuan.AYAT:
+        return s.nomor if s.nomor.startswith("(") else f"({s.nomor})"
+    if s.jenis in (
+        JenisSatuan.HURUF, JenisSatuan.ANGKA,
+        JenisSatuan.MENIMBANG, JenisSatuan.MENGINGAT,
+    ):
+        return f"{s.nomor}."
+    return ""
+
+
 class PohonSatuan(BaseModel):
     """Seluruh satuan sebuah dokumen, urut posisi.
 
@@ -104,7 +124,7 @@ class PohonSatuan(BaseModel):
 
     satuan: list[Satuan] = Field(default_factory=list)
     # Diisi parser kalau strukturnya tidak masuk akal. Selama ini terisi,
-    # SELURUH Fase 2 tidak dijalankan — lihat cabang 3.6 di rancangan.
+    # SELURUH Fase 2 tidak dijalankan — lihat cabang 3.7 di rancangan.
     gagal: Optional[str] = Field(
         default=None,
         description="Alasan parser menyerah. None berarti pohonnya sehat.",
@@ -128,18 +148,99 @@ class PohonSatuan(BaseModel):
     def anak_dari(self, id_satuan: str) -> list[Satuan]:
         return [s for s in self.satuan if s.induk == id_satuan]
 
-    def teks_lengkap(self, id_satuan: str) -> str:
+    def teks_lengkap(
+        self, id_satuan: str, berlabel: bool = False, label_akar: bool = False
+    ) -> str:
         """Teks satuan berikut seluruh anak-cucunya, dirangkai urut.
 
         Dipakai Langkah 4 (memastikan), yang menuntut teks UTUH — bukan
         ringkasan dan bukan potongan.
+
+        `berlabel=True` untuk SETIAP teks yang dibaca model: tiap anak-cucu
+        diawali labelnya — "(1)", "a.", "1." — seperti di naskah. Tanpa label,
+        "Pasal 3 ayat (1) huruf b" tidak bisa ditemukan di dalam teks ayat
+        (1), dan model menyimpulkan huruf b tidak ada. Terbukti pada PMK 45,
+        27 Sep 2026 (CLAUDE.md butir 14).
+
+        Tanpa label (bawaan) untuk kode yang mencocokkan kata — `sumber_internal`,
+        kueri pencarian korpus — supaya "a" dan "b" tidak terhitung kata.
+
+        `label_akar` ikut melabeli satuan akarnya sendiri. Dimatikan untuk teks
+        yang menjadi sumber kutipan `teks_asli`: label di depan kalimat ikut
+        tersalin, lalu tidak ketemu di paragraf Word yang labelnya berupa
+        penomoran otomatis.
         """
         akar = self.cari(id_satuan)
         if akar is None:
             return ""
-        bagian = [akar.teks] if akar.teks else []
+        bagian: list[str] = []
+        if label_akar and berlabel and label_satuan(akar):
+            bagian.append(f"{label_satuan(akar)} {akar.teks}".strip())
+        elif akar.teks:
+            bagian.append(akar.teks)
         for anak in self.anak_dari(id_satuan):
-            isi = self.teks_lengkap(anak.id)
+            isi = self.teks_lengkap(anak.id, berlabel=berlabel, label_akar=berlabel)
             if isi:
                 bagian.append(isi)
         return " ".join(bagian).strip()
+
+    def batang_induk(self, id_satuan: str) -> str:
+        """Kalimat pembuka induk-induknya, dirangkai dari yang terluar.
+
+        SEBUAH BUTIR TABULASI TIDAK BISA DIBACA SENDIRIAN. "PPK;" tidak
+        berarti apa-apa tanpa "KPA BUN ... menetapkan pegawai ... sebagai:"
+        yang mendahuluinya, dan "Pertanggungjawaban." tidak berarti apa-apa
+        tanpa "Ruang lingkup pengaturan dalam Peraturan Menteri ini meliputi:".
+
+        Terbukti pada PMK 17, 26 Sep 2026. Dikirim tanpa batang induknya,
+        model membaca butir daftar ruang lingkup sebagai norma lalu menuduhnya
+        tidak menyebut pemikul kewajiban — padahal daftar ruang lingkup tidak
+        memuat kewajiban sama sekali. Salah tandai, CLAUDE.md butir 1. Pada
+        satuan yang sama, ringkasan Langkah 2 keluar LEBIH PANJANG daripada
+        teks aslinya: tanda model sedang mengarang konteks yang tidak dikirim.
+
+        Yang diambil `teks` induknya SAJA, bukan `teks_lengkap` — kalau
+        seluruh anak-cucunya ikut, butir yang diperiksa tenggelam di antara
+        saudara-saudaranya.
+
+        Tiap induk membawa labelnya ("Pasal 3", "(1)", "a."). Batang ini
+        hanya dibaca model, dan tanpa label model tidak tahu butir yang
+        diperiksa bernaung di huruf mana.
+        """
+        simpul = self.cari(id_satuan)
+        if simpul is None:
+            return ""
+
+        rantai: list[str] = []
+        induk = simpul.induk
+        # Penjaga lingkaran: id yang menunjuk dirinya sendiri (atau berputar)
+        # pernah lahir dari naskah yang penomorannya kacau, dan tanpa ini
+        # seluruh analisis menggantung tanpa pesan apa pun.
+        dikunjungi = {id_satuan}
+        while induk and induk not in dikunjungi:
+            dikunjungi.add(induk)
+            atas = self.cari(induk)
+            if atas is None:
+                break
+            label = label_satuan(atas)
+            if atas.teks or label:
+                rantai.append(f"{label} {atas.teks}".strip())
+            induk = atas.induk
+
+        rantai.reverse()
+        # Dipisah " — ", bukan spasi: tanpa pemisah, judul bab menyatu dengan
+        # kalimat pasalnya jadi "BAB I KETENTUAN UMUM Ruang lingkup pengaturan
+        # ... meliputi:" — satu kalimat rancu yang tidak ada di naskah mana pun.
+        return " — ".join(rantai).strip()
+
+    def teks_dengan_induk(self, id_satuan: str) -> str:
+        """`teks_lengkap` yang didahului batang kalimat induknya.
+
+        Inilah bentuk yang dikirim ke model — bukan `teks_lengkap` telanjang.
+        Alasannya di `batang_induk`.
+        """
+        batang = self.batang_induk(id_satuan)
+        isi = self.teks_lengkap(id_satuan, berlabel=True, label_akar=True)
+        if batang and isi:
+            return f"{batang} {isi}"
+        return isi or batang

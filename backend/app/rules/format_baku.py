@@ -50,16 +50,14 @@ _BATAS_PANJANG_TANDA = 120
 
 # Aturan yang BOLEH menghasilkan temuan tanpa lokasi di naskah.
 #
-# Temuan tanpa lokasi tidak ditandai, tidak diberi komentar, dan tidak bisa
-# diterima atau ditolak — panel menampilkannya sebagai peringatan dokumen
-# sebaris (bagian 6.13). Selain kedua aturan ini, temuan ber-`teks_asli` kosong
-# dianggap cacat dan dibuang `jalankan_semua()`.
-#
-#   F1-003 — ketiadaan sebuah bagian wajib; tidak ada teks untuk ditunjuk.
-#   F1-004 — (tidak termasuk) selalu punya butir untuk ditunjuk.
-#   F1-002 — judul Menetapkan yang KEKURANGAN kata. Yang salah justru kata yang
-#            tidak ada di sana. Ditambahkan 18 Sep 2026 menggantikan cadangan
-#            lama yang menyorot satu paragraf penuh.
+# Sejak 27 Sep 2026 ini jalur JARANG lewat — F1-002 (cadangan) dan F1-003
+# sekarang memakai anchor netral lewat `_anchor_dokumen` (lihat di sana),
+# jadi keduanya HAMPIR SELALU punya lokasi (`tanpa_sorot=True`, bukan tanpa
+# lokasi) dan mendapat komentar + Terima/Tolak seperti temuan lain. Set ini
+# cuma jaring pengaman untuk kasus yang nyaris mustahil: seluruh dokumen
+# tidak punya satu paragraf pun berisi teks. Kalau itu terjadi, temuannya
+# tetap dibuat tanpa lokasi, tampil sebagai peringatan dokumen sebaris
+# (bagian 6.13) — bukan cacat yang dibuang seperti temuan tanpa lokasi lain.
 _BOLEH_TANPA_LOKASI = {"F1-002", "F1-003"}
 
 
@@ -80,6 +78,7 @@ def _buat_temuan(
     panjang: int,
     catatan: str,
     usulan_rumusan: Optional[str] = None,
+    tanpa_sorot: bool = False,
 ) -> Temuan:
     """Helper untuk membuat objek Temuan dengan rujukan dari tabel.
 
@@ -91,6 +90,10 @@ def _buat_temuan(
     temuan yang tidak bisa dicari di Word sama saja dengan temuan yang tidak
     ada. Pemotongan dilakukan di sini, di satu tempat, supaya aturan yang
     ditambahkan nanti ikut terlindungi tanpa perlu mengingat batas ini.
+
+    `tanpa_sorot=True` untuk temuan yang lokasinya cuma ANCHOR netral (lihat
+    `_anchor_dokumen`) — Word tetap mengomentari dan membungkusnya, tapi
+    TIDAK mewarnainya, karena teks di situ bukan yang salah.
     """
     if jenis_tanda == JenisTanda.CATATAN and panjang > _BATAS_PANJANG_TANDA:
         panjang = _potong_di_batas_kata(
@@ -112,9 +115,43 @@ def _buat_temuan(
         ),
         catatan=catatan,
         usulan_rumusan=usulan_rumusan,
+        tanpa_sorot=tanpa_sorot,
         rujukan=RujukanTemuan(**rujukan_dict),
         status=StatusTemuan.BELUM_DITINJAU,
     )
+
+
+def _anchor_dokumen(paragraf: list[ParagrafInput]) -> Optional[tuple[ParagrafInput, int, int]]:
+    """Titik aman untuk menempelkan komentar temuan yang kesalahannya adalah
+    KETIADAAN sesuatu — bukan kata tertentu yang salah.
+
+    Ditambahkan 27 Sep 2026. Sebelum ini, F1-002 (jalur cadangan) dan F1-003
+    dibuat TANPA lokasi sama sekali, sehingga tidak pernah dikomentari di
+    Word dan tidak bisa Terima/Tolak — penelaah menyebutnya bug: komentar
+    memang bagian dari menelaah yang perlu didiskusikan ke pemrakarsa, dan
+    itu cuma bisa terjadi lewat Word, bukan lewat panel yang hilang begitu
+    add-in ditutup.
+
+    Yang dipilih SENGAJA bukan tebakan "di mana seharusnya bagian yang
+    hilang itu berada" — menebak itu PERSIS kesalahan cadangan lama yang
+    sudah terbukti menimpa naskah (CLAUDE.md butir 6, kasus 9 di
+    test_format_baku.py). Anchor-nya paragraf JUDUL PEMBUKA dokumen: selalu
+    ada kalau sampai di titik ini (pohonnya sudah berhasil dibaca), dan
+    tidak pernah jadi bagian dari klaim "teks ini salah" — makanya dipakai
+    berbarengan dengan `tanpa_sorot=True`, bukan warna sorot biasa.
+
+    Mengembalikan (paragraf, offset, panjang) menunjuk kata PERTAMA baris
+    itu — cukup pendek untuk dicari Word, tidak pernah kosong kalau ada
+    baris berisi teks di dokumennya.
+    """
+    for p in paragraf:
+        teks = _trim(p.teks)
+        if teks:
+            akhir_kata = teks.find(" ")
+            panjang = akhir_kata if akhir_kata > 0 else len(teks)
+            mulai = p.teks.find(teks)
+            return (p, mulai, panjang)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -179,19 +216,56 @@ def _rentang_kata_huruf_kecil(teks: str) -> list[tuple[int, int]]:
     return hasil
 
 
-def _cari_frasa(teks: str, frasa: str) -> Optional[tuple[int, int]]:
+def _pola_frasa(frasa: str) -> Optional[str]:
+    """Pola regex frasa yang tahan terhadap spasi ganda antar-katanya."""
+    kata = frasa.split()
+    if not kata:
+        return None
+    return r"\s+".join(re.escape(k) for k in kata)
+
+
+def _hitung_frasa(teks: str, frasa: str) -> int:
+    """Berapa kali frasa muncul di teks."""
+    pola = _pola_frasa(frasa)
+    return len(re.findall(pola, teks, re.IGNORECASE)) if pola else 0
+
+
+def _cari_frasa(
+    teks: str, frasa: str, lewati: int = 0
+) -> Optional[tuple[int, int]]:
     """Cari posisi frasa di dalam teks, tahan terhadap spasi ganda.
 
     Frasa datang dari judul yang sudah dirapatkan spasinya, sedangkan teks
     paragraf aslinya belum — jadi pencarian harfiah bisa meleset hanya karena
     ada dua spasi. Pencocokan dilakukan per kata dengan pemisah \\s+.
+
+    `lewati` melompati sekian kemunculan pertama. Ada karena sebuah frasa bisa
+    muncul BERKALI-KALI dalam satu judul sementara yang salah cuma salah
+    satunya — lihat `_ordinal_frasa`.
     """
-    kata = frasa.split()
-    if not kata:
+    pola = _pola_frasa(frasa)
+    if pola is None:
         return None
-    pola = r"\s+".join(re.escape(k) for k in kata)
-    m = re.search(pola, teks, re.IGNORECASE)
-    return (m.start(), m.end()) if m else None
+    for i, m in enumerate(re.finditer(pola, teks, re.IGNORECASE)):
+        if i >= lewati:
+            return (m.start(), m.end())
+    return None
+
+
+def _ordinal_frasa(kata: list[str], frasa: str, mulai_kata: int) -> int:
+    """Kemunculan ke-berapa (0-based) frasa yang bermula di kata ke-`mulai_kata`.
+
+    KENAPA PERLU. Terbukti pada PMK 45 Tahun 2026, 27 Sep 2026. Judul pada
+    Menetapkan memuat "YANG DIPERGUNAKAN" dua kali sementara judul pembuka
+    sekali — jadi yang salah kemunculan KEDUA. Pencarian yang berhenti di
+    kemunculan pertama menyorot frasa yang justru sudah benar, dan penelaah
+    membaca komentar "di sini berbeda" pada kata yang tidak berbeda.
+    """
+    bagian = frasa.split()
+    n = len(bagian)
+    if n == 0:
+        return 0
+    return sum(1 for k in range(mulai_kata) if kata[k : k + n] == bagian)
 
 
 def _cari_index_anchor(
@@ -204,17 +278,6 @@ def _cari_index_anchor(
     return None
 
 
-def _cari_index_mengandung(
-    paragraf: list[ParagrafInput], kata_kunci: str, mulai: int = 0
-) -> Optional[int]:
-    """Cari indeks paragraf yang mengandung kata kunci (case-insensitive)."""
-    kata_upper = kata_kunci.upper()
-    for i in range(mulai, len(paragraf)):
-        if kata_upper in _trim(paragraf[i].teks).upper():
-            return i
-    return None
-
-
 # Catatan: dulu ada _tentukan_jenis_dokumen() yang menebak PMK/KMK dari
 # penyebutan pertama di dokumen. Dihapus 17 Sep 2026. Tebakan itu bertumpu pada
 # asumsi bahwa penyebutan pertama selalu datang dari blok judul — padahal bagian
@@ -222,6 +285,30 @@ def _cari_index_mengandung(
 # sehingga KMK bisa dikira PMK lalu F1-004 menuntut bunyi yang salah. Sekarang
 # jenisnya dipilih penelaah di task pane dan diteruskan sebagai parameter.
 # Lihat docs/fase1 drafter.md bagian 6.7.
+
+
+# Baris yang MUSTAHIL jadi bagian judul peraturan, dipakai menghentikan
+# pengambilan judul kalau penutup menurut jenisnya tidak ketemu.
+#
+# Kenapa perlu: penutup PMK "DENGAN RAHMAT TUHAN YANG MAHA ESA" tidak selalu
+# ada. PMK 104 Tahun 2025 langsung lompat dari judul ke "MENTERI KEUANGAN
+# REPUBLIK INDONESIA,", dan pengambilan judul lalu berjalan terus sampai
+# paragraf terakhir dokumen — F1-002 mengutip sembilan halaman peraturan ke
+# dalam satu kartu panel.
+#
+# Ketiadaan frasa itu sendiri BELUM diperiksa aturan mana pun: F1-003 hanya
+# mencari Menimbang, Mengingat, dan Menetapkan. Jadi jangan membaca penghenti
+# ini seolah menutup kekurangan itu — ia cuma menahan akibatnya.
+#
+# Dijangkar di AWAL baris. "PENETAPAN" tidak tertangkap `Menetapkan\b`, dan
+# judul peraturan tidak pernah dibuka salah satu kata ini.
+_PENGHENTI_JUDUL = re.compile(
+    r"^(DENGAN RAHMAT TUHAN YANG MAHA ESA"
+    r"|MENTERI KEUANGAN"
+    r"|Menimbang\b|Mengingat\b|Menetapkan\b|MEMUTUSKAN\b"
+    r"|BAB\b|Pasal\b)",
+    re.IGNORECASE,
+)
 
 
 def _ekstrak_judul_pembuka(
@@ -260,10 +347,10 @@ def _ekstrak_judul_pembuka(
         teks_trimmed = _trim(paragraf[i].teks)
         if teks_trimmed.upper() == penutup.upper():
             break
-        # Cek juga penutup alternatif (KMK mungkin tanpa "REPUBLIK INDONESIA,")
-        if penutup == _PENUTUP_JUDUL_KMK and teks_trimmed.upper().startswith(
-            "MENTERI KEUANGAN"
-        ):
+        # Penghenti cadangan — lihat `_PENGHENTI_JUDUL`. Penutup menurut jenis
+        # di atas tetap diperiksa lebih dulu supaya perilaku naskah normal
+        # tidak berubah sama sekali.
+        if _PENGHENTI_JUDUL.match(teks_trimmed):
             break
         judul_parts.append(teks_trimmed)
         judul_indeks.append(i)
@@ -271,8 +358,23 @@ def _ekstrak_judul_pembuka(
     if not judul_parts:
         return None
 
+    judul = " ".join(judul_parts)
+
+    # BATAS KEWAJARAN — CLAUDE.md butir 2.
+    #
+    # Jaring terakhir kalau seluruh penghenti di atas meleset juga. Tanpa ini
+    # pengambilannya berjalan sampai akhir dokumen, dan F1-002 melaporkan
+    # "judulnya berbeda" dengan mengutip SELURUH NASKAH ke dalam komentar dan
+    # kartu panel. Terbukti pada PMK 104 Tahun 2025, 27 Sep 2026: satu kartu
+    # memuat sembilan halaman peraturan.
+    #
+    # Di luar batas ini aturan MEMILIH DIAM. Judul yang tidak bisa diambil
+    # dengan yakin tidak bisa dibandingkan dengan yakin.
+    if len(judul.split()) > _BATAS_KATA_JUDUL:
+        return None
+
     return {
-        "judul": " ".join(judul_parts),
+        "judul": judul,
         "jenis": jenis,
         "paragraf_indeks": judul_indeks,
         "tentang_index": tentang_idx,
@@ -302,7 +404,10 @@ _PENGHENTI_MENETAPKAN = re.compile(
 # melewatinya, yang terjadi hampir pasti pengambilan kebablasan seperti bug
 # KESATU di atas. Dalam keadaan itu aturan MEMILIH DIAM, bukan melapor:
 # temuan yang ditandai wajib benar-benar salah.
-_BATAS_KATA_JUDUL_MENETAPKAN = 60
+#
+# Dipakai KEDUA sisi sejak 27 Sep 2026. Sebelumnya cuma sisi Menetapkan yang
+# dijaga, dan sisi pembuka kebablasan sampai akhir dokumen pada PMK 104.
+_BATAS_KATA_JUDUL = 60
 
 # Awal klausul Menetapkan. DIJANGKAR di awal paragraf — tanpa jangkar, kata
 # "menetapkan:" di tengah kalimat batang tubuh ikut tertangkap.
@@ -466,7 +571,7 @@ def _ekstrak_judul_menetapkan(paragraf: list[ParagrafInput]) -> Optional[dict]:
     # Jaring pengaman terakhir. Kalau hasilnya tidak masuk akal panjangnya,
     # pengambilannya gagal dan kita tidak tahu di mana. Melapor dalam keadaan
     # itu berarti menuduh judul yang mungkin sudah benar.
-    if len(gabungan.split()) > _BATAS_KATA_JUDUL_MENETAPKAN:
+    if len(gabungan.split()) > _BATAS_KATA_JUDUL:
         return None
 
     return {
@@ -735,7 +840,10 @@ def cek_judul_konsisten(
     kata_pembuka = judul_pembuka.split()
     kata_menetapkan = judul_menetapkan.split()
 
-    frasa_beda: list[str] = []
+    # Tiap frasa dibawa BERIKUT kemunculan ke-berapa ia di judul Menetapkan.
+    # Tanpa itu, frasa yang muncul dua kali disorot di kemunculan pertama —
+    # padahal yang berlebih justru yang kedua (PMK 45 Tahun 2026).
+    frasa_beda: list[tuple[str, int]] = []
     kata_hilang: list[str] = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
         None, kata_pembuka, kata_menetapkan
@@ -743,7 +851,8 @@ def cek_judul_konsisten(
         if tag == "equal":
             continue
         if j2 > j1:
-            frasa_beda.append(" ".join(kata_menetapkan[j1:j2]))
+            frasa = " ".join(kata_menetapkan[j1:j2])
+            frasa_beda.append((frasa, _ordinal_frasa(kata_menetapkan, frasa, j1)))
         else:
             # Ada di judul pembuka tapi tidak ada di Menetapkan \u2014 tidak ada
             # yang bisa disorot di naskah; disebut di catatan saja.
@@ -756,10 +865,25 @@ def cek_judul_konsisten(
     )
 
     temuan: list[Temuan] = []
-    for frasa in frasa_beda:
+    for frasa, ordinal in frasa_beda:
         letak: Optional[tuple[int, int, int]] = None  # (idx, mulai, akhir)
         for kandidat in info_menetapkan["paragraf_indeks"]:
-            posisi = _cari_frasa(paragraf[kandidat].teks, frasa)
+            # Ordinalnya dihitung pada judul yang SUDAH dinormalkan, sedangkan
+            # yang dicari paragraf MENTAH — yang masih memuat awalan
+            # "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG". Kalau frasanya
+            # kebetulan juga ada di awalan itu, penomorannya bergeser.
+            #
+            # Jadi ordinalnya hanya dipakai kalau jumlah kemunculan di kedua
+            # sisi memang sama. Kalau tidak, kembali ke perilaku lama —
+            # menyorot yang pertama. Menebak di luar itu lebih berbahaya
+            # daripada tidak setepat mungkin.
+            teks_kandidat = paragraf[kandidat].teks
+            sejajar = _hitung_frasa(teks_kandidat, frasa) == _hitung_frasa(
+                judul_menetapkan, frasa
+            )
+            posisi = _cari_frasa(
+                teks_kandidat, frasa, ordinal if sejajar else 0
+            )
             if posisi is not None:
                 letak = (kandidat, posisi[0], posisi[1])
                 break
@@ -787,37 +911,56 @@ def cek_judul_konsisten(
     # entah karena yang salah justru ada yang HILANG dari Menetapkan, entah
     # karena frasanya terpotong antarparagraf.
     #
-    # DIPERBAIKI 18 Sep 2026. Cadangan lama menandai SATU PARAGRAF PENUH
-    # (`offset_mulai=0, panjang=len(p.teks.strip())`), termasuk label
-    # "Menetapkan : " yang bukan bagian judul sama sekali. Itu melanggar
-    # kaidah yang ditetapkan sendiri di bagian 6.5 dan CLAUDE.md butir 6:
-    # temuan yang rentang presisinya tidak ketemu TIDAK ditandai sama sekali,
-    # bukan diperlebar ke satu paragraf. Pelanggaran aturan itu pernah terjadi
-    # sekali di proyek ini dan berakhir menimpa naskah.
+    # DIPERBAIKI 18 Sep 2026, DIPERBAIKI LAGI 27 Sep 2026.
     #
-    # Gantinya, temuannya dibuat TANPA LOKASI \u2014 sama seperti F1-003. Panel
-    # menampilkannya sebagai peringatan dokumen sebaris (bagian 6.13): tidak
-    # ada yang disorot di naskah, tidak ada komentar yang dipasang, dan tidak
-    # ada tombol keputusan. Informasinya utuh, naskahnya tidak disentuh.
+    # Cadangan MULA-MULA menandai SATU PARAGRAF PENUH (`offset_mulai=0,
+    # panjang=len(p.teks.strip())`), termasuk label "Menetapkan : " yang
+    # bukan bagian judul sama sekali. Itu melanggar CLAUDE.md butir 6 dan
+    # berakhir menimpa naskah \u2014 lihat kasus 9 di test_format_baku.py.
+    #
+    # Perbaikan 18 Sep menghapus lokasinya sama sekali (temuan TANPA LOKASI,
+    # tampil sebagai peringatan dokumen sebaris). Itu memang berhenti
+    # menyalahi naskah, tapi membawa cacat baru: temuannya tidak pernah
+    # dikomentari di Word dan tidak bisa Terima/Tolak \u2014 penelaah menyebutnya
+    # bug, karena komentar Word juga yang dibawa ke rapat pembahasan bersama
+    # pemrakarsa, dan peringatan sebaris di panel hilang begitu add-in
+    # ditutup.
+    #
+    # Sekarang dipakai anchor NETRAL \u2014 lihat `_anchor_dokumen`. Bukan tebakan
+    # "di mana bagian yang hilang seharusnya berada" (itu justru kesalahan
+    # yang sama dengan cadangan mula-mula), melainkan baris judul pembuka
+    # dokumen, yang tidak pernah jadi bagian dari klaim "ini yang salah".
+    # `tanpa_sorot=True` menjaga bedanya: Word tetap mengomentari dan
+    # membungkusnya (jadi Terima/Tolak berfungsi normal), tapi TIDAK
+    # mewarnainya \u2014 supaya baris judul tidak terlihat seolah teksnya sendiri
+    # yang keliru.
     tambahan = (
         f" Bagian yang tidak ada di Menetapkan: \"{'; '.join(kata_hilang)}\"."
         if kata_hilang
         else ""
     )
-    idx = info_menetapkan["paragraf_indeks"][0]
+    anchor = _anchor_dokumen(paragraf)
+    if anchor is None:
+        # Tidak ada satu pun paragraf berisi teks di seluruh dokumen \u2014 kalau
+        # sampai di sini, sesuatu yang lain sudah pasti gagal lebih dulu.
+        # Diam sepenuhnya lebih aman daripada memaksakan anchor yang tidak
+        # ada.
+        return []
+    p_anchor, mulai, panjang = anchor
     return [
         _buat_temuan(
             aturan_id="F1-002",
             jenis_tanda=JenisTanda.CATATAN,
-            paragraf=paragraf[idx],
-            offset_mulai=0,
-            panjang=0,
+            paragraf=p_anchor,
+            offset_mulai=mulai,
+            panjang=panjang,
             catatan=(
                 catatan_dasar
                 + tambahan
-                + " Letak persisnya tidak bisa ditunjuk di naskah, jadi tidak"
-                " ada yang ditandai \u2014 periksa klausul Menetapkan sendiri."
+                + " Letak persisnya tidak bisa ditunjuk di naskah \u2014 periksa"
+                " klausul Menetapkan sendiri."
             ),
+            tanpa_sorot=True,
         )
     ]
 
@@ -829,9 +972,21 @@ def cek_judul_konsisten(
 _BAGIAN_WAJIB = ["Menimbang", "Mengingat", "Menetapkan"]
 
 
-def cek_kelengkapan_struktur(paragraf: list[ParagrafInput]) -> list[Temuan]:
-    """Cek keberadaan bagian wajib: Menimbang, Mengingat, Menetapkan."""
+def cek_kelengkapan_struktur(
+    paragraf: list[ParagrafInput], jenis: Optional[JenisDokumen] = None
+) -> list[Temuan]:
+    """Cek keberadaan bagian wajib pembukaan.
+
+    Menimbang, Mengingat, dan Menetapkan untuk kedua jenis; ditambah frasa
+    "Dengan Rahmat Tuhan Yang Maha Esa" KHUSUS PMK — butir 13 menyebut
+    kekhususan itu dengan kata-katanya sendiri, jadi menerapkannya ke KMK
+    justru salah tandai.
+
+    `jenis` opsional supaya pemanggil lama tidak pecah; dihilangkan berarti
+    pemeriksaan frasa itu dilewati.
+    """
     temuan: list[Temuan] = []
+    ada_yang_ketemu = False
 
     for bagian in _BAGIAN_WAJIB:
         ditemukan = False
@@ -846,26 +1001,73 @@ def cek_kelengkapan_struktur(paragraf: list[ParagrafInput]) -> list[Temuan]:
                 )
             ):
                 ditemukan = True
+                ada_yang_ketemu = True
                 break
 
         if not ditemukan:
-            # Laporkan di paragraf pertama — tidak ada lokasi spesifik
-            temuan.append(
-                _buat_temuan(
-                    aturan_id="F1-003",
-                    jenis_tanda=JenisTanda.CATATAN,
-                    paragraf=paragraf[0] if paragraf else ParagrafInput(
-                        index=0, teks=""
-                    ),
-                    offset_mulai=0,
-                    panjang=0,
-                    catatan=(
-                        f"Bagian \"{bagian}\" tidak ditemukan. Menimbang, "
-                        "Mengingat, dan Menetapkan wajib ada pada tiap "
-                        "rancangan."
-                    ),
+            # Ketiadaan sesuatu tidak punya lokasi untuk ditunjuk secara
+            # jujur — anchor-nya NETRAL (baris judul pembuka dokumen), sama
+            # seperti cadangan F1-002. Lihat `_anchor_dokumen` untuk kenapa
+            # ini BUKAN pengulangan kesalahan "menyorot satu paragraf penuh"
+            # yang sudah pernah menimpa naskah (CLAUDE.md butir 6).
+            anchor = _anchor_dokumen(paragraf)
+            if anchor is not None:
+                p_anchor, mulai, panjang = anchor
+                temuan.append(
+                    _buat_temuan(
+                        aturan_id="F1-003",
+                        jenis_tanda=JenisTanda.CATATAN,
+                        paragraf=p_anchor,
+                        offset_mulai=mulai,
+                        panjang=panjang,
+                        catatan=(
+                            f"Bagian \"{bagian}\" tidak ditemukan. Menimbang, "
+                            "Mengingat, dan Menetapkan wajib ada pada tiap "
+                            "rancangan."
+                        ),
+                        tanpa_sorot=True,
+                    )
                 )
-            )
+
+    # --- Frasa "Dengan Rahmat Tuhan Yang Maha Esa", KHUSUS PMK -------------
+    #
+    # Butir 13 menyebut kekhususannya dengan kata-katanya sendiri: "a. Frasa
+    # Dengan Rahmat Tuhan Yang Maha Esa (khusus PMK)". Jadi KMK tidak boleh
+    # ikut diperiksa — kalau ikut, tiap KMK yang benar akan dituduh cacat.
+    #
+    # BATAS KEWAJARAN (CLAUDE.md butir 2): hanya dilaporkan kalau setidaknya
+    # SATU bagian pembukaan lain memang terbaca. Kalau tidak satu pun ketemu,
+    # yang terjadi hampir pasti blok pembukaannya tidak sampai ke parser —
+    # mis. tersimpan dalam bentuk yang belum terbaca — dan menambahkan tuduhan
+    # keempat di atas naskah yang memang belum terbaca tidak menolong siapa
+    # pun. Dalam keadaan itu aturan MEMILIH DIAM.
+    if jenis == JenisDokumen.PMK and ada_yang_ketemu:
+        gabungan = " ".join(_trim(p.teks) for p in paragraf).upper()
+        gabungan = re.sub(r"\s+", " ", gabungan)
+        if _PENUTUP_JUDUL_PMK not in gabungan:
+            # Anchor netral yang sama dengan cadangan di atas — lihat
+            # `_anchor_dokumen`. Ketiadaan frasa ini juga bukan kata tertentu
+            # yang salah, jadi tidak boleh menebak lokasi.
+            anchor = _anchor_dokumen(paragraf)
+            if anchor is not None:
+                p_anchor, mulai, panjang = anchor
+                temuan.append(
+                    _buat_temuan(
+                        aturan_id="F1-003",
+                        jenis_tanda=JenisTanda.CATATAN,
+                        paragraf=p_anchor,
+                        offset_mulai=mulai,
+                        panjang=panjang,
+                        catatan=(
+                            "Frasa \"DENGAN RAHMAT TUHAN YANG MAHA ESA\" tidak "
+                            "ditemukan. Butir 13 menetapkannya sebagai bagian "
+                            "pembukaan PMK, diletakkan di antara judul dan "
+                            "jabatan pembentuk. Khusus PMK — KMK memang tidak "
+                            "memakainya."
+                        ),
+                        tanpa_sorot=True,
+                    )
+                )
 
     return temuan
 
@@ -1633,7 +1835,7 @@ def jalankan_semua(
     if aktif("F1-002"):
         semua_temuan.extend(cek_judul_konsisten(paragraf, jenis))
     if aktif("F1-003"):
-        semua_temuan.extend(cek_kelengkapan_struktur(paragraf))
+        semua_temuan.extend(cek_kelengkapan_struktur(paragraf, jenis))
     if aktif("F1-004"):
         semua_temuan.extend(cek_frasa_baku_menimbang(paragraf, jenis))
     if aktif("F1-005"):
@@ -1664,14 +1866,11 @@ def jalankan_semua(
     # masing-masing: aturan yang menghasilkan lokasi kosong tetap dianggap cacat
     # dan sudah dibetulkan sendiri-sendiri.
     #
-    # F1-003 dan F1-002 DIKECUALIKAN — keduanya bisa menghasilkan temuan yang
-    # memang tidak punya lokasi:
-    #   F1-003 — ketiadaan sebuah bagian; tidak ada teks yang bisa ditunjuk
-    #            kalau teksnya justru tidak ada.
-    #   F1-002 — judul Menetapkan yang KEKURANGAN kata; yang salah adalah kata
-    #            yang tidak ada di sana, dan menyorot paragrafnya melanggar
-    #            kaidah 6.5. Ditambahkan 18 Sep 2026.
-    # Panel menampilkan keduanya sebagai peringatan dokumen, bukan kartu temuan.
+    # F1-003 dan F1-002 DIKECUALIKAN dari saringan ini — keduanya kini hampir
+    # selalu punya lokasi (anchor netral, lihat `_anchor_dokumen`), tapi pada
+    # kasus langka anchor-nya tidak ketemu (dokumen tanpa satu paragraf pun
+    # berisi teks), temuannya tetap dibuat tanpa lokasi dan tidak boleh ikut
+    # terbuang di sini. Panel menampilkan itu sebagai peringatan dokumen.
     semua_temuan = [
         t
         for t in semua_temuan

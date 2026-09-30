@@ -411,9 +411,21 @@ sendiri saat temuan ditolak. Karena nomornya melekat pada urutan dokumen,
 menjalankan analisis dua kali menghasilkan dua komentar bernomor sama. Itu bukan
 kemungkinan teoretis: pada pengujian 17 Sep 2026 dokumen contoh berakhir dengan
 sekitar 18 komentar padahal temuannya 5. Karena itu **panel wajib menolak
-menganalisis ulang selama masih ada temuan yang belum diputuskan**; jalan
-keluarnya tombol Bersihkan Daftar, yang sekaligus mencabut seluruh tanda bertag
-`DA-*` **dan seluruh komentar milik alat** dari naskah.
+menganalisis ulang selama NASKAHNYA masih memuat tanda alat**; jalan keluarnya
+tombol Bersihkan Daftar, yang sekaligus mencabut seluruh tanda bertag `DA-*`
+**dan seluruh komentar milik alat** dari naskah.
+
+Yang dihitung naskahnya, bukan daftar kartu — diubah 27 Sep 2026. Daftar
+kartu hilang tiap kali panel ditutup, Word dimulai ulang, atau berkas dibuka
+esok harinya; tandanya tetap di naskah. Selama yang diperiksa daftarnya,
+analisis berikutnya menomori ulang dari T1 di atas tanda lama, dan Tolak
+mencabut tanda milik temuan lain (PMK 45, `docs/perbaiki bug.md` bug 3).
+Sejak itu pula daftar kartunya ikut **tersimpan di dalam berkas** (setelan
+dokumen add-in) dan dipulihkan saat panel dibuka selama tandanya masih ada.
+Tanda yang sudah **diterima** ikut mengunci: menganalisis teks yang masih
+berisi coretan merah dan usulan hijau berarti membaca keduanya sebagai naskah.
+Karena Bersihkan ikut mencabut usulan yang sudah diterima, tombolnya meminta
+klik kedua bila ada yang bisa hilang begitu.
 
 Komentarnya ikut dihapus sejak 18 Sep 2026. Sebelumnya Bersihkan Daftar hanya
 mencabut content control dan meninggalkan komentarnya, sehingga pengaman di
@@ -663,6 +675,10 @@ Sekarang temuannya dibuat **tanpa lokasi**, sama seperti F1-003, dan panel
 menampilkannya sebagai peringatan dokumen (6.13). Informasinya utuh, naskahnya
 tidak disentuh.
 
+*(Diperbarui lagi 27 Sep 2026 — lihat penutup 6.13: temuan tanpa lokasi
+berhenti dipakai untuk kasus ini, diganti anchor netral yang tetap
+berkomentar.)*
+
 **Satu lubang cakupan yang ikut ditutup — `M E M U T U S K A N :`**
 
 Bukan salah tandai, tetapi ditemukan sambil memperbaiki yang di atas dan
@@ -871,9 +887,39 @@ Ketentuannya sekarang:
 - Temuan tanpa lokasi tidak ikut dihitung dalam pengaman analisis berulang —
   kalau ikut, tombol Analisis terkunci selamanya.
 - `tandaiSemuaTemuan()` tetap mengembalikan daftar id temuan yang gagal
-  ditandai, dan jumlahnya disebut di baris info. Sesudah pemotongan panjang di
+  ditandai, dan jumlahnya disebut di **Rincian proses** (bagian "Penandaan di
+  naskah", sejak 27 Sep 2026 — sebelumnya kotak info sendiri di atas daftar
+  kartu). Peringatan penandaan yang menuntut tindakan (komentar kosong, Track
+  Changes tidak bisa dimatikan) tidak ikut masuk Rincian yang tertutup; itu
+  tampil terbuka sebagai peringatan. Sesudah pemotongan panjang di
   Kasus 5, sebab yang tersisa tinggal dua: rentangnya tidak ketemu di naskah,
   atau rentangnya berimpit dengan temuan lain yang menang (6.11).
+
+**Diperbarui 27 Sep 2026 — "tanpa lokasi" berhenti dipakai untuk F1-002
+cadangan dan F1-003, diganti anchor netral.**
+
+Penelaah menyebutnya bug, dengan alasan yang berbeda dari yang menolak
+percobaan pertama di atas: komentar Word juga bagian dari menelaah yang
+dibawa ke rapat pembahasan bersama pemrakarsa, dan temuan tanpa lokasi
+kehilangan itu sepenuhnya — begitu add-in ditutup, peringatannya lenyap tanpa
+bekas di naskah, dan tidak bisa Terima/Tolak sama sekali.
+
+**Ini BUKAN mengulang percobaan yang sudah ditolak di atas.** Yang ditolak
+dulu adalah mencetak alasan **di dalam kartu**. Yang dibangun sekarang tidak
+menyentuh bentuk kartu sama sekali — kartunya tetap bentuk baku yang sama
+(nomor, badge, cuplikan, Lompat ke Teks, Terima, Tolak), karena `lokasi`-nya
+kini menunjuk **anchor netral**: baris judul pembuka dokumen, satu-satunya
+tempat yang dijamin selalu ada begitu pohonnya berhasil dibaca. Alasannya
+tetap hidup di **komentar Word**, persis seperti temuan lain — bukan
+ditambahkan ke kartu.
+
+Yang menjaga ini tidak jadi Kasus 10 jilid dua: anchor-nya bukan tebakan "di
+mana bagian yang hilang seharusnya berada" (itu tetap dilarang, CLAUDE.md
+butir 6), melainkan baris yang SUDAH ADA dan tidak pernah jadi bagian dari
+klaim "ini yang salah". Karena itu baris judulnya sengaja **tidak diwarnai**
+sama sekali — medan baru `Temuan.tanpa_sorot` menahan langkah pewarnaan di
+`office.ts`, sementara komentar dan content control tetap terpasang seperti
+biasa. Lihat `_anchor_dokumen()` di `format_baku.py`.
 
 ### 6.14 Panel Pengaturan — pemeriksaan bisa dipilih dan diperiksa sendiri
 
@@ -932,8 +978,7 @@ drafter-analiser/
 │   ├── README.md                    ← indeks + urutan baca
 │   ├── fase1 drafter.md             ← dokumen ini. SATU-SATUNYA acuan rancangan
 │   ├── project-brief.md             ← KENAPA alat ini dibangun. Bukan spesifikasi
-│   ├── panduan-officejs.md          ← API Word yang sudah diverifikasi + jebakannya
-│   └── panduan-vibe.md              ← ringkasan konvensi (isinya pindah ke CLAUDE.md)
+│   └── panduan-officejs.md          ← API Word yang sudah diverifikasi + jebakannya
 │
 ├── frontend/                        ← task pane. Ini yang DILIHAT penelaah
 │   └── src/
@@ -983,13 +1028,10 @@ drafter-analiser/
         │                              tidak ikut ke add-in
         ├── cek_docx.py              ← jalankan aturan terhadap sebuah .docx
         │                              TANPA membuka Word
-        ├── buat_contoh_uji.py       ← bangkitkan naskah uji + kunci jawabannya
         └── contoh/
-            ├── contoh-rancangan-uji.docx  ← naskah contoh lama
-            ├── uji-pmk-lengkap.docx       ← naskah PMK, kesalahannya diketahui
-            ├── uji-kmk-lengkap.docx       ← naskah KMK, pembukaan BERTABEL
-            └── KUNCI-UJI.md               ← kunci, DIBANGKITKAN — jangan
-                                             disunting tangan
+            └── tempat pmk/                ← PMK yang sudah diundangkan, untuk
+                                             uji. Naskah uji buatan dihapus
+                                             29 Sep 2026 — jebakannya kini tes
 ```
 
 Tiga berkas bertanda ★★ dan ★ itu yang menanggung hampir seluruh pekerjaan.
@@ -1054,7 +1096,7 @@ Panel sengaja dimulai **tanpa jenis dokumen terpilih**. Alasannya di 6.12.
 |---|---|---|
 | Jenis dokumen sudah dipilih? | Baris pilihan **bergoyang** merah, analisis tidak jalan | Tanpa PMK/KMK, F1-004 menuntut bunyi frasa yang salah — alat akan menandai naskah yang benar |
 | Ada aturan yang dinyalakan? | Panel Pengaturan dibuka | Nol aturan berarti nol temuan, dan penelaah mengira naskahnya bersih |
-| Masih ada temuan yang belum diputuskan? | Tombol Analisis **mati** | Analisis ulang memasang komentar bernomor sama. Pernah menghasilkan ~18 komentar untuk 5 temuan (6.8) |
+| Naskah masih memuat tanda alat? (dihitung dari naskahnya, bukan dari daftar) | Tombol Analisis **mati**, tombol Bersihkan tampil | Analisis ulang memasang komentar bernomor sama. Pernah menghasilkan ~18 komentar untuk 5 temuan (6.8), dan pada PMK 45 membuat Tolak mencabut tanda temuan lain |
 
 ### Tahap 2 — membaca naskah (`readParagraphs`, office.ts)
 
@@ -1474,7 +1516,7 @@ KMK 527/KMK.01/2022 Lamp. II butir ... — jdih.kemenkeu.go.id/... (T2)
 - Nomor `(T1)`, `(T2)` juga dipakai kode untuk menemukan kembali komentarnya
   sendiri. Karena nomornya melekat pada urutan dokumen, menjalankan analisis dua
   kali menghasilkan komentar bernomor sama — panel wajib menolak menganalisis
-  ulang selama masih ada temuan yang belum diputuskan (bagian 6.8).
+  ulang selama naskahnya masih memuat tanda alat (bagian 6.8).
 
 ---
 
@@ -1533,7 +1575,7 @@ tetapi belum sekali pun dijalankan di dalam Word.
    `_tentukan_jenis_dokumen()` dihapus, teks `catatan` ditulis ulang jadi bentuk
    alasan.
 7. ~~Pasang pengaman analisis berulang~~ (bagian 6.8). **Selesai** — panel
-   menolak analisis ulang selama masih ada temuan yang belum diputuskan, dengan
+   menolak analisis ulang selama naskahnya masih memuat tanda alat, dengan
    jalan keluar Bersihkan Daftar.
 8. ~~Ringkas task pane~~ (bagian 6.9). **Selesai** — penjelasan panjang dibuang,
    tersisa pemilih jenis dokumen, nomor temuan, cuplikan, Lompat ke Teks, dan
@@ -1734,45 +1776,23 @@ dengan yang dijanjikannya sendiri. **Itu belum berarti aturannya benar.**
 
 ### 16.2 Uji aturan terhadap naskah, tanpa membuka Word
 
-**Mulai dari naskah uji yang kesalahannya sudah diketahui.** Dua berkas di
-`tools/contoh/`, beserta kunci jawabannya:
+**Jebakan yang dulu dipasang di naskah uji buatan kini tes regresi** di
+`test_format_baku.py` — bagian yang kelihatan salah tetapi sebenarnya benar,
+dan tidak boleh ditandai: isi diktum KMK yang diawali kata "Menetapkan", nama
+resmi peraturan lain yang memuat "Republik Indonesia", "undang-undang" generik
+di batang tubuh, label yang berdiri sendiri di sel tabel, dan
+`M E M U T U S K A N :` berspasi huruf. Naskah uji buatannya berikut kuncinya
+dihapus 29 Sep 2026. Kasus 11 dan 12 di bagian 6.10 ditemukan justru saat
+naskah itu disusun.
+
+**Uji ke naskah sungguhan**, satu naskah per perintah:
 
 ```bash
-cd backend && python tools/cek_docx.py tools/contoh/uji-pmk-lengkap.docx --jenis PMK
-cd backend && python tools/cek_docx.py tools/contoh/uji-kmk-lengkap.docx --jenis KMK
+cd backend && python tools/cek_docx.py "tools/contoh/tempat pmk/<berkas>.docx" --jenis PMK
 ```
 
-Cocokkan hasilnya dengan `tools/contoh/KUNCI-UJI.md`. Kunci itu memuat dua
-tabel yang harus dibandingkan: **apa yang sengaja dirusak** dan **apa yang
-benar-benar keluar hari ini**. Selisihnya yang berarti:
-
-- ada di keduanya → aturannya bekerja;
-- ada di rencana, tidak ada di hasil → aturannya diam, belum tentu cacat;
-- **ada di hasil, tidak ada di rencana → salah tandai.** Ini yang wajib
-  dilaporkan.
-
-Kedua berkas itu juga memuat **jebakan yang sengaja dipasang** — bagian yang
-kelihatan salah tetapi sebenarnya benar, dan tidak boleh ditandai: isi diktum
-KMK yang diawali kata "Menetapkan", nama resmi peraturan lain yang memuat
-"Republik Indonesia", "undang-undang" generik di batang tubuh, label yang
-berdiri sendiri di sel tabel, dan `M E M U T U S K A N :` berspasi huruf.
-
-Keduanya dibangkitkan `tools/buat_contoh_uji.py`, dan **kuncinya ikut
-dibangkitkan dari sumber yang sama** — supaya tidak pernah bisa berbeda dari
-naskahnya. Kalau aturannya berubah, jalankan ulang skripnya.
-
-Cara ini bukan basa-basi: **Kasus 11 dan 12 di bagian 6.10 ditemukan justru
-saat naskah uji itu disusun**, bukan dari membaca kode dan bukan dari 86 tes
-yang sudah ada.
-
-**Lalu lanjutkan ke naskah sungguhan.**
-
-```bash
-cd backend && python tools/cek_docx.py <berkas.docx> --jenis PMK
-```
-
-Jalankan pada **5–10 RPMK/RKMK sungguhan** yang sudah pernah ditelaah, bukan
-pada dokumen contoh. Untuk tiap temuan yang keluar, jawab satu pertanyaan:
+Hasil yang benar saat ini ada di bagian akhir `cek list fase 1.md`. Di luar
+itu, jalankan pada **5–10 RPMK/RKMK sungguhan** yang sudah pernah ditelaah. Untuk tiap temuan yang keluar, jawab satu pertanyaan:
 
 > Kalau penelaah melihat tanda ini di naskahnya, apakah dia akan setuju bahwa
 > di situ memang ada yang salah?
@@ -1810,7 +1830,9 @@ selesai. Tiap baris bisa dijawab ya/tidak dengan mata sendiri:
 | Tolak memulihkan naskah **tanpa bekas** — warna, coretan, sorotan, komentar | Tolak satu temuan, bandingkan |
 | Bersihkan Daftar mencabut semua tanda **dan** komentar alat | Jalankan, lalu periksa naskah dan panel komentar |
 | Bersihkan Daftar **tidak** menyentuh warna milik penyusun | Warnai satu kata biru sebelum analisis, pastikan tetap biru sesudahnya |
-| Analisis ulang ditolak selama ada temuan yang belum diputuskan | Tekan Analisis dua kali |
+| Analisis ulang ditolak selama naskah masih memuat tanda alat | Tekan Analisis dua kali |
+| Kartu kembali sesudah panel ditutup lalu dibuka lagi | Analisis, tutup panel, buka lagi — Terima/Tolak tetap bekerja |
+| Naskah bertanda tanpa daftar: Analisis mati, Bersihkan tampil | Buka berkas yang sudah bertanda dengan panel yang simpanannya tidak ada |
 | Mode "Bagian Terpilih" jalan, atau tombolnya mati kalau WordApi 1.3 tidak ada | Tombol Word Connected → lihat baris v1.3 |
 
 Uji juga **pada dokumen panjang**, bukan cuma yang pendek. PMK 124/2024 punya

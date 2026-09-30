@@ -152,9 +152,22 @@ class Penomoran:
             self._definisi = {}
         self._cacah: dict[tuple[str, int], int] = {}
 
+    @classmethod
+    def dari_xml(cls, numbering: Optional[bytes]) -> "Penomoran":
+        """Dari isi numbering.xml mentah — dipakai pembaca yang tidak memuat
+        seluruh dokumen (`baca_docx.py`). None: dokumen tanpa daftar bernomor."""
+        from lxml import etree
+
+        hasil = cls(None)
+        if numbering:
+            hasil._definisi = _baca_definisi(etree.fromstring(numbering))
+        return hasil
+
     @staticmethod
     def _ambil_num(paragraf) -> Optional[tuple[str, int]]:
-        pPr = paragraf._p.pPr
+        # Objek Paragraph python-docx, atau elemen w:p mentah.
+        p = getattr(paragraf, "_p", paragraf)
+        pPr = p.find(qn("w:pPr"))
         if pPr is None:
             return None
         numPr = pPr.find(qn("w:numPr"))

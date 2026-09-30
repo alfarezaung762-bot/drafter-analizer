@@ -117,3 +117,31 @@ class TestAturanFase23:
         catatan = str(RUJUKAN["F3-002"]["catatan"])
         assert "belum berlaku" in catatan.lower()
         assert "dicabut" in catatan.lower()
+
+
+class TestF2101MenurutLetaknya:
+    """Regresi 27 Sep 2026 — docs/perbaiki bug.md bug 6.
+
+    Butir 66 hanya mengatur definisi di Ketentuan Umum, tetapi dulu tertulis
+    di hampir setiap komentar F2-101 di batang tubuh.
+    """
+
+    def test_di_luar_pasal_1_tidak_mengaku_berbutir(self):
+        entri = RUJUKAN["F2-101"]
+        assert entri["status"] == "placeholder"
+        assert "TIDAK KETEMU" in str(entri["catatan"])
+
+    def test_di_pasal_1_butir_66_kutipan_langsung(self):
+        entri = RUJUKAN["F2-101-definisi"]
+        assert entri["butir"] == "66" and entri["status"] == "visual"
+
+    def test_langkah_5_memilih_entri_menurut_letak(self):
+        from app.telaah.tahap5_verifikasi import _kunci_rujukan
+        from app.models.pekerjaan import CalonTemuan
+
+        def calon(sid):
+            return CalonTemuan(aturan_id="F2-101", satuan_id=sid)
+
+        assert _kunci_rujukan(calon("pasal-1-angka-3")) == "F2-101-definisi"
+        assert _kunci_rujukan(calon("pasal-12-ayat-1")) == "F2-101"
+        assert _kunci_rujukan(calon("pasal-10")) == "F2-101"

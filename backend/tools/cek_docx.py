@@ -31,62 +31,52 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 try:
-    from docx import Document
-    from docx.oxml.ns import qn
-    from docx.table import Table
-    from docx.text.paragraph import Paragraph
+    import docx  # noqa: F401 — penanda saja; pembacanya di tools/baca_docx.py
 except ImportError:
     print("python-docx belum terpasang. Jalankan:  pip install python-docx")
     raise SystemExit(1)
 
-from tools.penomoran import Penomoran
+from tools.baca_docx import baca_docx
 
-from app.models.temuan import JenisDokumen, ParagrafInput
+from app.models.temuan import JenisDokumen, KerangkaTabel, ParagrafInput
 from app.rules.format_baku import jalankan_semua
-from app.fase2.tahap0_struktur import bangun_pohon
-from app.fase2.tahap0_definisi import ambil_definisi
-from app.fase2.tahap1_saring import saring
-from app.fase2.mekanis_konsistensi import jalankan_mekanis
+from app.telaah.tahap1_parser.definisi import ambil_definisi
+from app.telaah.tahap1_parser.struktur import bangun_pohon
+from app.telaah.tahap2_persiapan.mekanis_konsistensi import jalankan_mekanis
 
 
-def baca_paragraf(path: Path) -> list[dict]:
-    """Baca seluruh paragraf dokumen menurut urutan asli, termasuk isi tabel.
+def baca_naskah(path: Path) -> tuple[list[dict], list[ParagrafInput], list[KerangkaTabel]]:
+    """Entri mentah, paragraf siap kirim, dan kerangka tabel raksasa.
 
-    Tiap entri: {'teks': str, 'penanda': str, 'tingkat': int, 'dari_tabel': bool}
+    Paragrafnya menurut urutan `body.paragraphs` di Word. Tiap entri berisi
+    medan `ParagrafInput` — teks, penanda, tingkat, letak tabel/baris/sel,
+    gambar, rumus, letak_pasti — ditambah `dari_tabel`.
 
     `penanda` adalah nomor otomatis Word — "Pasal 5", "(2)", "a." — yang TIDAK
     ikut di `paragraph.text` dan karena itu harus dihitung sendiri. Pada naskah
     PMK sungguhan 60% paragrafnya bernomor otomatis, jadi tanpa ini alat
     diagnosa membaca naskah yang berbeda dari yang dibaca add-in.
 
-    Penghitungnya CERMINAN Word, bukan Word — batasnya di tools/penomoran.py.
+    Pembacanya di `tools/baca_docx.py`: tiap sel dibaca SEKALI (bug 10), dan
+    tabel raksasa jadi kerangka seperti di panel.
     """
-    doc = Document(str(path))
-    nomor = Penomoran(doc)
-    hasil: list[dict] = []
-
-    def tambah(p, dari_tabel: bool) -> None:
-        penanda, tingkat = nomor.berikutnya(p)
-        hasil.append(
-            {
-                "teks": p.text,
-                "penanda": penanda,
-                "tingkat": tingkat,
-                "dari_tabel": dari_tabel,
-            }
+    entri, kerangka = baca_docx(path)
+    paragraf = [
+        ParagrafInput(
+            index=e["index"],
+            teks=e["teks"],
+            penanda=e.get("penanda", ""),
+            tingkat=e.get("tingkat", -1),
+            tabel=e.get("tabel", -1),
+            baris=e.get("baris", -1),
+            sel=e.get("sel", -1),
+            gambar=e.get("gambar", 0),
+            rumus=e.get("rumus", 0),
+            letak_pasti=e.get("letak_pasti", True),
         )
-
-    for child in doc.element.body.iterchildren():
-        if child.tag == qn("w:p"):
-            tambah(Paragraph(child, doc), False)
-        elif child.tag == qn("w:tbl"):
-            tabel = Table(child, doc)
-            for baris in tabel.rows:
-                for sel in baris.cells:
-                    for p in sel.paragraphs:
-                        tambah(p, True)
-
-    return hasil
+        for e in entri
+    ]
+    return entri, paragraf, [KerangkaTabel(**k) for k in kerangka]
 
 
 def _cetak_temuan(temuan) -> None:
@@ -129,18 +119,22 @@ def _cetak_temuan(temuan) -> None:
             print("  Rujukan : BELUM DIISI — butir dan kutipannya masih placeholder")
 
 
-def _jalankan_lanjut(paragraf, args) -> int:
+def _jalankan_lanjut(paragraf, tabel_raksasa, args) -> int:
     """Jalankan seluruh Fase 2 (dan 3) terhadap naskah ini. MEMANGGIL MODEL.
 
-    Ini satu-satunya cara menguji jalur penalaran tanpa membuka Word. Yang
-    dicetak bukan cuma temuannya melainkan juga YANG GUGUR di Langkah 5 dan
-    ongkosnya — dua angka yang menentukan apakah alat ini layak dipakai, dan
-    dua-duanya tidak kelihatan dari panel.
+    Ini satu-satunya cara menguji jalur AI tanpa membuka Word. Yang dicetak
+    bukan cuma temuannya melainkan juga YANG GUGUR di tahap 5 dan ongkosnya —
+    dua angka yang menentukan apakah alat ini layak dipakai, dan dua-duanya
+    tidak kelihatan dari panel.
     """
     from app.bersama.llm import KlienAzure, PerapalAzure
     from app.bersama.opensearch import KorpusOpenSearch, PencariOpenSearch
     from app.core.config import settings
-    from app.fase2.alur import jalankan_lanjut
+    from app.telaah.alur import jalankan_lanjut
+    from app.telaah.ekspor.tahap3 import susun_ekspor_tahap3
+    from app.telaah.ekspor.tahap4 import susun_ekspor_tahap4
+    from app.telaah.ekspor.tahap5 import susun_ekspor_tahap5
+    from app.telaah.tahap2_persiapan.bahan import angka
 
     klien = KlienAzure()
     if not klien.siap:
@@ -156,11 +150,11 @@ def _jalankan_lanjut(paragraf, args) -> int:
         cari = PencariOpenSearch()
         pencari = cari if cari.siap else None
 
-    def lapor(selesai: int, total: int, _baru) -> None:
-        print(f"  Langkah 2: {selesai}/{total} satuan terbaca")
+    def lapor(tahap: str, selesai: int, total: int) -> None:
+        print(f"  Tahap {tahap}: {selesai}/{total}")
 
     print("=" * 78)
-    print("FASE 2 — JALUR PENALARAN (memanggil model, berbiaya)")
+    print("FASE 2 — JALUR AI (memanggil model, berbiaya)")
     print("=" * 78)
 
     hasil = jalankan_lanjut(
@@ -170,8 +164,11 @@ def _jalankan_lanjut(paragraf, args) -> int:
         perapal=perapal,
         pencari=pencari,
         ambang=args.ambang if args.ambang is not None else settings.FASE2_AMBANG_SKOR,
-        per_panggilan=settings.FASE2_SATUAN_PER_PANGGILAN,
         lapor=lapor,
+        tabel_raksasa=tabel_raksasa,
+        anggaran=settings.FASE2_ANGGARAN_TOKEN,
+        pasal_per_fokus=settings.FASE2_PASAL_PER_FOKUS,
+        berbarengan=settings.FASE2_PANGGILAN_BERBARENGAN,
     )
 
     if not hasil.berjalan:
@@ -189,34 +186,34 @@ def _jalankan_lanjut(paragraf, args) -> int:
         return 0
 
     print()
-    print(f"  Peta    : {len(hasil.peta)} baris dari {hasil.satuan_total} satuan")
-    print(f"  Dugaan  : {len(hasil.dugaan)} dari Langkah 3")
+    if hasil.bahan is not None:
+        print(f"  Bahan   : ±{angka(hasil.bahan.total_token)} token ({hasil.bahan.cara_hitung})")
+    print(f"  Dugaan  : {len(hasil.dugaan)} dari tahap 3")
     print(f"  Ongkos  : {hasil.ongkos.ringkas()}")
     print()
 
-    # Dicetak dari hasil yang BARU SAJA berjalan, bukan dari simpanan: peta
-    # yang diperlihatkan harus peta yang dipakai, dan di CLI keduanya ada di
-    # tangan sekaligus.
+    # Pesan dan hasil dari analisis yang BARU SAJA berjalan, apa adanya.
     if args.tahap3:
-        from app.fase2.ekspor_tahap3 import susun_ekspor_tahap3
-
-        print(
-            susun_ekspor_tahap3(
-                paragraf,
-                hasil.peta,
-                hasil.dugaan,
-                dokumen=Path(args.berkas).name,
-            )
-        )
+        print(susun_ekspor_tahap3(hasil.pesan_tahap3))
+    if args.tahap4:
+        print(susun_ekspor_tahap4(hasil.pesan_tahap4))
+    if args.tahap5:
+        print(susun_ekspor_tahap5(hasil))
 
     _cetak_temuan(hasil.temuan)
 
-    # Yang gugur sama pentingnya dengan yang lolos: inilah bukti Langkah 5
+    if hasil.jejak_tahap3:
+        print()
+        print("CATATAN TAHAP 3")
+        for c in hasil.jejak_tahap3:
+            print(f"  {c}")
+
+    # Yang gugur sama pentingnya dengan yang lolos: inilah bukti tahap 5
     # benar-benar bekerja, bukan cuma ada.
     if hasil.gugur:
         print()
         print("=" * 78)
-        print(f"GUGUR DI LANGKAH 5 : {len(hasil.gugur)}")
+        print(f"GUGUR ATAU DITURUNKAN : {len(hasil.gugur)}")
         print("=" * 78)
         for g in hasil.gugur:
             print(f"  {g}")
@@ -230,12 +227,15 @@ def main() -> int:
     ap.add_argument("--paragraf-saja", action="store_true", help="Hanya tampilkan paragraf, tanpa menjalankan aturan")
     ap.add_argument("--batas", type=int, default=60, help="Jumlah paragraf yang ditampilkan (default 60, 0 = semua)")
     ap.add_argument("--struktur", action="store_true", help="Tampilkan pohon satuan hasil parser Fase 2")
-    ap.add_argument("--fase2", action="store_true", help="Jalankan pemeriksaan mekanis Fase 2 (F2-001..007), bukan Fase 1")
-    ap.add_argument("--tahap0", action="store_true", help="ALAT PENGEMBANG: cetak apa yang akan dibaca model, termasuk satuan yang dibuang penyaring")
-    ap.add_argument("--lanjut", action="store_true", help="Jalankan SELURUH Fase 2 termasuk jalur penalaran. MEMANGGIL MODEL dan BERBIAYA.")
+    ap.add_argument("--fase2", action="store_true", help="Jalankan pemeriksaan kode Fase 2 (F2-001..007), bukan Fase 1")
+    ap.add_argument("--tahap1", action="store_true", help="ALAT PENGEMBANG: hasil parser — pohon satuan, definisi, lampiran. Gratis")
+    ap.add_argument("--tahap2", action="store_true", help="ALAT PENGEMBANG: perkiraan token, lalu bahan persis untuk AI. Gratis")
+    ap.add_argument("--lanjut", action="store_true", help="Jalankan SELURUH Fase 2 termasuk jalur AI. MEMANGGIL MODEL dan BERBIAYA.")
     ap.add_argument("--fase3", action="store_true", help="Bersama --lanjut: cari pembanding di korpus peraturan (OpenSearch + embedding).")
-    ap.add_argument("--tahap3", action="store_true", help="Bersama --lanjut: cetak peta Langkah 2 dan dugaan Langkah 3 yang baru saja dipakai.")
-    ap.add_argument("--ambang", type=float, default=None, help="Ambang skor Langkah 5. Bawaan dari core/config.py.")
+    ap.add_argument("--tahap3", action="store_true", help="Bersama --lanjut: cetak pesan tahap 3 (cari dugaan) persis seperti dikirim ke AI.")
+    ap.add_argument("--tahap4", action="store_true", help="Bersama --lanjut: cetak pesan tahap 4 berikut hasil alat, persis seperti dibaca AI.")
+    ap.add_argument("--tahap5", action="store_true", help="Bersama --lanjut: cetak nasib tiap dugaan — lolos atau gugur, berikut alasannya.")
+    ap.add_argument("--ambang", type=float, default=None, help="Ambang skor tahap 5. Bawaan dari core/config.py.")
     ap.add_argument("--jenis", choices=["PMK", "KMK"], default="PMK", help="Jenis dokumen; di add-in ini dipilih penelaah (default PMK)")
     args = ap.parse_args()
 
@@ -244,64 +244,67 @@ def main() -> int:
         print(f"Berkas tidak ditemukan: {path}")
         return 1
 
-    entri = baca_paragraf(path)
+    entri, paragraf, tabel_raksasa = baca_naskah(path)
     jml_tabel = sum(1 for e in entri if e["dari_tabel"])
 
-    print("=" * 78)
-    print(f"BERKAS : {path.name}")
-    print(f"PARAGRAF: {len(entri)} total, {jml_tabel} di antaranya berasal dari dalam tabel")
-    if jml_tabel:
+    # --tahap1 dan --tahap2 mencetak ekspornya SAJA — sama persis dengan
+    # berkas Ekspor Tahap 1/2 dari panel — jadi kepala ini dilewati.
+    if not (args.tahap1 or args.tahap2):
+        print("=" * 78)
+        print(f"BERKAS : {path.name}")
+        print(f"PARAGRAF: {len(entri)} total, {jml_tabel} di antaranya berasal dari dalam tabel")
+        if tabel_raksasa:
+            print(
+                f"TABEL RAKSASA: {len(tabel_raksasa)} tabel tidak dibaca per paragraf — "
+                "dikirim kerangkanya saja, seperti di panel"
+            )
+        print("=" * 78)
         print()
-        print("  PERHATIAN: dokumen ini memakai tabel. Periksa apakah blok Menimbang/")
-        print("  Mengingat termasuk di dalamnya — kalau iya, tata letaknya berbeda dari")
-        print("  yang diasumsikan tes saat ini, dan parser perlu ditinjau ulang.")
-    print("=" * 78)
-    print()
 
-    batas = len(entri) if args.batas == 0 else min(args.batas, len(entri))
-    print(f"--- {batas} paragraf pertama (ditampilkan apa adanya, termasuk spasi/tab) ---")
-    for i in range(batas):
-        tanda = "[TABEL]" if entri[i]["dari_tabel"] else "       "
-        pen = entri[i].get("penanda", "")
-        awalan = f"{pen!r:<12}" if pen else " " * 12
-        print(f"{i:>4} {tanda} {awalan} {entri[i]['teks']!r}")
-    if batas < len(entri):
-        print(f"     ... {len(entri) - batas} paragraf berikutnya tidak ditampilkan (pakai --batas 0 untuk semua)")
-    print()
+        batas = len(entri) if args.batas == 0 else min(args.batas, len(entri))
+        print(f"--- {batas} paragraf pertama (ditampilkan apa adanya, termasuk spasi/tab) ---")
+        for i in range(batas):
+            tanda = f"[T{entri[i]['tabel']}:{entri[i]['baris']}:{entri[i]['sel']}]" if entri[i]["dari_tabel"] else ""
+            pen = entri[i].get("penanda", "")
+            awalan = f"{pen!r:<12}" if pen else " " * 12
+            print(f"{i:>4} {tanda:<12} {awalan} {entri[i]['teks']!r}")
+        if batas < len(entri):
+            print(f"     ... {len(entri) - batas} paragraf berikutnya tidak ditampilkan (pakai --batas 0 untuk semua)")
+        print()
 
     if args.paragraf_saja:
         return 0
 
-    paragraf = [
-        ParagrafInput(
-            index=i,
-            teks=e["teks"],
-            penanda=e.get("penanda", ""),
-            tingkat=e.get("tingkat", -1),
-        )
-        for i, e in enumerate(entri)
-    ]
     jenis = JenisDokumen(args.jenis)
 
-    if args.tahap0:
+    if args.tahap1:
+        from app.telaah.ekspor.tahap1 import susun_ekspor_tahap1
+
+        print(susun_ekspor_tahap1(paragraf, tabel_raksasa))
+        return 0
+
+    if args.tahap2:
         from app.core.config import settings
-        from app.fase2.ekspor_tahap0 import susun_ekspor
+        from app.telaah.ekspor.tahap2 import susun_ekspor_tahap2
 
         print(
-            susun_ekspor(
+            susun_ekspor_tahap2(
                 paragraf,
-                per_panggilan=settings.FASE2_SATUAN_PER_PANGGILAN,
-                dokumen=path.name,
+                tabel_raksasa,
+                anggaran=settings.FASE2_ANGGARAN_TOKEN,
+                pasal_per_fokus=settings.FASE2_PASAL_PER_FOKUS,
             )
         )
         return 0
 
     if args.lanjut:
-        return _jalankan_lanjut(paragraf, args)
+        return _jalankan_lanjut(paragraf, tabel_raksasa, args)
 
     if args.struktur or args.fase2:
         pohon = bangun_pohon(paragraf)
         if args.struktur:
+            from app.telaah.ekspor.tahap1 import teks_di_luar_satuan
+
             print("=" * 78)
             print(f"POHON SATUAN : {len(pohon.satuan)} satuan")
             print("=" * 78)
@@ -316,12 +319,12 @@ def main() -> int:
                     f"  {'  ' * dalam}{s_.id:<34} [{s_.jenis.value:<10}] "
                     f"p{s_.paragraf_mulai}-{s_.paragraf_akhir}  {isi!r}"
                 )
-            hs = saring(pohon)
-            dibaca, dilewati = hs.jumlah
+            lepas = teks_di_luar_satuan(paragraf, pohon)
             print()
-            print(f"  PENYARING LANGKAH 1: {dibaca} dibaca model, {dilewati} dilewati")
-            for s_, alasan in hs.dilewati:
-                print(f"    dilewati  {s_.id:<30} {alasan}")
+            print(
+                f"  PARAGRAF BATANG TUBUH DI LUAR TEKS SATUAN: {len(lepas)} "
+                "(tetap dikirim mentah ke AI; rinciannya di --tahap1)"
+            )
             if not args.fase2:
                 return 0
             print()

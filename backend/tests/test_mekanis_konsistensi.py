@@ -1,9 +1,9 @@
 """Tes aturan mekanis Fase 2 — F2-001, F2-003, F2-004, F2-007."""
 
-from app.fase2.mekanis_konsistensi import _kata_jadi_angka, jalankan_mekanis
-from app.fase2.tahap0_definisi import ambil_definisi
-from app.fase2.tahap0_struktur import bangun_pohon
 from app.models.temuan import ParagrafInput
+from app.telaah.tahap1_parser.definisi import ambil_definisi
+from app.telaah.tahap1_parser.struktur import bangun_pohon
+from app.telaah.tahap2_persiapan.mekanis_konsistensi import _kata_jadi_angka, jalankan_mekanis
 
 _KEPALA = [
     "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA", "NOMOR 12 TAHUN 2026",

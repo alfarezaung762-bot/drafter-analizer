@@ -16,11 +16,11 @@ offset dihitung terhadap `teks`, bukan `utuh`. Kalau suatu hari ada yang
 menempel penanda ke depan teks, tes itu yang berbunyi.
 """
 
-from app.fase2.mekanis_konsistensi import jalankan_mekanis
-from app.fase2.tahap0_definisi import _bentuk_pendek, ambil_definisi
-from app.fase2.tahap0_struktur import bangun_pohon
 from app.models.satuan import JenisSatuan
 from app.models.temuan import ParagrafInput
+from app.telaah.tahap1_parser.definisi import _bentuk_pendek, ambil_definisi
+from app.telaah.tahap1_parser.struktur import bangun_pohon
+from app.telaah.tahap2_persiapan.mekanis_konsistensi import jalankan_mekanis
 
 _KEPALA = [
     ("", "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA"),
@@ -204,7 +204,7 @@ class TestBentukPendekIstilah:
 
 
 class TestBagianBukanKalimatBiasa:
-    """Cacat yang baru terlihat sesudah parser membaca naskah PMK sungguhan.
+    r"""Cacat yang baru terlihat sesudah parser membaca naskah PMK sungguhan.
 
     PMK organisasi penuh unit bernama "Bagian Umum", "Bagian Kepegawaian".
     Pola lama `^Bagian\s+(\w+)` membaca kalimat "Bagian Umum mempunyai tugas

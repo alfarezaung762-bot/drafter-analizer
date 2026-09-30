@@ -1,19 +1,17 @@
-"""Tempat pekerjaan dan peta disimpan — di Postgres kalau ada, di memori kalau tidak.
+"""Tempat pekerjaan dan jawaban disimpan — di Postgres kalau ada, di memori kalau tidak.
 
 Pemanggil TIDAK PERNAH tahu yang mana yang sedang dipakai. Itu yang membuat
 add-in ini bisa dicoba di mesin penelaah tanpa menyiapkan basis data dulu,
 sementara di server ia tetap tahan restart.
 
-YANG DISIMPAN KE POSTGRES: pekerjaan dan peta. Peta bagian termahal Fase 2 —
-Langkah 2 memanggil model belasan sampai puluhan kali, dan itu yang paling
-sayang hilang. Backend yang mati di satuan ke-68 meninggalkan 68 baris peta
-yang sudah dibayar, dan analisis ulang meneruskan dari situ.
+YANG DISIMPAN KE POSTGRES: pekerjaan, dan jawaban tiap panggilan tahap 3 —
+bagian yang dibayar per token dan paling sayang hilang. Analisis yang
+dilanjutkan sesudah backend restart tidak membayar ulang pesan yang sama.
 
-YANG TINGGAL DI MEMORI: temuan. Temuan lahir di Langkah 5 dari bahan yang
-sudah tersimpan, jadi kehilangannya cuma memerlukan penalaran ulang, bukan
-pembacaan ulang seluruh naskah. Akibatnya yang perlu diketahui penelaah:
-sesudah backend restart, daftar temuan perlu dijalankan lagi — tetapi
-tagihannya jauh lebih kecil daripada dari nol.
+YANG TINGGAL DI MEMORI: temuan, keberatan, tahap yang sedang berjalan, dan
+percakapan untuk Ekspor Tahap 3–5. Temuan lahir di tahap 5 dari jawaban yang
+tersimpan, jadi kehilangannya cuma memerlukan pemastian ulang, bukan
+pembacaan ulang seluruh naskah.
 """
 
 from __future__ import annotations
@@ -21,9 +19,12 @@ from __future__ import annotations
 import threading
 from typing import Optional
 
+from app.bersama.llm import Blok
 from app.db import sesi as db_sesi
-from app.models.pekerjaan import BarisPeta, Dugaan, Pekerjaan, StatusPekerjaan
+from app.models.pekerjaan import Pekerjaan, StatusPekerjaan
 from app.models.temuan import Temuan
+
+Rekaman = list[tuple[str, list[Blok]]]
 
 
 class _Memori:
@@ -31,26 +32,26 @@ class _Memori:
 
     def __init__(self) -> None:
         self.pekerjaan: dict[int, Pekerjaan] = {}
-        self.peta: dict[int, list[BarisPeta]] = {}
+        self.jawaban: dict[int, dict[str, str]] = {}
         self.urut = 0
 
 
 _memori = _Memori()
 _temuan: dict[int, list[Temuan]] = {}
 # Temuan Fase 1 yang dapat keberatan model. Dipisah dari `_temuan` karena
-# panel sudah memegang temuan itu — yang perlu dikirim balik cuma catatannya,
-# bukan temuannya lagi.
+# panel sudah memegang temuan itu — yang perlu dikirim balik cuma catatannya.
 _keberatan: dict[int, list[Temuan]] = {}
-# Dugaan Langkah 3. Di memori saja, sekelas temuan: sekali petanya tersimpan,
-# menalar ulang cuma satu panggilan — jauh lebih murah daripada membaca ulang
-# seluruh naskah. Yang dipakai Ekspor Tahap 3 untuk memperlihatkan apa yang
-# KELUAR dari Langkah 3, bukan cuma apa yang masuk.
-_dugaan: dict[int, list[Dugaan]] = {}
+# Tahap yang sedang berjalan ("3 cari dugaan"). Di memori saja: kolomnya tidak
+# ada di tabel pekerjaan, dan menambah kolom menuntut migrasi.
+_tahap: dict[int, str] = {}
+# Percakapan tahap 3 dan 4, apa adanya, dan teks Ekspor Tahap 5. Ekspor
+# menuliskannya tanpa menyusun ulang: naskah di Word sudah berubah sesudah
+# ditandai, jadi menyusunnya ulang dari naskah sekarang bisa berbeda dari
+# yang dulu benar-benar dikirim.
+_pesan_tahap3: dict[int, Rekaman] = {}
+_pesan_tahap4: dict[int, Rekaman] = {}
+_ekspor_tahap5: dict[int, str] = {}
 _kunci = threading.Lock()
-
-
-def _pisah(teks: str) -> list[str]:
-    return [x.strip() for x in teks.split(",") if x.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ def _pisah(teks: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def buat(dokumen: str, satuan_total: int = 0) -> int:
+def buat(dokumen: str) -> int:
     """Daftarkan satu analisis baru, kembalikan nomornya."""
     s = db_sesi.sesi()
     if s is None:
@@ -66,23 +67,16 @@ def buat(dokumen: str, satuan_total: int = 0) -> int:
             _memori.urut += 1
             nomor = _memori.urut
             _memori.pekerjaan[nomor] = Pekerjaan(
-                id=nomor,
-                dokumen=dokumen,
-                status=StatusPekerjaan.BERJALAN,
-                satuan_total=satuan_total,
+                id=nomor, dokumen=dokumen, status=StatusPekerjaan.BERJALAN
             )
-            _memori.peta[nomor] = []
+            _memori.jawaban[nomor] = {}
             _temuan[nomor] = []
         return nomor
 
     from app.db.tabel import PekerjaanDB
 
     with s:
-        baris = PekerjaanDB(
-            dokumen=dokumen,
-            status=StatusPekerjaan.BERJALAN.value,
-            satuan_total=satuan_total,
-        )
+        baris = PekerjaanDB(dokumen=dokumen, status=StatusPekerjaan.BERJALAN.value)
         s.add(baris)
         s.commit()
         s.refresh(baris)
@@ -95,14 +89,19 @@ def buat(dokumen: str, satuan_total: int = 0) -> int:
 def perbarui(
     nomor: int,
     status: Optional[StatusPekerjaan] = None,
-    satuan_total: Optional[int] = None,
-    satuan_selesai: Optional[int] = None,
+    tahap: Optional[str] = None,
+    selesai: Optional[int] = None,
+    total: Optional[int] = None,
     panggilan: Optional[int] = None,
     token_masuk: Optional[int] = None,
     token_keluar: Optional[int] = None,
     pesan: Optional[str] = None,
 ) -> None:
     """Perbarui kemajuan. Field yang None dibiarkan apa adanya."""
+    if tahap is not None:
+        with _kunci:
+            _tahap[nomor] = tahap
+
     s = db_sesi.sesi()
     if s is None:
         with _kunci:
@@ -111,10 +110,12 @@ def perbarui(
                 return
             if status is not None:
                 p.status = status
-            if satuan_total is not None:
-                p.satuan_total = satuan_total
-            if satuan_selesai is not None:
-                p.satuan_selesai = satuan_selesai
+            if tahap is not None:
+                p.tahap = tahap
+            if selesai is not None:
+                p.selesai = selesai
+            if total is not None:
+                p.total = total
             if panggilan is not None:
                 p.panggilan = panggilan
             if token_masuk is not None:
@@ -135,10 +136,10 @@ def perbarui(
             return
         if status is not None:
             baris.status = status.value
-        if satuan_total is not None:
-            baris.satuan_total = satuan_total
-        if satuan_selesai is not None:
-            baris.satuan_selesai = satuan_selesai
+        if total is not None:
+            baris.satuan_total = total
+        if selesai is not None:
+            baris.satuan_selesai = selesai
         if panggilan is not None:
             baris.panggilan = panggilan
         if token_masuk is not None:
@@ -156,7 +157,8 @@ def ambil(nomor: int) -> Optional[Pekerjaan]:
     s = db_sesi.sesi()
     if s is None:
         with _kunci:
-            return _memori.pekerjaan.get(nomor)
+            p = _memori.pekerjaan.get(nomor)
+            return p.model_copy() if p is not None else None
 
     from app.db.tabel import PekerjaanDB
 
@@ -164,12 +166,15 @@ def ambil(nomor: int) -> Optional[Pekerjaan]:
         baris = s.get(PekerjaanDB, nomor)
         if baris is None:
             return None
+        with _kunci:
+            tahap = _tahap.get(nomor, "")
         return Pekerjaan(
             id=baris.id,
             dokumen=baris.dokumen,
             status=StatusPekerjaan(baris.status),
-            satuan_total=baris.satuan_total,
-            satuan_selesai=baris.satuan_selesai,
+            tahap=tahap,
+            selesai=baris.satuan_selesai,
+            total=baris.satuan_total,
             panggilan=baris.panggilan,
             token_masuk=baris.token_masuk,
             token_keluar=baris.token_keluar,
@@ -178,82 +183,53 @@ def ambil(nomor: int) -> Optional[Pekerjaan]:
 
 
 # ---------------------------------------------------------------------------
-# Peta
+# Jawaban tahap 3 — yang membuat restart tidak mahal
 # ---------------------------------------------------------------------------
 
 
-def simpan_peta(nomor: int, baris: list[BarisPeta]) -> None:
-    """Simpan baris peta yang sudah selesai. Yang sudah ada TIDAK ditimpa."""
-    if not baris:
-        return
+def simpan_jawaban(nomor: int, kunci: str, jawaban: str) -> None:
+    """Simpan jawaban satu panggilan. Yang sudah ada TIDAK ditimpa."""
     s = db_sesi.sesi()
     if s is None:
         with _kunci:
-            ada = {b.satuan_id for b in _memori.peta.get(nomor, [])}
-            _memori.peta.setdefault(nomor, []).extend(
-                b for b in baris if b.satuan_id not in ada
-            )
+            _memori.jawaban.setdefault(nomor, {}).setdefault(kunci, jawaban)
         return
 
     from sqlmodel import select
 
-    from app.db.tabel import HasilSatuanDB
+    from app.db.tabel import HasilPanggilanDB
 
     with s:
-        sudah = set(
-            s.exec(
-                select(HasilSatuanDB.satuan_id).where(HasilSatuanDB.pekerjaan_id == nomor)
-            ).all()
-        )
-        for b in baris:
-            if b.satuan_id in sudah:
-                continue
-            s.add(
-                HasilSatuanDB(
-                    pekerjaan_id=nomor,
-                    satuan_id=b.satuan_id,
-                    ringkasan=b.ringkasan,
-                    memuat_norma=b.memuat_norma,
-                    istilah_dipakai=", ".join(b.istilah_dipakai),
-                    merujuk=", ".join(b.merujuk),
-                    dugaan=b.dugaan,
-                )
+        ada = s.exec(
+            select(HasilPanggilanDB.id).where(
+                HasilPanggilanDB.pekerjaan_id == nomor, HasilPanggilanDB.kunci == kunci
             )
-        s.commit()
+        ).first()
+        if ada is None:
+            s.add(HasilPanggilanDB(pekerjaan_id=nomor, kunci=kunci, jawaban=jawaban))
+            s.commit()
 
 
-def ambil_peta(nomor: int) -> list[BarisPeta]:
-    """Peta yang sudah tersimpan. Inilah yang membuat restart tidak mahal."""
+def ambil_jawaban(nomor: int) -> dict[str, str]:
+    """Jawaban yang sudah tersimpan untuk satu pekerjaan, menurut sidik pesannya."""
     s = db_sesi.sesi()
     if s is None:
         with _kunci:
-            return list(_memori.peta.get(nomor, []))
+            return dict(_memori.jawaban.get(nomor, {}))
 
     from sqlmodel import select
 
-    from app.db.tabel import HasilSatuanDB
+    from app.db.tabel import HasilPanggilanDB
 
     with s:
         baris = s.exec(
-            select(HasilSatuanDB)
-            .where(HasilSatuanDB.pekerjaan_id == nomor)
-            .order_by(HasilSatuanDB.id)
+            select(HasilPanggilanDB).where(HasilPanggilanDB.pekerjaan_id == nomor)
         ).all()
-        return [
-            BarisPeta(
-                satuan_id=b.satuan_id,
-                ringkasan=b.ringkasan,
-                memuat_norma=b.memuat_norma,
-                istilah_dipakai=_pisah(b.istilah_dipakai),
-                merujuk=_pisah(b.merujuk),
-                dugaan=b.dugaan,
-            )
-            for b in baris
-        ]
+        return {b.kunci: b.jawaban for b in baris}
 
 
 # ---------------------------------------------------------------------------
-# Temuan — memori saja, dan itu disengaja (lihat docstring berkas)
+# Temuan dan keberatan — memori saja, dan itu disengaja (lihat docstring)
 # ---------------------------------------------------------------------------
 
 
@@ -278,41 +254,55 @@ def ambil_keberatan(nomor: int) -> list[Temuan]:
 
 
 # ---------------------------------------------------------------------------
-# Dugaan Langkah 3 — memori saja
+# Bahan ekspor tahap 3–5 — memori saja
 # ---------------------------------------------------------------------------
 
 
-def simpan_dugaan(nomor: int, dugaan: list[Dugaan]) -> None:
-    """Catat hasil Langkah 3. Daftar kosong TETAP dicatat, dan itu penting.
-
-    "Langkah 3 tidak menghasilkan dugaan" dan "Langkah 3 belum pernah
-    dijalankan" adalah dua keadaan yang berbeda, dan Ekspor Tahap 3 harus bisa
-    membedakannya. Karena itu yang dipakai `nomor in _dugaan`, bukan panjang
-    daftarnya.
-    """
+def simpan_pesan_tahap3(nomor: int, rekaman: Rekaman) -> None:
+    """Daftar kosong TETAP dicatat: tahap 3 berjalan tanpa mengirim apa pun."""
     with _kunci:
-        _dugaan[nomor] = list(dugaan)
+        _pesan_tahap3[nomor] = list(rekaman)
 
 
-def ambil_dugaan(nomor: int) -> Optional[list[Dugaan]]:
-    """None berarti BELUM PERNAH dicatat; daftar kosong berarti nihil."""
+def ambil_pesan_tahap3(nomor: int) -> Optional[Rekaman]:
+    """None kalau tidak tercatat — tahap 3 tidak jalan, atau backend restart."""
     with _kunci:
-        ada = _dugaan.get(nomor)
+        ada = _pesan_tahap3.get(nomor)
         return None if ada is None else list(ada)
+
+
+def simpan_pesan_tahap4(nomor: int, rekaman: Rekaman) -> None:
+    """Daftar kosong TETAP dicatat: tahap 4 berjalan tanpa dugaan untuk diuji."""
+    with _kunci:
+        _pesan_tahap4[nomor] = list(rekaman)
+
+
+def ambil_pesan_tahap4(nomor: int) -> Optional[Rekaman]:
+    with _kunci:
+        ada = _pesan_tahap4.get(nomor)
+        return None if ada is None else list(ada)
+
+
+def simpan_ekspor_tahap5(nomor: int, teks: str) -> None:
+    with _kunci:
+        _ekspor_tahap5[nomor] = teks
+
+
+def ambil_ekspor_tahap5(nomor: int) -> Optional[str]:
+    with _kunci:
+        return _ekspor_tahap5.get(nomor)
 
 
 def pekerjaan_terakhir(dokumen: str) -> Optional[int]:
     """Nomor pekerjaan terbaru untuk sebuah dokumen, atau None.
 
-    Dipakai Ekspor Tahap 3 supaya panel yang baru dimuat ulang — dan karena
+    Dipakai Ekspor Tahap 3–5 supaya panel yang baru dimuat ulang — dan karena
     itu lupa nomor pekerjaannya — tetap bisa mengekspor analisis terakhir.
     """
     s = db_sesi.sesi()
     if s is None:
         with _kunci:
-            cocok = [
-                n for n, p in _memori.pekerjaan.items() if p.dokumen == dokumen
-            ]
+            cocok = [n for n, p in _memori.pekerjaan.items() if p.dokumen == dokumen]
             return max(cocok) if cocok else None
 
     from sqlmodel import select
@@ -333,10 +323,11 @@ def bersihkan_memori() -> None:
     """Hanya untuk tes. Tidak menyentuh basis data."""
     with _kunci:
         _memori.pekerjaan.clear()
-        _memori.peta.clear()
+        _memori.jawaban.clear()
         _memori.urut = 0
         _temuan.clear()
         _keberatan.clear()
-        _dugaan.clear()
-        _temuan.clear()
-        _keberatan.clear()
+        _tahap.clear()
+        _pesan_tahap3.clear()
+        _pesan_tahap4.clear()
+        _ekspor_tahap5.clear()

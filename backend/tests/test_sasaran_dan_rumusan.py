@@ -18,13 +18,13 @@ import json
 
 from app.bersama.llm import KlienPalsu, Ongkos, PerapalPalsu
 from app.bersama.opensearch import HasilCari, KorpusPalsu, Pembanding
-from app.fase2 import tahap5_verifikasi
-from app.fase2.mekanis_konsistensi import jalankan_mekanis
-from app.fase2.tahap0_definisi import ambil_definisi
-from app.fase2.tahap0_struktur import bangun_pohon
-from app.fase3 import tahap6_rumusan
 from app.models.pekerjaan import CalonTemuan
 from app.models.temuan import JenisTanda, ParagrafInput
+from app.telaah import tahap5_verifikasi
+from app.telaah.tahap1_parser.definisi import ambil_definisi
+from app.telaah.tahap1_parser.struktur import bangun_pohon
+from app.telaah.tahap2_persiapan.mekanis_konsistensi import jalankan_mekanis
+from app.telaah.tahap4_memastikan import korpus_rumusan
 
 _BARIS = [
     "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
@@ -133,6 +133,140 @@ class TestSasaranSampaiKeTemuan:
         assert lolos[0].sasaran == ""
 
 
+class TestAngkaDefinisiTerkait:
+    """Mempertajam "Perbaiki di: Pasal 1" jadi angka definisinya.
+
+    Ditambahkan 26 Sep 2026 sesudah penelaah melihat komentar pada PMK PPh 21
+    yang cuma berkata "Perbaiki di: Pasal 1 (Ketentuan Umum)" — padahal Pasal
+    1 naskah itu memuat empat belas definisi, dan penelaah harus menebak
+    sendiri yang mana.
+    """
+
+    def _daftar(self):
+        pohon = _pohon()
+        return ambil_definisi(pohon)
+
+    def test_istilah_di_dalam_kutipan_disebut_angkanya(self):
+        angka = tahap5_verifikasi.angka_definisi_terkait(
+            "Pengguna Barang wajib mengajukan permohonan", self._daftar()
+        )
+        assert angka == ["angka 1 (Pengguna Barang)"]
+
+    def test_diurutkan_menurut_nomor_angka_bukan_urutan_kalimat(self):
+        """Penelaah membaca Pasal 1 dari atas ke bawah, bukan mengikuti
+        urutan kata di kalimat yang ditandai."""
+        paragraf = [
+            ParagrafInput(index=i, teks=t)
+            for i, t in enumerate(
+                _BARIS[:12]
+                + [
+                    "1. Pengguna Barang adalah pejabat pemegang kewenangan.",
+                    "2. Sistem Informasi adalah aplikasi pencatatan.",
+                    "Pasal 2",
+                    "Sistem Informasi dipakai Pengguna Barang untuk mencatat.",
+                ]
+            )
+        ]
+        daftar = ambil_definisi(bangun_pohon(paragraf))
+        angka = tahap5_verifikasi.angka_definisi_terkait(
+            "Sistem Informasi dipakai Pengguna Barang", daftar
+        )
+        assert angka == ["angka 1 (Pengguna Barang)", "angka 2 (Sistem Informasi)"]
+
+    def test_istilah_yang_TIDAK_muncul_tidak_disebut(self):
+        assert (
+            tahap5_verifikasi.angka_definisi_terkait(
+                "permohonan diselesaikan tepat waktu", self._daftar()
+            )
+            == []
+        )
+
+    def test_huruf_besar_kecil_DIBEDAKAN(self):
+        """Istilah berdefinisi ditulis berhuruf awal kapital (butir 67 KMK
+        527). Mencocokkan tanpa peduli kapital akan menangkap kata biasa yang
+        kebetulan sama bunyinya — 'pengguna barang' di kalimat lepas bukan
+        rujukan ke istilah berdefinisi."""
+        assert (
+            tahap5_verifikasi.angka_definisi_terkait(
+                "pengguna barang wajib mengajukan", self._daftar()
+            )
+            == []
+        )
+
+    def test_daftar_definisi_gagal_tidak_meledak(self):
+        paragraf = [ParagrafInput(index=0, teks="Naskah tanpa Pasal 1.")]
+        daftar = ambil_definisi(bangun_pohon(paragraf))
+        assert tahap5_verifikasi.angka_definisi_terkait("apa pun", daftar) == []
+
+
+class TestSasaranParagraf:
+    """Nomor paragraf sasaran — yang dipakai tombol "Lompat ke Perbaikan"."""
+
+    def test_sasaran_sah_membawa_nomor_paragrafnya(self):
+        lolos, _ = _verifikasi(_calon(sasaran="pasal-1"))
+        assert lolos[0].sasaran_paragraf is not None
+
+    def test_sasaran_kosong_tidak_membawa_nomor(self):
+        """Tanpa sasaran, tombol lompatnya tidak boleh digambar sama sekali."""
+        lolos, _ = _verifikasi(_calon())
+        assert lolos[0].sasaran == ""
+        assert lolos[0].sasaran_paragraf is None
+
+    def test_sasaran_karangan_tidak_membawa_nomor(self):
+        lolos, _ = _verifikasi(_calon(sasaran="pasal-99"))
+        assert lolos[0].sasaran_paragraf is None
+
+    def test_singkatan_yang_TERKANDUNG_di_singkatan_lain_tidak_ikut_ditunjuk(self):
+        """SALAH TUNJUK YANG TERBUKTI, PMK 104 Tahun 2025, 27 Sep 2026.
+
+        Teks yang ditandai "RPKBUNP SPAN", dan panel menyuruh penelaah
+        memperbaiki "Pasal 1 angka 2 (BUN)" — karena "BUN" memang terkandung
+        di dalam "RPK-BUN-P". Naskah hukum penuh jebakan begini: BUN di dalam
+        RPKBUNP, PA di dalam KPA, SPM di dalam SPM-LS.
+
+        Menunjuk angka yang salah lebih buruk daripada tidak menunjuk sama
+        sekali.
+        """
+        daftar = ambil_definisi(_pohon())
+        assert daftar.gagal is None
+
+        terkait = tahap5_verifikasi.definisi_terkait(
+            "penyaluran dana melalui RPKBUNP SPAN", daftar
+        )
+        assert [istilah for _, istilah, _ in terkait] == []
+
+        # Penjaga sisi sebaliknya: istilah yang BERDIRI SENDIRI tetap ketemu.
+        terkait = tahap5_verifikasi.definisi_terkait(
+            "Pengguna Barang wajib mengajukan permohonan", daftar
+        )
+        assert [istilah for _, istilah, _ in terkait] == ["Pengguna Barang"]
+
+    def test_lompatnya_ke_ANGKA_definisinya_bukan_pangkal_pasal_1(self):
+        """KAIDAH YANG MENJAGA TOMBOL "Lompat ke Perbaikan".
+
+        Dilaporkan penelaah 26 Sep 2026: tombolnya mendarat di "Pasal 1",
+        bukan di angka yang dipersoalkan — pada naskah yang Pasal 1-nya
+        belasan definisi, itu masih menyisakan pekerjaan menggulir dan
+        menebak.
+
+        Kalau suatu hari lompatannya dikembalikan ke pangkal pasal, tes ini
+        yang berbunyi.
+        """
+        pohon = _pohon()
+        pangkal = pohon.cari("pasal-1").paragraf_mulai
+        angka = pohon.cari("pasal-1-angka-1").paragraf_mulai
+        assert angka != pangkal, "fixture-nya tidak menguji apa pun"
+
+        lolos, _ = _verifikasi(
+            _calon(
+                sasaran="pasal-1",
+                teks_asli="Pengguna Barang wajib mengajukan permohonan",
+            )
+        )
+        assert lolos[0].sasaran_paragraf == angka
+        assert "angka 1 (Pengguna Barang)" in lolos[0].sasaran
+
+
 class TestPenghapusan:
     def test_F2_003_lahir_sebagai_penghapusan(self):
         """Definisi yang tidak pernah dipakai tidak punya rumusan pengganti
@@ -156,18 +290,18 @@ class TestPenghapusan:
 
 class TestLayakDicarikan:
     def test_yang_sudah_punya_usulan_dilewati(self):
-        assert not tahap6_rumusan.layak_dicarikan(_calon(usulan_rumusan="apa pun"))
+        assert not korpus_rumusan.layak_dicarikan(_calon(usulan_rumusan="apa pun"))
 
     def test_kutipan_kosong_dilewati(self):
-        assert not tahap6_rumusan.layak_dicarikan(_calon(teks_asli="   "))
+        assert not korpus_rumusan.layak_dicarikan(_calon(teks_asli="   "))
 
     def test_kutipan_terlalu_panjang_dilewati(self):
         """Penggantinya pasti ditolak `usulan_harfiah`, jadi membayarinya
         satu pencarian korpus cuma membuang uang."""
-        assert not tahap6_rumusan.layak_dicarikan(_calon(teks_asli="x" * 201))
+        assert not korpus_rumusan.layak_dicarikan(_calon(teks_asli="x" * 201))
 
     def test_calon_biasa_layak(self):
-        assert tahap6_rumusan.layak_dicarikan(_calon())
+        assert korpus_rumusan.layak_dicarikan(_calon())
 
 
 class TestLangkah6c:
@@ -192,7 +326,7 @@ class TestLangkah6c:
     def _jalan(self, jawaban: dict, *sebutan):
         calon = _calon()
         klien = KlienPalsu([json.dumps(jawaban, ensure_ascii=False)])
-        tahap6_rumusan.cari_rumusan(
+        korpus_rumusan.cari_rumusan(
             calon,
             _pohon(),
             self._korpus(*sebutan),
@@ -258,7 +392,7 @@ class TestLangkah6c:
         """Bertanya tanpa bahan cuma mengundang karangan — dan membayar."""
         calon = _calon()
         klien = KlienPalsu([])
-        tahap6_rumusan.cari_rumusan(
+        korpus_rumusan.cari_rumusan(
             calon, _pohon(), KorpusPalsu([HasilCari()]), PerapalPalsu(), klien, Ongkos()
         )
         assert klien.diminta == []
@@ -267,7 +401,7 @@ class TestLangkah6c:
     def test_batas_per_dokumen_ditaati_dan_dicatat(self):
         """Batas biaya. Yang kelebihan TIDAK diam-diam dilewati — catatannya
         masuk daftar gugur, supaya batas tidak nanti disangka bug."""
-        banyak = [_calon() for _ in range(tahap6_rumusan.BATAS_RUMUSAN + 4)]
+        banyak = [_calon() for _ in range(korpus_rumusan.BATAS_RUMUSAN + 4)]
         jawab = json.dumps(
             {
                 "usulan_rumusan": "wajib mengajukan permohonan kepada Menteri",
@@ -276,7 +410,7 @@ class TestLangkah6c:
             }
         )
         klien = KlienPalsu([jawab] * len(banyak))
-        catatan = tahap6_rumusan.lengkapi(
+        catatan = korpus_rumusan.lengkapi(
             banyak,
             _pohon(),
             self._korpus("PMK 40/2024", kali=len(banyak)),
@@ -284,7 +418,7 @@ class TestLangkah6c:
             klien,
             Ongkos(),
         )
-        assert len(klien.diminta) == tahap6_rumusan.BATAS_RUMUSAN
+        assert len(klien.diminta) == korpus_rumusan.BATAS_RUMUSAN
         assert any("batas" in c for c in catatan)
 
     def test_langkah_yang_berjalan_tanpa_hasil_tetap_tercatat(self):
@@ -293,7 +427,7 @@ class TestLangkah6c:
         menelusuri kenapa tidak ada temuan hijau."""
         satu = [_calon()]
         klien = KlienPalsu([json.dumps({"usulan_rumusan": "", "peraturan": ""})])
-        catatan = tahap6_rumusan.lengkapi(
+        catatan = korpus_rumusan.lengkapi(
             satu,
             _pohon(),
             self._korpus("PMK 40/2024"),
@@ -305,7 +439,7 @@ class TestLangkah6c:
 
     def test_tidak_ada_yang_layak_tidak_meninggalkan_catatan(self):
         """Tidak ada yang dibayar berarti tidak ada yang perlu dilaporkan."""
-        assert tahap6_rumusan.lengkapi(
+        assert korpus_rumusan.lengkapi(
             [_calon(usulan_rumusan="sudah ada")],
             _pohon(),
             self._korpus("PMK 40/2024"),
@@ -321,7 +455,7 @@ class TestLangkah6c:
         klien = KlienPalsu(
             [json.dumps({"usulan_rumusan": "x", "peraturan": "PMK 40/2024", "skor": 0.9})]
         )
-        tahap6_rumusan.lengkapi(
+        korpus_rumusan.lengkapi(
             campur,
             _pohon(),
             self._korpus("PMK 40/2024"),

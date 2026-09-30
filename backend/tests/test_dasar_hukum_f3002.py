@@ -14,9 +14,9 @@ from app.bersama.opensearch import (
     baca_nomor_korpus,
     baca_status_peraturan,
 )
-from app.fase2.tahap0_struktur import bangun_pohon
-from app.fase3.tahap6_dasar_hukum import cek_dasar_hukum
 from app.models.temuan import ParagrafInput
+from app.telaah.tahap1_parser.struktur import bangun_pohon
+from app.telaah.tahap2_persiapan.dasar_hukum import cek_dasar_hukum
 
 _KEPALA = [
     "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",

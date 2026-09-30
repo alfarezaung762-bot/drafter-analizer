@@ -1,6 +1,6 @@
 # Dokumentasi Drafter Analiser
 
-Enam berkas di sini, plus `CLAUDE.md` di akar. Kalau ada yang bertentangan,
+Tujuh berkas di sini, plus `CLAUDE.md` di akar. Kalau ada yang bertentangan,
 **`fase1 drafter.md` yang berlaku** — dokumen itu disamakan dengan kode setiap
 kali kode berubah.
 
@@ -9,9 +9,10 @@ kali kode berubah.
 | [`project-brief.md`](project-brief.md) | **Kenapa** alat ini dibangun, untuk siapa, dan cara penelaah bekerja sebenarnya. Bukan spesifikasi | Sekali, untuk memahami konteksnya |
 | [`fase1 drafter.md`](fase1%20drafter.md) | Seluruh rancangan Fase 1: apa yang dibangun, cara temuan ditampilkan, kontrak data, aturan untuk agen coding, definisi selesai | Sebelum mengubah apa pun |
 | [`cek list fase 1.md`](cek%20list%20fase%201.md) | **Apa yang benar-benar diperiksa, disusun per bagian naskah** (Judul, Menimbang, Mengingat, Menetapkan, batang tubuh, Lampiran) — untuk PMK dan KMK. Memuat juga Fase 2 dan 3, yang TIDAK diperiksa, dan kapan aturan memilih diam | Sambil membuka rancangan, untuk tahu mana yang masih harus diperiksa sendiri |
-| [`fase-2dan-3drafter.md`](fase-2dan-3drafter.md) | **Alur, batasan, dan teknologi** Fase 2 & 3: bagaimana model membaca PMK pasal per pasal tanpa ada yang terlewat, apa yang membatasi rancangannya, dan apa saja yang dibutuhkan. **Sudah dibangun; dokumen ini disamakan dengan kodenya** | Sebelum menyentuh `app/fase2/` atau `app/fase3/` |
+| [`fase-2dan-3drafter.md`](fase-2dan-3drafter.md) | **Alur, batasan, dan teknologi** Fase 2 & 3: bagaimana model membaca naskah utuh tanpa ada paragraf yang terlewat, apa yang membatasi rancangannya, dan apa saja yang dibutuhkan. **Sudah dibangun; dokumen ini disamakan dengan kodenya** | Sebelum menyentuh `app/telaah/` |
+| [`fase4-merapikan-backend.md`](fase4-merapikan-backend.md) | **Rancangan Fase 4 — agen penuh dengan skills:** yang ditelaah Biro Hukum, struktur folder berikut formulir analisis, alur, daftar respons agen, urutan dan rincian pengerjaan, daftar lengkap 193 fitur yang bisa dianalisis, beralamat lengkap di KMK 527; pertanyaan yang belum diputuskan di paling bawah | Sebelum mengerjakan Fase 4 |
 | [`panduan-officejs.md`](panduan-officejs.md) | API Word yang sudah diverifikasi ke `index.d.ts`, dan jebakan yang sudah terbukti | Sebelum memakai API Word yang belum pernah dipakai |
-| [`panduan-vibe.md`](panduan-vibe.md) | Ringkasan konvensi kode. **Isinya sudah ada seluruhnya di `CLAUDE.md`** — kandidat dihapus, lihat catatan di bawah | Tidak perlu |
+| [`perbaiki bug.md`](perbaiki%20bug.md) | **Catatan bug**: yang belum selesai berikut pilihan perbaikan dan akibatnya kalau dibiarkan; untuk yang sudah selesai cukup tes penjaganya — supaya tidak kambuh sesudah pembaruan berikutnya | Sebelum mengubah parser, bahan yang dikirim ke model, atau penandaan di Word |
 | [`../CLAUDE.md`](../CLAUDE.md) | Aturan kerja repo yang tidak boleh dilanggar | Otomatis dibaca Claude Code |
 
 ## Urutan baca
@@ -48,7 +49,11 @@ sewaktu-waktu diperlukan.
 | `rancangan-analisis-terima-ekspor.md` | Sama, dan rancangan ekspornya diringkas di bagian 6.7 sebagai dua pilihan yang belum diputuskan |
 | `konteks-hukum.md` | Seluruhnya kerangka kosong berisi `<!-- Isi akan ditambahkan kemudian -->`. Isinya ada di `pengetahuan-pmk-kmk.md` di ruang pengetahuan proyek |
 | `konteks-sistem-existing.md` | Sama, kerangka kosong. Isinya ada di `pemahaman-jdih-law-analyzer.md` |
-| `panduan-vibe.md` | Isinya dipindahkan ke `CLAUDE.md` supaya agen coding membacanya otomatis — **tetapi berkasnya ternyata masih ada di disk.** Ketahuan 18 Sep 2026. Selama masih ada, ia salinan kedua dari konvensi yang sama, yaitu persis pabrik cacat yang jadi alasan `kontrak-data.md` dihapus. Hapus, atau buat isinya menunjuk ke `CLAUDE.md` saja |
+| `analisis yang bisa dilakukan.md` | Dihapus 30 Sep 2026 atas permintaan penelaah. Seluruh 141 pemeriksaannya pindah ke `fase4-merapikan-backend.md` bagian 6, ditambah 48 dari Lampiran I KMK 527 dan blok Pemeriksaan rangkuman; kolom Sifat (pasti/tandai/usul) tetap ada di Lampiran D `tata-cara-penulisan-pmk-kmk527.md` |
+| Naskah uji buatan di `backend/tools/contoh/` (`uji-pmk-lengkap.docx`, `uji-kmk-lengkap.docx`, `uji-fase2-batangtubuh.docx`, `contoh-rancangan-uji.docx`), `KUNCI-UJI.md`, dan `tools/buat_contoh_uji.py` | Dihapus 29 Sep 2026 atas permintaan penelaah. Kesalahan dan jebakan yang dipasang di dalamnya sudah dijaga tes `pytest`; uji ke naskah memakai PMK yang sudah diundangkan di `tools/contoh/tempat pmk/` |
+| `app/fase2/tahap1_saring.py`, `tahap2_baca.py`, `tahap3_menalar.py`, `tahap4_tabrakan.py`, `ekspor_tahap0.py` | Bug 7, 29 Sep 2026. Peta ringkasan per satuan kehilangan detail; digantikan bahan naskah utuh (`telaah/tahap2_persiapan/bahan.py`) dan pencarian dugaan per kelompok pasal (`telaah/tahap3_cari_dugaan.py`). Tabrakan digabung ke `telaah/tahap4_memastikan/memastikan.py`; ekspor Tahap 0 jadi Tahap 1–2 |
+| Folder `app/fase2/` dan `app/fase3/` | Dipindah ke `app/telaah/` 29 Sep 2026, satu folder per tahap: `tahap0_*` → `tahap1_parser/`; `tahap2_bahan`, `mekanis_konsistensi`, `fase3/tahap6_dasar_hukum` → `tahap2_persiapan/`; `tahap4_*` dan `fase3/tahap6_*` → `tahap4_memastikan/`; `ekspor_tahapN` → `ekspor/tahapN.py`. Susunannya di `fase-2dan-3drafter.md` bagian 2 |
+| `panduan-vibe.md` | Isinya dipindahkan ke `CLAUDE.md` supaya agen coding membacanya otomatis. Berkasnya baru benar-benar dihapus 29 Sep 2026 — selama masih ada, ia salinan kedua dari konvensi yang sama, persis pabrik cacat yang jadi alasan `kontrak-data.md` dihapus |
 
 ## Cara memakai dokumentasi ini dengan agen coding
 
@@ -76,13 +81,10 @@ Tiga hal yang paling sering dilanggar:
 
 [`fase-2dan-3drafter.md`](fase-2dan-3drafter.md) berdiri sendiri dan bisa dibaca
 sesudah `fase1 drafter.md`. Susunannya: ringkasan, struktur folder berikut
-teknologi dan env-nya, **alur tujuh langkah beserta enam cabangnya** (termasuk
-apa yang terjadi kalau dua pasal bertabrakan), daftar fitur dan batasannya, sisa
+teknologi dan env-nya, **alur lima tahap beserta cabangnya** (termasuk apa yang
+terjadi kalau dua pasal bertabrakan), daftar fitur dan batasannya, sisa
 pertanyaan, dan hal janggal yang perlu dipertimbangkan.
 
 Yang paling menentukan di sana: **parser struktur sebagai pondasi tunggal** yang
-dipakai bersama seluruh Fase 2 dan 3, dan **contoh isi peta untuk 20 pasal** —
-yang memperlihatkan apa sebenarnya yang dibaca model saat menalar.
-
-Dokumen itu **rancangan, bukan perintah kerja.** Penulisan kodenya menunggu
-persetujuan terpisah.
+dipakai bersama seluruh Fase 2 dan 3, dan **bahan naskah utuh** — seluruh
+paragraf, satu baris per paragraf — yang ikut di tiap panggilan AI.

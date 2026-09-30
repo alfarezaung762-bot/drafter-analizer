@@ -1,22 +1,28 @@
 """Dua tabel, dan cuma dua.
 
-    PekerjaanDB   satu baris per analisis. Yang dibaca panel untuk menampilkan
-                  kemajuan "82/175" dan untuk tahu analisisnya masih hidup.
-    HasilSatuanDB satu baris per satuan yang sudah selesai dibaca — INILAH
-                  PETA. Bukan konsep tambahan: peta memang tinggal di tabel
-                  ini, dan Langkah 3 membacanya dari sini.
+    PekerjaanDB        satu baris per analisis. Yang dibaca panel untuk
+                       menampilkan kemajuan "Tahap 3 · 4/12" dan untuk tahu
+                       analisisnya masih hidup.
+    HasilPanggilanDB   satu baris per panggilan tahap 3 yang sudah dijawab —
+                       jawaban mentahnya, dikunci sidik pesannya.
 
 KENAPA PERLU BASIS DATA SAMA SEKALI. Analisis Fase 2 berjalan menit, bukan
 detik. Selama menit itu tiga hal bisa terjadi dan ketiganya pernah terjadi:
-backend di-restart, Word ditutup, panel dimuat ulang. Kalau petanya cuma ada
-di memori proses, ketiganya menghanguskan seluruh pekerjaan yang sudah
-dibayar — dan pekerjaan Fase 2 dibayar per token.
+backend di-restart, Word ditutup, panel dimuat ulang. Kalau jawabannya cuma
+ada di memori proses, ketiganya menghanguskan pekerjaan yang sudah dibayar.
 
-Brief 8.7 mencatat Law Analyzer berhenti di 68/175 satuan. Dengan tabel ini,
-berhenti di 68 berarti 68 satuan sudah tersimpan dan yang perlu diulang
-tinggal sisanya.
+Sampai bug 7 (29 Sep 2026) yang disimpan PETA per satuan (`da_hasil_satuan`).
+Petanya sudah tidak ada — model membaca naskah utuh — jadi yang disimpan kini
+jawaban tiap panggilan tahap 3. Kuncinya sidik PESAN, bukan id satuan: jawaban
+lama hanya dipakai ulang untuk pesan yang sama persis, jadi naskah yang sudah
+diubah tidak pernah menerima jawaban atas naskah lamanya. Tabel lama dibiarkan
+di basis data, tidak dipakai lagi.
 
-TIDAK ADA TABEL TEMUAN. Temuan lahir di Langkah 5 dan langsung dikirim ke
+Kolom `satuan_total`/`satuan_selesai` di tabel pekerjaan sengaja TIDAK diganti
+nama walau isinya kini kemajuan per tahap: mengganti nama kolom menuntut
+migrasi di basis data yang sudah berjalan.
+
+TIDAK ADA TABEL TEMUAN. Temuan lahir di tahap 5 dan langsung dikirim ke
 panel; yang perlu bertahan justru bahan bakunya, karena itu yang mahal.
 """
 
@@ -40,8 +46,8 @@ class PekerjaanDB(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     dokumen: str = Field(default="", index=True)
     status: str = Field(default="menunggu", index=True)
-    satuan_total: int = 0
-    satuan_selesai: int = 0
+    satuan_total: int = 0  # kemajuan: total langkah tahap yang berjalan
+    satuan_selesai: int = 0  # kemajuan: yang sudah selesai
     panggilan: int = 0
     token_masuk: int = 0
     token_keluar: int = 0
@@ -50,24 +56,17 @@ class PekerjaanDB(SQLModel, table=True):
     diperbarui: datetime = Field(default_factory=_sekarang)
 
 
-class HasilSatuanDB(SQLModel, table=True):
-    """Satu baris peta yang sudah selesai dibaca.
+class HasilPanggilanDB(SQLModel, table=True):
+    """Jawaban satu panggilan tahap 3 yang sudah dibayar.
 
-    Kunci uniknya (pekerjaan_id, satuan_id): satuan yang sama tidak pernah
-    dibayar dua kali dalam satu pekerjaan.
+    Kunci uniknya (pekerjaan_id, kunci): pesan yang sama tidak pernah dibayar
+    dua kali dalam satu pekerjaan.
     """
 
-    __tablename__ = "da_hasil_satuan"
+    __tablename__ = "da_hasil_panggilan"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     pekerjaan_id: int = Field(index=True)
-    satuan_id: str = Field(index=True)
-    ringkasan: str = ""
-    memuat_norma: bool = False
-    # Disimpan sebagai teks dipisah koma, bukan tabel sendiri. Isinya cuma
-    # dibaca utuh lalu dikirim ke model, tidak pernah dicari per istilah, jadi
-    # tabel penghubung cuma menambah kerumitan tanpa menambah kemampuan.
-    istilah_dipakai: str = ""
-    merujuk: str = ""
-    dugaan: str = ""
+    kunci: str = Field(index=True, description="Sidik SHA-1 pesan system + user.")
+    jawaban: str = ""
     dibuat: datetime = Field(default_factory=_sekarang)

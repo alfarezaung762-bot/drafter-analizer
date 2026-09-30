@@ -1,22 +1,23 @@
-"""Bentuk data untuk analisis panjang Fase 2/3 — pekerjaan, peta, dugaan, calon.
+"""Bentuk data untuk analisis panjang Fase 2/3 — pekerjaan, dugaan, calon.
 
 BERKAS INI TIDAK MENGERJAKAN APA PUN, sekelas dengan temuan.py dan satuan.py.
-Ia menetapkan empat bentuk yang berpindah tangan antar-langkah:
+Ia menetapkan tiga bentuk yang berpindah tangan antar-tahap:
 
-    BarisPeta     keluaran Langkah 2. Satu baris per satuan. Kumpulan baris
-                  inilah yang disebut PETA, dan Langkah 3 menalar di atasnya —
-                  bukan di atas teks penuh.
-    Dugaan        keluaran Langkah 3. BELUM temuan. Tidak pernah menyentuh
-                  naskah sebelum lolos Langkah 4.
-    CalonTemuan   keluaran Langkah 4 dan 6. Masih belum menyentuh naskah:
-                  Langkah 5 yang memutuskan ia jadi Temuan atau gugur.
+    Dugaan        keluaran tahap 3 (cari dugaan). BELUM temuan. Tidak pernah
+                  menyentuh naskah sebelum lolos tahap 4.
+    CalonTemuan   keluaran tahap 4 (memastikan) dan korpus. Masih belum
+                  menyentuh naskah: tahap 5 yang memutuskan ia jadi Temuan
+                  atau gugur.
     Pekerjaan     keadaan satu kali analisis, supaya panel bisa menampilkan
                   kemajuan dan supaya backend yang mati di tengah jalan tidak
-                  menghanguskan yang sudah selesai.
+                  menghanguskan yang sudah dibayar.
 
 Kenapa dipisah bertingkat begini, tidak langsung jadi Temuan: supaya tidak ada
 satu pun jalan pintas dari tebakan model ke naskah orang. Tiap tingkat punya
 satu pemeriksa, dan Temuan baru lahir di ujung terakhir.
+
+`BarisPeta` sudah dihapus 29 Sep 2026 bersama petanya (bug 7): model kini
+membaca naskah utuh, bukan ringkasan per satuan.
 """
 
 from __future__ import annotations
@@ -34,45 +35,8 @@ class StatusPekerjaan(str, Enum):
     GAGAL = "gagal"
 
 
-class BarisPeta(BaseModel):
-    """Satu baris peta — hasil Langkah 2 untuk satu satuan."""
-
-    satuan_id: str
-    ringkasan: str = Field(default="", description="Satu kalimat: satuan ini mengatur apa.")
-    memuat_norma: bool = False
-    istilah_dipakai: list[str] = Field(default_factory=list)
-    merujuk: list[str] = Field(
-        default_factory=list,
-        description="id satuan yang dirujuk. Diisi PARSER, bukan model.",
-    )
-    dugaan: str = Field(
-        default="",
-        description="Kejanggalan yang sudah terlihat saat membaca satuan ini sendirian.",
-    )
-
-    def baris(self) -> str:
-        """Bentuk sebaris untuk dikirim ke Langkah 3.
-
-        Sengaja padat: seluruh peta dokumen 175 satuan harus muat dalam satu
-        panggilan, dan yang membuatnya muat adalah baris ini pendek.
-        """
-        bagian = [f"[{self.satuan_id}] {self.ringkasan}"]
-        if self.merujuk:
-            bagian.append("merujuk: " + ", ".join(self.merujuk))
-        if self.istilah_dipakai:
-            bagian.append("istilah: " + ", ".join(self.istilah_dipakai))
-        if self.dugaan:
-            bagian.append("DUGAAN: " + self.dugaan)
-        return " | ".join(bagian)
-
-
 class Dugaan(BaseModel):
-    """Keluaran Langkah 3. BELUM temuan — wajib lewat Langkah 4 dulu.
-
-    Rancangan bagian 3: "tidak ada temuan yang boleh lahir dari Langkah 3
-    saja." Peta kehilangan detail, jadi apa pun yang terlihat di atasnya masih
-    dugaan sampai diuji pada teks utuhnya.
-    """
+    """Keluaran tahap 3. BELUM temuan — wajib lewat tahap 4 dulu."""
 
     satuan_id: str
     satuan_lain: str = Field(
@@ -80,15 +44,18 @@ class Dugaan(BaseModel):
     )
     jenis: str = Field(
         default="",
-        description="tabrakan | pemikul | makna_ganda | operasional | cakupan",
+        description="makna_ganda | pemikul | operasional | tabrakan | cakupan | lampiran",
     )
     alasan: str = ""
     eksternal: bool = Field(
         default=False,
         description=(
             "True bila pembuktiannya menuntut dokumen DI LUAR rancangan ini. "
-            "Yang menentukan apakah Langkah 6 (korpus) wajib dijalankan."
+            "Yang menentukan apakah pencarian korpus (F3-001) dijalankan."
         ),
+    )
+    asal: str = Field(
+        default="", description="Panggilan tahap 3 yang melahirkannya — untuk Ekspor Tahap 5."
     )
 
     @property
@@ -97,12 +64,12 @@ class Dugaan(BaseModel):
 
 
 class CalonTemuan(BaseModel):
-    """Keluaran Langkah 4 atau Langkah 6. Masuk ke Langkah 5 untuk diverifikasi.
+    """Keluaran tahap 4 atau korpus. Masuk ke tahap 5 untuk diverifikasi.
 
     Bedanya dengan Temuan: calon masih memegang `teks_asli` sebagai kutipan
     MENTAH dari model. Belum dibuktikan kutipan itu benar-benar ada di naskah.
-    Langkah 5 yang membuktikannya, dan yang tidak terbukti tidak pernah
-    sampai ke naskah.
+    Tahap 5 yang membuktikannya, dan yang tidak terbukti tidak pernah sampai
+    ke naskah.
     """
 
     aturan_id: str
@@ -119,26 +86,45 @@ class CalonTemuan(BaseModel):
             "\n"
             "Ada karena komentar yang menempel di Pasal 5 bisa menyuruh "
             "menambah definisi, padahal definisinya harus ditulis di Pasal 1. "
-            "Penelaah tidak punya cara menebaknya. Langkah 5 membuktikan "
-            "tempat yang disebut memang ada di naskah; yang tidak terbukti "
-            "dikosongkan, karena menunjuk Pasal yang tidak ada lebih buruk "
-            "daripada diam soal tempat."
+            "Penelaah tidak punya cara menebaknya. Tahap 5 membuktikan tempat "
+            "yang disebut memang ada di naskah; yang tidak terbukti dikosongkan, "
+            "karena menunjuk Pasal yang tidak ada lebih buruk daripada diam soal "
+            "tempat."
         ),
     )
     usulan_rumusan: str = ""
+    bacaan: list[str] = Field(
+        default_factory=list,
+        description=(
+            "F2-101: dua cara membaca rumusan yang sama-sama masuk akal dan "
+            "berbeda akibatnya. Tanpa keduanya, 'bisa dibaca dua arah' cuma "
+            "kesan — tahap 5 menggugurkannya. Ditambahkan 27 Sep 2026, sesudah "
+            "F2-101 menandai rumusan baku 'sesuai dengan peraturan "
+            "perundang-undangan' sebagai 'terlalu umum', yang bukan dua arah."
+        ),
+    )
+    tidak_ada: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Teks yang diklaim model TIDAK ADA di naskah. Tahap 5 mencarinya di "
+            "seluruh teks mentah — ketemu di mana pun berarti klaimnya keliru, "
+            "dan calonnya gugur (bug 7). Salah tandai 27 Sep 2026 lahir dari "
+            "klaim begini yang tidak pernah dibuktikan."
+        ),
+    )
     skor: float = 0.0
     eksternal: bool = False
     pembanding: str = Field(
-        default="", description="Fase 3: nama peraturan pembanding, disalin dari hasil pencarian."
+        default="", description="Korpus: nama peraturan pembanding, disalin dari hasil pencarian."
     )
     pembanding_sah: list[str] = Field(
         default_factory=list,
         description=(
-            "Fase 3: nama peraturan yang BOLEH disebut — persis yang dikirim "
-            "ke model pada Langkah 6. Dibawa per calon, bukan satu daftar "
-            "untuk seluruh dokumen, karena tiap ketentuan punya pembandingnya "
-            "sendiri. Langkah 5 memakainya untuk membuktikan model tidak "
-            "menyebut peraturan dari ingatannya."
+            "Korpus: nama peraturan yang BOLEH disebut — persis yang dikirim ke "
+            "model saat membandingkan. Dibawa per calon, bukan satu daftar untuk "
+            "seluruh dokumen, karena tiap ketentuan punya pembandingnya sendiri. "
+            "Tahap 5 memakainya untuk membuktikan model tidak menyebut peraturan "
+            "dari ingatannya."
         ),
     )
 
@@ -148,14 +134,16 @@ class Pekerjaan(BaseModel):
 
     Brief 8.7: Law Analyzer macet di 68/175 satuan. Yang membuat kemacetan itu
     tidak terlihat sampai terlambat adalah tidak adanya angka kemajuan. Di sini
-    angkanya ada sejak panggilan pertama.
+    angkanya ada sejak panggilan pertama — per tahap: "Tahap 3 · 4/12
+    panggilan", lalu "Tahap 4 · 3/10 dugaan".
     """
 
     id: Optional[int] = None
     dokumen: str = ""
     status: StatusPekerjaan = StatusPekerjaan.MENUNGGU
-    satuan_total: int = 0
-    satuan_selesai: int = 0
+    tahap: str = Field(default="", description="Tahap yang sedang berjalan, mis. '3 cari dugaan'.")
+    selesai: int = 0
+    total: int = 0
     panggilan: int = 0
     token_masuk: int = 0
     token_keluar: int = 0
@@ -165,4 +153,4 @@ class Pekerjaan(BaseModel):
 
     @property
     def kemajuan(self) -> str:
-        return f"{self.satuan_selesai}/{self.satuan_total}"
+        return f"{self.selesai}/{self.total}"

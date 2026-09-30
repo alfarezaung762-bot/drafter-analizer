@@ -15,7 +15,7 @@ persis supaya `pytest -v` terbaca seperti skemanya. Jalankan:
     .venv/Scripts/python.exe -m pytest tests/test_usulan_muat_di_kalimat.py -v
 """
 
-from app.fase2.tahap5_verifikasi import periksa_usulan, usulan_harfiah
+from app.telaah.tahap5_verifikasi import periksa_usulan, usulan_harfiah
 
 
 class TestEmpatKasusYangDipakaiMemutuskan:

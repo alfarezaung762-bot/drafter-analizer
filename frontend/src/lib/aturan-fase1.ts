@@ -33,81 +33,6 @@ export const ATURAN_FASE1: KeteranganAturan[] = [
       "deteksi yang terbukti.",
   },
   {
-    id: "F1-002",
-    judul: "Judul pembuka sama persis dengan judul pada Menetapkan",
-    diperiksa: [
-      "Judul sesudah TENTANG di blok pembuka, dibandingkan kata per kata dengan judul pada klausul Menetapkan",
-      "Klausul Menetapkan dicari HANYA di antara MEMUTUSKAN dan batang tubuh (BAB/Pasal/diktum)",
-      "Bentuk bertabel ikut terbaca: label “Menetapkan” dan isinya boleh di paragraf terpisah",
-    ],
-    tidakDiperiksa: [
-      "Mana dari dua judul itu yang benar — itu keputusan penelaah",
-      "Isi judulnya sendiri; yang dibandingkan cuma kesamaan keduanya",
-      "MEMILIH DIAM bila MEMUTUSKAN tidak ada di dokumen — tanpa itu klausul Menetapkan tidak bisa dipastikan letaknya",
-    ],
-    tanda:
-      "Blok kuning pada kata yang berbeda saja. Kalau yang salah justru kata " +
-      "yang HILANG dari Menetapkan, tidak ada yang bisa ditunjuk di naskah: " +
-      "temuannya muncul sebagai peringatan dokumen di atas daftar, tanpa " +
-      "tanda dan tanpa komentar",
-  },
-  {
-    id: "F1-003",
-    judul: "Kelengkapan bagian wajib",
-    diperiksa: [
-      "Ada tidaknya bagian Menimbang",
-      "Ada tidaknya bagian Mengingat",
-      "Ada tidaknya klausul Menetapkan",
-    ],
-    tidakDiperiksa: [
-      "Isi maupun urutan ketiganya",
-      "Bagian lain seperti Dasar Hukum, Diktum, atau penutup",
-    ],
-    tanda:
-      "Peringatan di panel, tanpa tanda di naskah — ketiadaan sebuah bagian " +
-      "memang tidak punya lokasi untuk ditunjuk",
-  },
-  {
-    id: "F1-004",
-    judul: "Bunyi baku butir Menimbang terakhir",
-    diperiksa: [
-      "Frasa “berdasarkan pertimbangan sebagaimana dimaksud dalam huruf”",
-      "Frasa “perlu menetapkan”",
-      "Nama jenis peraturan sesuai pilihan PMK/KMK, diikuti kata “tentang”",
-      "Butirnya diakhiri tanda titik koma",
-    ],
-    tidakDiperiksa: [
-      "Berlaku HANYA bila Menimbang punya lebih dari satu butir (a, b, c). Satu butir tanpa huruf adalah bentuk yang sah",
-      "Apakah huruf yang dirujuk benar-benar ada di butir sebelumnya",
-      "Isi pertimbangannya sendiri",
-      "Apakah penyimpangannya bisa diterima dalam konteksnya — itu pertimbangan penelaah, bukan alat",
-    ],
-    tanda: "Blok kuning pada awal butir terakhir, dipotong di 120 karakter",
-    catatanSumber:
-      "Butir 22 berbunyi rumusan itu dipakai “PADA UMUMNYA”, bukan wajib — " +
-      "sudah diperiksa pada pindaian halaman 35, 18 Sep 2026. Artinya " +
-      "penyimpangan dari rumusan ini BELUM TENTU kesalahan. Aturan ini satu-" +
-      "satunya di Fase 1 yang tidak bersandar pada butir imperatif; kalau " +
-      "penelaah menilai temuannya lebih mengganggu daripada berguna, " +
-      "matikan saja lewat kotak centang di atas.",
-  },
-  {
-    id: "F1-005",
-    judul: "Ejaan baku penyusunan peraturan",
-    diperiksa: [
-      "“Undang-Undang” ditulis kapital pada kedua unsurnya — HANYA di bagian Mengingat",
-      "“Peraturan Pemerintah Pengganti Undang-Undang” ditulis lengkap dengan kapital — juga hanya di Mengingat",
-      "Kata “tentang” di dalam judul peraturan pada dasar hukum tetap huruf kecil — HANYA di bagian Mengingat",
-    ],
-    tidakDiperiksa: [
-      "Typo biasa. Salah ketik seperti “bena” → “benar” TIDAK terdeteksi sama sekali, dan memang tidak akan. Ini bukan kamus bahasa Indonesia, cuma tiga pola di atas",
-      "Nama jenis peraturan lain (Perpres, Perda, dsb.) — belum dimasukkan",
-      "Apa pun di luar bagian Mengingat. Butir 32 dan 33 dua-duanya berbicara tentang DASAR HUKUM, jadi rujukan generik di dalam Lampiran tidak lagi dituduh",
-      "Kata penghubung/konjungsi yang menurut butir 32 juga tetap huruf kecil — belum dibangun",
-    ],
-    tanda: "Teks lama merah dicoret, usulan penggantinya hijau di sebelahnya",
-  },
-  {
     id: "F1-006",
     judul: "Judul peraturan tidak diakhiri tanda baca",
     diperiksa: [
@@ -119,6 +44,28 @@ export const ATURAN_FASE1: KeteranganAturan[] = [
       "Baris kosong di ujung blok judul, dilewati",
     ],
     tanda: "Kata terakhir beserta tanda bacanya dicoret merah, penggantinya hijau",
+  },
+  {
+    id: "F1-003",
+    judul: "Kelengkapan bagian wajib",
+    diperiksa: [
+      "Ada tidaknya bagian Menimbang",
+      "Ada tidaknya bagian Mengingat",
+      "Ada tidaknya klausul Menetapkan",
+      "Ada tidaknya frasa “DENGAN RAHMAT TUHAN YANG MAHA ESA” — HANYA pada PMK, karena butir 13 menyebut kekhususan itu sendiri",
+    ],
+    tidakDiperiksa: [
+      "Isi maupun urutan keempatnya",
+      "Frasa “Dengan Rahmat …” pada KMK — KMK memang tidak memakainya",
+      "Letak frasanya; yang diperiksa ada atau tidak, bukan benar tempatnya",
+      "MEMILIH DIAM soal frasa itu bila tidak satu pun bagian pembukaan terbaca — pertanda bloknya belum sampai ke pembaca naskah, bukan pertanda cacat",
+      "Bagian lain seperti Dasar Hukum, Diktum, atau penutup",
+    ],
+    tanda:
+      "Komentar menempel di baris judul pembuka dokumen (anchor netral, " +
+      "TIDAK diwarnai) — ketiadaan sebuah bagian memang tidak punya lokasi " +
+      "sendiri untuk ditunjuk, tapi tetap wajib berkomentar dan bisa " +
+      "Terima/Tolak seperti temuan lain (27 Sep 2026)",
   },
   {
     id: "F1-007",
@@ -155,6 +102,30 @@ export const ATURAN_FASE1: KeteranganAturan[] = [
       "beberapa butir sekaligus",
   },
   {
+    id: "F1-004",
+    judul: "Bunyi baku butir Menimbang terakhir",
+    diperiksa: [
+      "Frasa “berdasarkan pertimbangan sebagaimana dimaksud dalam huruf”",
+      "Frasa “perlu menetapkan”",
+      "Nama jenis peraturan sesuai pilihan PMK/KMK, diikuti kata “tentang”",
+      "Butirnya diakhiri tanda titik koma",
+    ],
+    tidakDiperiksa: [
+      "Berlaku HANYA bila Menimbang punya lebih dari satu butir (a, b, c). Satu butir tanpa huruf adalah bentuk yang sah",
+      "Apakah huruf yang dirujuk benar-benar ada di butir sebelumnya",
+      "Isi pertimbangannya sendiri",
+      "Apakah penyimpangannya bisa diterima dalam konteksnya — itu pertimbangan penelaah, bukan alat",
+    ],
+    tanda: "Blok kuning pada awal butir terakhir, dipotong di 120 karakter",
+    catatanSumber:
+      "Butir 22 berbunyi rumusan itu dipakai “PADA UMUMNYA”, bukan wajib — " +
+      "sudah diperiksa pada pindaian halaman 35, 18 Sep 2026. Artinya " +
+      "penyimpangan dari rumusan ini BELUM TENTU kesalahan. Aturan ini satu-" +
+      "satunya di Fase 1 yang tidak bersandar pada butir imperatif; kalau " +
+      "penelaah menilai temuannya lebih mengganggu daripada berguna, " +
+      "matikan saja lewat kotak centang di atas.",
+  },
+  {
     id: "F1-009",
     judul: "Penulisan kata “Mengingat”",
     diperiksa: [
@@ -184,6 +155,22 @@ export const ATURAN_FASE1: KeteranganAturan[] = [
     tanda: "Blok kuning pada satu karakter terakhir butirnya",
   },
   {
+    id: "F1-005",
+    judul: "Ejaan baku penyusunan peraturan",
+    diperiksa: [
+      "“Undang-Undang” ditulis kapital pada kedua unsurnya — HANYA di bagian Mengingat",
+      "“Peraturan Pemerintah Pengganti Undang-Undang” ditulis lengkap dengan kapital — juga hanya di Mengingat",
+      "Kata “tentang” di dalam judul peraturan pada dasar hukum tetap huruf kecil — HANYA di bagian Mengingat",
+    ],
+    tidakDiperiksa: [
+      "Typo biasa. Salah ketik seperti “bena” → “benar” TIDAK terdeteksi sama sekali, dan memang tidak akan. Ini bukan kamus bahasa Indonesia, cuma tiga pola di atas",
+      "Nama jenis peraturan lain (Perpres, Perda, dsb.) — belum dimasukkan",
+      "Apa pun di luar bagian Mengingat. Butir 32 dan 33 dua-duanya berbicara tentang DASAR HUKUM, jadi rujukan generik di dalam Lampiran tidak lagi dituduh",
+      "Kata penghubung/konjungsi yang menurut butir 32 juga tetap huruf kecil — belum dibangun",
+    ],
+    tanda: "Teks lama merah dicoret, usulan penggantinya hijau di sebelahnya",
+  },
+  {
     id: "F1-011",
     judul: "Penulisan kata “Menetapkan”",
     diperiksa: [
@@ -197,6 +184,26 @@ export const ATURAN_FASE1: KeteranganAturan[] = [
       "Ketentuan “disejajarkan ke bawah dengan Menimbang dan Mengingat” — itu tata letak, tidak bisa diperiksa dari daftar paragraf",
     ],
     tanda: "Kata labelnya saja",
+  },
+  {
+    id: "F1-002",
+    judul: "Judul pembuka sama persis dengan judul pada Menetapkan",
+    diperiksa: [
+      "Judul sesudah TENTANG di blok pembuka, dibandingkan kata per kata dengan judul pada klausul Menetapkan",
+      "Klausul Menetapkan dicari HANYA di antara MEMUTUSKAN dan batang tubuh (BAB/Pasal/diktum)",
+      "Bentuk bertabel ikut terbaca: label “Menetapkan” dan isinya boleh di paragraf terpisah",
+    ],
+    tidakDiperiksa: [
+      "Mana dari dua judul itu yang benar — itu keputusan penelaah",
+      "Isi judulnya sendiri; yang dibandingkan cuma kesamaan keduanya",
+      "MEMILIH DIAM bila MEMUTUSKAN tidak ada di dokumen — tanpa itu klausul Menetapkan tidak bisa dipastikan letaknya",
+    ],
+    tanda:
+      "Blok kuning pada kata yang berbeda saja. Kalau yang salah justru kata " +
+      "yang HILANG dari Menetapkan, tidak ada kata yang bisa disorot: " +
+      "komentarnya menempel di baris judul pembuka dokumen (anchor netral, " +
+      "TIDAK diwarnai) supaya tetap bisa Terima/Tolak seperti biasa " +
+      "(27 Sep 2026)",
   },
   {
     id: "F1-012",

@@ -4,9 +4,9 @@ Fungsi murni, dites tanpa server, tanpa model, tanpa kredensial — pola yang
 sama dengan tes Fase 1.
 """
 
-from app.fase2.tahap0_struktur import bangun_pohon
 from app.models.satuan import JenisSatuan
 from app.models.temuan import ParagrafInput
+from app.telaah.tahap1_parser.struktur import bangun_pohon, pasangan_label
 
 
 def _dok(baris: list[str]) -> list[ParagrafInput]:
@@ -398,3 +398,265 @@ class TestNaskahPerubahan:
         kepala[7] = "Menetapkan : PERATURAN MENTERI KEUANGAN TENTANG TATA CARA."
         pohon = self._pohon(kepala + ["Pasal 1", "Isi pasal satu."])
         assert pohon.gagal is None
+
+
+class TestBatangInduk:
+    """Butir tabulasi tidak boleh sampai ke model tanpa kalimat induknya.
+
+    Dua satuan di bawah ini disalin dari PMK 17 Tahun 2026, dan keduanya kasus
+    nyata yang sudah menghasilkan salah tandai 26 Sep 2026: dikirim telanjang,
+    "Pertanggungjawaban." terbaca model sebagai norma yang tidak menyebut
+    pemikul kewajiban — padahal ia butir daftar ruang lingkup.
+    """
+
+    _ISI = [
+        "Pasal 2",
+        "Ruang lingkup pengaturan dalam Peraturan Menteri ini meliputi:",
+        "a. Koordinasi dalam rangka penyusunan RKA Otoritas Jasa Keuangan;",
+        "b. Pejabat perbendaharaan; dan",
+        "c. Pertanggungjawaban.",
+        "Pasal 9",
+        "(1) KPA BUN sebagaimana dimaksud dalam Pasal 7 menetapkan pegawai sebagai:",
+        "a. PPK; dan",
+        "b. PPSPM.",
+    ]
+
+    def _pohon(self):
+        return bangun_pohon(_dok(_PEMBUKAAN + self._ISI))
+
+    def test_butir_ruang_lingkup_membawa_kalimat_pembukanya(self):
+        gabung = self._pohon().teks_dengan_induk("pasal-2-huruf-c")
+        assert "Ruang lingkup" in gabung and "meliputi" in gabung
+        assert "Pertanggungjawaban." in gabung
+
+    def test_huruf_di_dalam_ayat_membawa_batang_ayatnya(self):
+        """"PPK;" sendirian tidak berarti apa-apa."""
+        gabung = self._pohon().teks_dengan_induk("pasal-9-ayat-1-huruf-a")
+        assert "menetapkan pegawai sebagai:" in gabung
+        assert "PPK" in gabung
+
+    def test_batang_TIDAK_membawa_saudara_sebutirnya(self):
+        """Kalau anak-cucu induknya ikut, butir yang diperiksa tenggelam."""
+        assert "PPSPM" not in self._pohon().batang_induk("pasal-9-ayat-1-huruf-a")
+
+    def test_satuan_teratas_tidak_punya_batang(self):
+        assert self._pohon().batang_induk("pasal-2") == ""
+
+    def test_id_karangan_tidak_meledak(self):
+        assert self._pohon().batang_induk("pasal-99-ayat-3") == ""
+        assert self._pohon().teks_dengan_induk("pasal-99-ayat-3") == ""
+
+
+class TestButirBersarang:
+    """Regresi PMK 45 Tahun 2026 Pasal 3, 27 Sep 2026 — docs/perbaiki bug.md bug 1.
+
+    Angka 1–9 di bawah huruf a dulu jadi anak ayat (1), bersaudara dengan
+    huruf a. Model menerima "Lembaga Kepresidenan;" sebagai lanjutan
+    "merupakan barang yang:", melompati "digunakan … oleh:".
+    """
+
+    _ISI = [
+        "BAB II",
+        "PEMBEBASAN BEA MASUK",
+        "Pasal 3",
+        "(1) Barang sebagaimana dimaksud dalam Pasal 2 merupakan barang yang:",
+        "a. digunakan bagi keperluan pertahanan dan keamanan negara oleh:",
+        "1. Lembaga Kepresidenan;",
+        "2. Kementerian Pertahanan; dan/atau",
+        "b. digunakan dalam kegiatan militer bersama.",
+        "(2) Barang dan bahan dipergunakan untuk keperluan lain.",
+    ]
+
+    def _pohon(self):
+        return bangun_pohon(_dok(_PEMBUKAAN + self._ISI))
+
+    def test_angka_di_bawah_huruf_menjadi_anak_hurufnya(self):
+        pohon = self._pohon()
+        angka = pohon.cari("pasal-3-ayat-1-huruf-a-angka-1")
+        assert angka is not None and angka.induk == "pasal-3-ayat-1-huruf-a"
+        assert not pohon.ada("pasal-3-ayat-1-angka-1")
+
+    def test_huruf_sesudah_daftar_angka_kembali_bersaudara_dengan_huruf_a(self):
+        b = self._pohon().cari("pasal-3-ayat-1-huruf-b")
+        assert b is not None and b.induk == "pasal-3-ayat-1"
+
+    def test_rentang_huruf_a_mencakup_angkanya(self):
+        pohon = self._pohon()
+        a = pohon.cari("pasal-3-ayat-1-huruf-a")
+        angka_2 = pohon.cari("pasal-3-ayat-1-huruf-a-angka-2")
+        assert a.paragraf_akhir == angka_2.paragraf_akhir
+
+    def test_ayat_baru_menutup_seluruh_butir(self):
+        ayat_2 = self._pohon().cari("pasal-3-ayat-2")
+        assert ayat_2 is not None and ayat_2.induk == "pasal-3"
+
+    def test_huruf_di_bawah_angka_juga_bersarang_lalu_kembali(self):
+        pohon = bangun_pohon(_dok(_PEMBUKAAN + [
+            "Pasal 4",
+            "(1) Dokumen terdiri atas:",
+            "1. dokumen pokok, yang meliputi:",
+            "a. surat permohonan;",
+            "b. surat kuasa;",
+            "2. dokumen pendukung.",
+        ]))
+        assert pohon.cari("pasal-4-ayat-1-angka-1-huruf-b").induk == "pasal-4-ayat-1-angka-1"
+        assert pohon.cari("pasal-4-ayat-1-angka-2").induk == "pasal-4-ayat-1"
+
+    def test_definisi_pasal_1_tetap_bersaudara(self):
+        pohon = bangun_pohon(_dok(_PEMBUKAAN + [
+            "Pasal 1",
+            "1. Hari adalah hari kerja.",
+            "2. Menteri adalah menteri keuangan.",
+        ]))
+        assert pohon.cari("pasal-1-angka-2").induk == "pasal-1"
+
+
+class TestJudulBabBerbaris:
+    """Regresi PMK 45 dan PMK 17, 27 Sep 2026: baris kedua judul BAB hilang."""
+
+    def test_judul_bab_dua_baris_terbaca_utuh(self):
+        pohon = bangun_pohon(_dok(_PEMBUKAAN + [
+            "BAB III",
+            "PERMOHONAN, PENELITIAN,",
+            "DAN PENETAPAN PEMBEBASAN BEA MASUK",
+            "Pasal 6",
+            "Isi pasal enam.",
+        ]))
+        bab = pohon.cari("bab-iii")
+        assert bab.teks == "BAB III PERMOHONAN, PENELITIAN, DAN PENETAPAN PEMBEBASAN BEA MASUK"
+        assert pohon.cari("pasal-6").teks == "Isi pasal enam."
+
+    def test_judul_bagian_tidak_menelan_kalimat_pasal(self):
+        pohon = bangun_pohon(_dok(_PEMBUKAAN + [
+            "BAB I",
+            "KETENTUAN UMUM",
+            "Pasal 1",
+            "Isi pasal satu.",
+        ]))
+        assert pohon.cari("bab-i").teks == "BAB I KETENTUAN UMUM"
+
+
+class TestLabelDiTeksModel:
+    """CLAUDE.md butir 14: label penomoran wajib ikut di teks yang dibaca model."""
+
+    def _pohon(self):
+        return TestButirBersarang()._pohon()
+
+    def test_teks_berlabel_memuat_huruf_dan_angka(self):
+        utuh = self._pohon().teks_lengkap("pasal-3-ayat-1", berlabel=True)
+        assert "a. digunakan bagi" in utuh
+        assert "1. Lembaga Kepresidenan;" in utuh
+        assert "b. digunakan dalam kegiatan militer" in utuh
+
+    def test_akar_tidak_dilabeli_karena_jadi_sumber_kutipan(self):
+        utuh = self._pohon().teks_lengkap("pasal-3-ayat-1", berlabel=True)
+        assert utuh.startswith("Barang sebagaimana")
+
+    def test_bawaan_tanpa_label_untuk_pencocokan_kata(self):
+        utuh = self._pohon().teks_lengkap("pasal-3-ayat-1")
+        assert "a. " not in utuh and "1. " not in utuh
+
+    def test_batang_induk_membawa_label_tiap_tingkat(self):
+        batang = self._pohon().batang_induk("pasal-3-ayat-1-huruf-a-angka-1")
+        assert "Pasal 3" in batang
+        assert "(1) Barang" in batang
+        assert "a. digunakan bagi keperluan" in batang
+
+    def test_teks_dengan_induk_melabeli_akarnya(self):
+        gabung = self._pohon().teks_dengan_induk("pasal-3-ayat-1-huruf-b")
+        assert "b. digunakan dalam kegiatan militer" in gabung
+
+
+# ===========================================================================
+# Bug 11 — naskah bertata letak tabel: nomor dan teks di sel terpisah
+# ===========================================================================
+
+
+def _baris_tabel(isi: list[list[str]], tabel: int = 0, mulai: int = 0) -> list[ParagrafInput]:
+    """Satu paragraf per sel, berurutan seperti body.paragraphs di Word."""
+    hasil = []
+    for b, sel in enumerate(isi):
+        for s, t in enumerate(sel):
+            hasil.append(ParagrafInput(index=0, teks=t, tabel=tabel, baris=b, sel=s))
+    return hasil
+
+
+def _nomori(paragraf: list[ParagrafInput]) -> list[ParagrafInput]:
+    return [p.model_copy(update={"index": i}) for i, p in enumerate(paragraf)]
+
+
+class TestLabelTerpisahSel:
+    """PMK 119/2025: "1." di satu sel, "Pemerintah … adalah …" di sel sebelahnya."""
+
+    def _naskah(self) -> list[ParagrafInput]:
+        pembukaan = [ParagrafInput(index=0, teks=t) for t in _PEMBUKAAN[:6]]
+        menimbang = _baris_tabel([
+            ["Menimbang", ":", "a.", "bahwa untuk tertib pengelolaan perlu diatur;"],
+            ["", "", "b.", "bahwa perlu menetapkan Peraturan Menteri Keuangan;"],
+            ["Mengingat", ":", "1.", "Undang-Undang Nomor 1 Tahun 2004 tentang Perbendaharaan Negara;"],
+        ], tabel=0)
+        tengah = [ParagrafInput(index=0, teks=t) for t in _PEMBUKAAN[-2:]]
+        batang = _baris_tabel([
+            ["", "", "Pasal 1"],
+            ["", "", "Dalam Peraturan Menteri ini yang dimaksud dengan:"],
+            ["", "", "1.", "Pengelola Barang adalah pejabat yang berwenang."],
+            ["", "", "2.", "Pengguna Barang adalah pejabat pemegang kewenangan."],
+            ["", "", "Pasal 2"],
+            ["", "", "(1)", "Pengguna Barang wajib mengajukan permohonan."],
+        ], tabel=1)
+        return _nomori(pembukaan + menimbang + tengah + batang)
+
+    def test_definisi_pasal_1_terbaca_sebagai_angka(self):
+        pohon = bangun_pohon(self._naskah())
+        assert pohon.gagal is None
+        angka = pohon.cari("pasal-1-angka-1")
+        assert angka is not None
+        assert angka.teks == "Pengelola Barang adalah pejabat yang berwenang."
+
+    def test_rentang_satuan_mencakup_sel_teksnya(self):
+        """Kutipan dari teks definisi harus ada di dalam rentang satuannya."""
+        paragraf = self._naskah()
+        pohon = bangun_pohon(paragraf)
+        angka = pohon.cari("pasal-1-angka-1")
+        isi = [p.teks for p in paragraf if angka.paragraf_mulai <= p.index < angka.paragraf_akhir]
+        assert "Pengelola Barang adalah pejabat yang berwenang." in isi
+
+    def test_menimbang_dan_mengingat_bertabel_terbaca(self):
+        pohon = bangun_pohon(self._naskah())
+        assert [s.nomor for s in pohon.semua(JenisSatuan.MENIMBANG)] == ["a", "b"]
+        assert pohon.cari("menimbang-a").teks.startswith("bahwa untuk tertib")
+        assert [s.nomor for s in pohon.semua(JenisSatuan.MENGINGAT)] == ["1"]
+
+    def test_ayat_bertabel_terbaca(self):
+        pohon = bangun_pohon(self._naskah())
+        assert pohon.cari("pasal-2-ayat-1").teks == "Pengguna Barang wajib mengajukan permohonan."
+
+    def test_NEGATIF_label_dan_teks_di_baris_berbeda_tidak_disambung(self):
+        paragraf = _nomori(_baris_tabel([["1."], ["Teks baris lain."]]))
+        assert pasangan_label(paragraf) == {}
+
+    def test_NEGATIF_di_luar_tabel_tidak_disambung(self):
+        paragraf = _dok(["1.", "Teks paragraf berikutnya."])
+        assert pasangan_label(paragraf) == {}
+
+    def test_NEGATIF_teks_yang_sudah_berlabel_tidak_disambung(self):
+        paragraf = _nomori(_baris_tabel([["a.", "(1) Ayat yang berlabel sendiri."]]))
+        assert pasangan_label(paragraf) == {}
+
+
+class TestLampiranDicariSesudahPenutup:
+    """Pasal yang kalimatnya diawali "Lampiran …" bukan kepala lampiran."""
+
+    def test_pasal_berawalan_lampiran_tidak_memotong_batang_tubuh(self):
+        pohon = bangun_pohon(_dok(_PEMBUKAAN + [
+            "Pasal 1",
+            "Lampiran merupakan bagian tidak terpisahkan dari Peraturan Menteri ini.",
+            "Pasal 2",
+            "Peraturan Menteri ini mulai berlaku pada tanggal diundangkan.",
+            "Ditetapkan di Jakarta",
+            "LAMPIRAN",
+            "PERATURAN MENTERI KEUANGAN REPUBLIK INDONESIA",
+        ]))
+        assert pohon.ada("pasal-2")
+        lampiran = pohon.cari("lampiran")
+        assert lampiran is not None and lampiran.teks == "LAMPIRAN"

@@ -39,6 +39,12 @@ export interface RujukanTemuan {
   kutipan: string;
   pdf_url: string;
   /**
+   * Halaman butirnya di PDF KMK 527. Dipakai komentar Word menggantikan
+   * `pdf_url` — seluruh entri tabel rujukan menunjuk beranda jdih, dan beranda
+   * bukan rujukan. Nomor halaman bisa langsung dibuka penelaah.
+   */
+  halaman?: string;
+  /**
    * Keandalan rujukan:
    * - "placeholder" — belum diisi sama sekali
    * - "ekstraksi"   — dari teks OCR, belum dibaca manusia
@@ -91,6 +97,22 @@ export interface Temuan {
    */
   saran?: string;
   /**
+   * DARI MANA rumusan hijau itu datang — "istilah berdefinisi Pasal 1: Pengguna
+   * Barang", atau "PMK 40 TAHUN 2024 (masih berlaku)".
+   *
+   * Medan sendiri, bukan bagian `saran`: komentar temuan hijau sengaja
+   * melewati blok Saran (penggantinya sudah terbaca hijau di naskah), tetapi
+   * sumbernya WAJIB tetap terbaca — itu syarat kebijakan hijau, bukan hiasan.
+   * Hanya terisi pada temuan `penggantian`.
+   */
+  sumber_usulan?: string;
+  /**
+   * Tempat LAIN yang memuat kesalahan yang sama persis ("Pasal 13 ayat (2)").
+   * Satu kesalahan yang terulang jadi satu kartu dan satu komentar di
+   * kemunculan pertamanya; sisanya cuma disebut di sini, tidak disorot.
+   */
+  juga_di?: string[];
+  /**
    * DI MANA perbaikannya dikerjakan, sudah dalam bentuk yang dibaca manusia —
    * "Pasal 1 (Ketentuan Umum)", "bagian Menimbang". Muncul sebagai baris
    * "Perbaiki di:" di komentar Word.
@@ -100,6 +122,16 @@ export interface Temuan {
    * tidak ditulis. Backend yang memutuskan, panel tidak menebak.
    */
   sasaran?: string;
+  /**
+   * Nomor paragraf tempat `sasaran` berada — dipakai tombol "Lompat ke
+   * Perbaikan" di kartu panel.
+   *
+   * Nomor paragraf, bukan id satuan: panel tidak memegang pohon satuan, dan
+   * Word mengalamati isinya dengan nomor paragraf. Kosong berarti sasarannya
+   * bukan satuan yang bisa ditunjuk (mis. bagian Menimbang) — tombolnya tidak
+   * digambar sama sekali, bukan digambar lalu tidak mengerjakan apa-apa.
+   */
+  sasaran_paragraf?: number | null;
   /**
    * Teks pengganti harfiah untuk lokasi.teks_asli — HANYA terisi pada temuan
    * `penggantian`, dan penggantian hanya dipakai ketika kesalahannya terbukti
@@ -114,6 +146,19 @@ export interface Temuan {
    * dan temuannya TETAP ADA. Penelaah yang memutuskan.
    */
   catatan_ai?: string;
+  /**
+   * True HANYA untuk temuan yang kesalahannya adalah KETIADAAN sesuatu (bagian
+   * wajib hilang, atau frasa hilang dari judul Menetapkan) — bukan kata
+   * tertentu yang salah. `lokasi` di sini menunjuk anchor NETRAL (baris judul
+   * pembuka dokumen), dipilih hanya karena selalu ada dan aman disentuh —
+   * BUKAN klaim bahwa teks di situ salah.
+   *
+   * Panel tetap memasang komentar dan content control seperti temuan lain
+   * (Terima/Tolak berfungsi normal), tetapi MELEWATI pewarnaan sorot/highlight
+   * supaya anchor netral itu tidak terlihat seolah teksnya sendiri yang
+   * bermasalah. Ditambahkan 27 Sep 2026.
+   */
+  tanpa_sorot?: boolean;
   rujukan: RujukanTemuan;
   status: StatusTemuan;
 }
@@ -141,6 +186,44 @@ export interface ParagrafInput {
    * dibiarkan opsional supaya kontrak lamanya tidak pecah.
    */
   tampil_kapital?: boolean;
+  /**
+   * Letak fisik di Word (bug 7 dan 11). Tabel tidak selalu berarti data:
+   * PMK 119 menulis batang tubuhnya di tabel tata letak, nomor "1." di satu
+   * sel dan teksnya di sel sebelahnya — tanpa letak ini parser tidak tahu
+   * keduanya satu butir. `tabel` nomor urut tabel terdalam, -1 bila bukan di
+   * tabel.
+   */
+  tabel?: number;
+  baris?: number;
+  sel?: number;
+  /** Jumlah gambar sebaris — isinya tidak terbaca model, dan bahan menyebutnya. */
+  gambar?: number;
+  /**
+   * False untuk paragraf SESUDAH tabel raksasa: panel tidak membaca isi
+   * tabel itu, jadi `index` di sini urutan baca, bukan nomor paragraf Word.
+   * Temuan di paragraf begini tidak pernah ditandai di naskah.
+   */
+  letak_pasti?: boolean;
+}
+
+/**
+ * Tabel raksasa (di atas BATAS_BARIS_RAKSASA baris) yang TIDAK dibaca per
+ * paragraf — cukup kerangkanya. PMK 108/2024 memuat 228 ribu baris tabel.
+ */
+export interface KerangkaTabel {
+  tabel: number;
+  /** index paragraf terakhir SEBELUM tabel ini; -1 bila di awal naskah. */
+  sesudah_paragraf: number;
+  jumlah_baris: number;
+  jumlah_kolom: number;
+  /** Beberapa baris pertama, teks tiap sel. */
+  contoh: string[][];
+}
+
+/** Hasil membaca naskah: paragraf, dan kerangka tabel yang terlalu besar dibaca. */
+export interface NaskahTerbaca {
+  paragraf: ParagrafInput[];
+  tabel_raksasa: KerangkaTabel[];
 }
 
 export interface AnalisisRequest {
@@ -194,6 +277,8 @@ export type StatusPekerjaan = "menunggu" | "berjalan" | "selesai" | "gagal";
 
 export interface AnalisisLanjutRequest {
   paragraf: ParagrafInput[];
+  /** Kerangka tabel raksasa yang tidak dibaca per paragraf. */
+  tabel_raksasa?: KerangkaTabel[];
   dokumen?: string;
   /** Kode aturan yang dicentang penelaah. Dihilangkan berarti semua. */
   aturan_aktif?: string[];
@@ -208,7 +293,7 @@ export interface AnalisisLanjutRequest {
   ambang?: number;
   /** Cari pembanding di korpus peraturan. Mati secara bawaan. */
   fase3?: boolean;
-  /** Nomor pekerjaan lama yang petanya dipakai ulang, supaya tidak dibayar dua kali. */
+  /** Nomor pekerjaan lama yang jawaban tahap 3-nya dipakai ulang, supaya tidak dibayar dua kali. */
   lanjutkan?: number;
   /**
    * Temuan Fase 1 yang SUDAH terpasang di naskah. Dikirim supaya model tidak
@@ -227,8 +312,11 @@ export interface MulaiResponse {
 export interface KemajuanResponse {
   pekerjaan: number;
   status: StatusPekerjaan;
-  satuan_total: number;
-  satuan_selesai: number;
+  /** Tahap yang sedang berjalan: "3 cari dugaan", "4 memastikan", "5 verifikasi". */
+  tahap: string;
+  /** Kemajuan tahap itu: panggilan (tahap 3) atau dugaan (tahap 4). */
+  selesai: number;
+  total: number;
   panggilan: number;
   token_masuk: number;
   token_keluar: number;

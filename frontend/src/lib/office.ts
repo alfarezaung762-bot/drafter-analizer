@@ -51,7 +51,7 @@
  * terpisah lewat ekspor.
  */
 
-import { ParagrafInput, Temuan } from "./types";
+import { KerangkaTabel, NaskahTerbaca, ParagrafInput, Temuan } from "./types";
 
 /**
  * Cek apakah Office.js runtime tersedia.
@@ -79,15 +79,6 @@ export function checkApiSupport(version: string, nama = "WordApi"): boolean {
 }
 
 /**
- * Membaca paragraf dokumen (seluruh dokumen atau teks terpilih).
- *
- * Catatan 17 Sep 2026: pembacaan font.allCaps DIHAPUS dari sini. Satu-satunya
- * pemakainya adalah aturan judul kapital (F1-001), dan aturan itu dimatikan
- * karena tidak bisa membuktikan kesalahannya — lihat AKTIFKAN_F1_001 di
- * backend/app/rules/format_baku.py. Membacanya berarti satu putaran sync
- * tambahan atas ratusan paragraf untuk data yang tidak dipakai siapa pun.
- */
-/**
  * Apakah cakupan "Bagian Terpilih" bisa dipakai di Word ini.
  *
  * Mode itu bersandar pada `Range.intersectWithOrNullObject()`, yang sudah
@@ -101,6 +92,100 @@ export function checkApiSupport(version: string, nama = "WordApi"): boolean {
 export function cakupanTerpilihTersedia(): boolean {
   return checkApiSupport("1.3");
 }
+
+// ---------------------------------------------------------------------------
+// Membaca naskah
+// ---------------------------------------------------------------------------
+
+/**
+ * Tabel tingkat teratas yang barisnya lebih dari ini TIDAK dibaca per
+ * paragraf — cukup kerangkanya. PMK 108/2024 memuat 228 ribu baris tabel (609
+ * ribu paragraf); membacanya paragraf demi paragraf membuat Word macet.
+ * Ditetapkan penelaah 29 Sep 2026.
+ *
+ * WAJIB SAMA dengan BATAS_BARIS_RAKSASA dan BARIS_CONTOH di
+ * backend/tools/baca_docx.py — alat uji meniru panel.
+ */
+const BATAS_BARIS_RAKSASA = 1000;
+const BARIS_CONTOH = 5;
+
+interface Potongan {
+  /**
+   * Paragraf yang dibaca, per potongan naskah di antara tabel raksasa. null
+   * untuk potongan kosong (tabel raksasa di awal/akhir naskah, atau dua tabel
+   * raksasa berdempetan).
+   */
+  bagian: (Word.ParagraphCollection | null)[];
+  /** Tabel raksasa, urut dokumen — satu di antara tiap dua potongan. */
+  raksasa: Word.Table[];
+}
+
+/**
+ * Potongan naskah yang dibaca per paragraf.
+ *
+ * Tanpa tabel raksasa: seluruh badan dokumen, satu potongan — persis seperti
+ * sebelum fitur ini ada. Dengan tabel raksasa: potongan-potongan DI ANTARA
+ * tabel itu, dicari lewat paragraf tepat sebelum dan sesudah tiap tabel.
+ *
+ * Dipanggil ulang di tiap Word.run pembacaan. Navigasinya pasti, jadi
+ * potongannya sama di tiap putaran selama naskahnya tidak disunting.
+ * Seluruh API-nya WordApi 1.3; tanpa 1.3 naskah dibaca utuh seperti dulu.
+ */
+async function susunPotongan(context: Word.RequestContext): Promise<Potongan> {
+  const body = context.document.body;
+  if (!checkApiSupport("1.3")) return { bagian: [body.paragraphs], raksasa: [] };
+
+  const tabel = body.tables;
+  tabel.load("items/rowCount,items/nestingLevel");
+  await context.sync();
+  const raksasa = tabel.items.filter(
+    (t) => t.nestingLevel === 1 && t.rowCount > BATAS_BARIS_RAKSASA
+  );
+  if (raksasa.length === 0) return { bagian: [body.paragraphs], raksasa };
+
+  const batas = raksasa.map((t) => {
+    const isi = t.getRange("Whole").paragraphs;
+    return {
+      sebelum: isi.getFirst().getPreviousOrNullObject(),
+      sesudah: isi.getLast().getNextOrNullObject(),
+    };
+  });
+  batas.forEach((b) => {
+    b.sebelum.load("isNullObject");
+    b.sesudah.load("isNullObject");
+  });
+  await context.sync();
+
+  const bagian: (Word.ParagraphCollection | null)[] = [];
+  bagian.push(
+    batas[0].sebelum.isNullObject
+      ? null
+      : body.getRange("Start").expandTo(batas[0].sebelum.getRange("Whole")).paragraphs
+  );
+  for (let k = 1; k < batas.length; k++) {
+    const dari = batas[k - 1].sesudah;
+    const sampai = batas[k].sebelum;
+    bagian.push(
+      dari.isNullObject || sampai.isNullObject
+        ? null
+        : dari.getRange("Whole").expandTo(sampai.getRange("Whole")).paragraphs
+    );
+  }
+  const terakhir = batas[batas.length - 1].sesudah;
+  bagian.push(
+    terakhir.isNullObject
+      ? null
+      : terakhir.getRange("Whole").expandTo(body.getRange("End")).paragraphs
+  );
+  return { bagian, raksasa };
+}
+
+/** Isi pembaca tambahan dipakai hanya kalau panjangnya cocok dengan potongannya. */
+function selaras<T>(isi: T[] | undefined, panjang: number): T[] | undefined {
+  return isi && isi.length === panjang ? isi : undefined;
+}
+
+type Penanda = { penanda: string; tingkat: number };
 
 /**
  * Nomor otomatis Word tiap paragraf — "Pasal 5", "(2)", "a.", "BAB I".
@@ -121,40 +206,143 @@ export function cakupanTerpilihTersedia(): boolean {
  * keduanya jebol, hasilnya daftar kosong dan analisis tetap berjalan seperti
  * sebelum fitur ini ada.
  */
-async function bacaPenanda(): Promise<{ penanda: string; tingkat: number }[]> {
+async function bacaPenanda(): Promise<Penanda[][]> {
   if (!checkApiSupport("1.3")) return [];
   try {
     return await Word.run(async (context) => {
-      const paragraf = context.document.body.paragraphs;
-      paragraf.load("items");
+      const { bagian } = await susunPotongan(context);
+      bagian.forEach((b) => b?.load("items/tableNestingLevel"));
       await context.sync();
 
-      const butir = paragraf.items.map((p) => p.listItemOrNullObject);
-      butir.forEach((b) => b.load("isNullObject,listString,level"));
+      const butir = bagian.map((b) => (b ? b.items.map((p) => p.listItemOrNullObject) : []));
+      butir.flat().forEach((x) => x.load("isNullObject,listString,level"));
       await context.sync();
 
-      return butir.map((b) =>
-        b.isNullObject
-          ? { penanda: "", tingkat: -1 }
-          : { penanda: b.listString ?? "", tingkat: b.level ?? -1 }
+      return butir.map((isi) =>
+        isi.map((b) =>
+          b.isNullObject
+            ? { penanda: "", tingkat: -1 }
+            : { penanda: b.listString ?? "", tingkat: b.level ?? -1 }
+        )
       );
     });
   } catch (err) {
-    console.warn(
-      "Nomor otomatis Word tidak terbaca; analisis lanjut memakai teks apa adanya.",
-      err
-    );
+    console.warn("Nomor otomatis Word tidak terbaca; analisis memakai teks apa adanya.", err);
     return [];
   }
 }
 
-export async function readParagraphs(
+type Letak = { tabel: number; baris: number; sel: number };
+const TANPA_LETAK: Letak = { tabel: -1, baris: -1, sel: -1 };
+
+/**
+ * Letak tiap paragraf di tabel — nomor tabel, baris, sel (bug 7 dan 11).
+ *
+ * Tabel tidak selalu berarti data: PMK 119 menulis batang tubuhnya di tabel
+ * tata letak, nomor "1." di satu sel dan teksnya di sel sebelahnya. Tanpa
+ * letak ini parser tidak tahu keduanya satu butir, dan seluruh definisi
+ * Pasal 1 tidak pernah sampai ke model.
+ *
+ * Word tidak memberi nomor tabel, jadi nomornya diturunkan dari urutan: tabel
+ * baru dimulai tiap kali tingkat tabel naik, atau nomor barisnya mundur di
+ * tingkat yang sama. Tabel raksasa ikut mendapat nomor di tempatnya.
+ * Urutannya sama dengan alat uji (backend/tools/baca_docx.py).
+ *
+ * Gagal membaca bukan alasan menggagalkan analisis — hasilnya null, dan naskah
+ * dibaca tanpa letak seperti sebelum fitur ini ada.
+ */
+async function bacaLetak(): Promise<{ letak: Letak[][]; idRaksasa: number[] } | null> {
+  if (!checkApiSupport("1.3")) return null;
+  try {
+    return await Word.run(async (context) => {
+      const { bagian, raksasa } = await susunPotongan(context);
+      bagian.forEach((b) => b?.load("items/tableNestingLevel"));
+      await context.sync();
+
+      const sel = bagian.map((b) =>
+        b ? b.items.map((p) => (p.tableNestingLevel > 0 ? p.parentTableCellOrNullObject : null)) : []
+      );
+      sel.flat().forEach((c) => c?.load("isNullObject,rowIndex,cellIndex"));
+      await context.sync();
+
+      let tabelKe = -1;
+      const idRaksasa: number[] = [];
+      const letak: Letak[][] = bagian.map((b, k) => {
+        const tumpuk: { id: number; baris: number }[] = [];
+        const hasil = (b ? b.items : []).map((p, j) => {
+          const tingkat = p.tableNestingLevel;
+          if (!tingkat) {
+            tumpuk.length = 0;
+            return TANPA_LETAK;
+          }
+          const c = sel[k][j];
+          const baris = c && !c.isNullObject ? c.rowIndex : -1;
+          const kolom = c && !c.isNullObject ? c.cellIndex : -1;
+          while (tumpuk.length > tingkat) tumpuk.pop();
+          while (tumpuk.length < tingkat) tumpuk.push({ id: ++tabelKe, baris: -1 });
+          const atas = tumpuk[tingkat - 1];
+          // Nomor baris mundur di tingkat yang sama: tabel lain yang berdempetan.
+          if (baris < atas.baris) atas.id = ++tabelKe;
+          atas.baris = baris;
+          return { tabel: atas.id, baris, sel: kolom };
+        });
+        if (k < raksasa.length) idRaksasa.push(++tabelKe);
+        return hasil;
+      });
+      return { letak, idRaksasa };
+    });
+  } catch (err) {
+    console.warn("Letak tabel tidak terbaca; naskah dibaca tanpa letak tabel.", err);
+    return null;
+  }
+}
+
+/**
+ * Jumlah gambar sebaris tiap paragraf (WordApi 1.1). Isinya tidak terbaca
+ * model, dan bahan menyebutnya terang-terangan — model tidak boleh mengira
+ * tidak ada apa-apa di sana. Gagal membaca berarti daftar kosong.
+ */
+async function bacaGambar(): Promise<number[][]> {
+  try {
+    return await Word.run(async (context) => {
+      const { bagian } = await susunPotongan(context);
+      bagian.forEach((b) => b?.load("items/alignment"));
+      await context.sync();
+
+      const koleksi = bagian.map((b) =>
+        b
+          ? b.items.map((p) => {
+              const c = p.inlinePictures;
+              c.load("items/width");
+              return c;
+            })
+          : []
+      );
+      await context.sync();
+      return koleksi.map((isi) => isi.map((c) => c.items.length));
+    });
+  } catch (err) {
+    console.warn("Gambar sebaris tidak terbaca.", err);
+    return [];
+  }
+}
+
+/**
+ * Membaca naskah: paragrafnya, dan kerangka tabel yang terlalu besar dibaca.
+ *
+ * Naskah biasa dibaca utuh seperti sebelumnya, kini dengan letak tabel dan
+ * jumlah gambar tiap paragraf. Naskah bertabel raksasa dibaca per potongan di
+ * antara tabel itu; paragraf SESUDAH tabel raksasa pertama bernomor urutan
+ * baca, bukan nomor paragraf Word (`letak_pasti: false`) — panel tidak
+ * membaca isi tabelnya, jadi tidak bisa menghitung paragraf di dalamnya.
+ * Temuan di paragraf begitu dilaporkan di panel tetapi tidak pernah ditandai.
+ */
+export async function bacaNaskah(
   scope: "all" | "selection" = "all"
-): Promise<ParagrafInput[]> {
+): Promise<NaskahTerbaca> {
   if (!isOfficeAvailable()) {
     throw new Error("Office.js tidak tersedia dalam lingkungan ini.");
   }
-
   if (scope === "selection" && !cakupanTerpilihTersedia()) {
     throw new Error(
       "Word ini belum mendukung cakupan Bagian Terpilih (butuh WordApi 1.3). " +
@@ -164,44 +352,79 @@ export async function readParagraphs(
 
   // Dibaca untuk SELURUH badan dokumen, bukan cuma bagian terpilih: nomor
   // paragraf di bawah memang penomoran seluruh dokumen, jadi indeksnya cocok.
-  const nomor = await bacaPenanda();
-  const ambil = (idx: number) => ({
-    penanda: nomor[idx]?.penanda ?? "",
-    tingkat: nomor[idx]?.tingkat ?? -1,
-  });
+  const penanda = await bacaPenanda();
+  const letak = await bacaLetak();
+  const gambar = await bacaGambar();
 
   return Word.run(async (context) => {
-    const body = context.document.body.paragraphs;
-    body.load("text");
-    await context.sync();
-
-    if (scope !== "selection") {
-      return body.items.map((p, idx) => ({
-        index: idx,
-        teks: p.text,
-        ...ambil(idx),
-      }));
+    const { bagian, raksasa } = await susunPotongan(context);
+    if (scope === "selection" && raksasa.length > 0) {
+      throw new Error(
+        "Naskah ini memuat tabel lebih dari 1.000 baris, dan cakupan Bagian " +
+          "Terpilih belum mendukungnya. Pakai Seluruh Naskah."
+      );
     }
+    bagian.forEach((b) => b?.load("items/text"));
+    const contoh = raksasa.map((t) => {
+      const baris = [t.rows.getFirst()];
+      for (let i = 1; i < BARIS_CONTOH; i++) baris.push(baris[i - 1].getNextOrNullObject());
+      baris.forEach((r) => r.load("values,cellCount"));
+      return baris;
+    });
+    await context.sync();
 
     // Mode "Bagian Terpilih": nomor paragraf TETAP memakai penomoran seluruh
     // dokumen, bukan dihitung ulang dari nol di dalam seleksi. Sorotan dan
     // komentar dicari lewat body.paragraphs — nomor 0 di situ berarti paragraf
     // pertama dokumen, jadi penomoran ulang membuat tanda mendarat di paragraf
     // yang sama sekali lain.
-    const seleksi = context.document.getSelection();
-    const irisan = body.items.map((p) =>
-      p.getRange().intersectWithOrNullObject(seleksi)
-    );
-    irisan.forEach((r) => r.load("isNullObject"));
-    await context.sync();
+    let terpilih: boolean[] | null = null;
+    if (scope === "selection" && bagian[0]) {
+      const seleksi = context.document.getSelection();
+      const irisan = bagian[0].items.map((p) =>
+        p.getRange().intersectWithOrNullObject(seleksi)
+      );
+      irisan.forEach((r) => r.load("isNullObject"));
+      await context.sync();
+      terpilih = irisan.map((r) => !r.isNullObject);
+    }
 
-    const hasil: ParagrafInput[] = [];
-    body.items.forEach((p, idx) => {
-      if (!irisan[idx].isNullObject) {
-        hasil.push({ index: idx, teks: p.text, ...ambil(idx) });
+    const paragraf: ParagrafInput[] = [];
+    const tabel_raksasa: KerangkaTabel[] = [];
+    let urut = 0;
+    bagian.forEach((b, k) => {
+      const items = b ? b.items : [];
+      const pen = selaras(penanda[k], items.length);
+      const let_ = selaras(letak?.letak[k], items.length);
+      const gam = selaras(gambar[k], items.length);
+      items.forEach((p, j) => {
+        const l = let_?.[j] ?? TANPA_LETAK;
+        const isi: ParagrafInput = {
+          index: urut,
+          teks: p.text,
+          penanda: pen?.[j]?.penanda ?? "",
+          tingkat: pen?.[j]?.tingkat ?? -1,
+          tabel: l.tabel,
+          baris: l.baris,
+          sel: l.sel,
+          gambar: gam?.[j] ?? 0,
+          letak_pasti: k === 0,
+        };
+        if (!terpilih || terpilih[j]) paragraf.push(isi);
+        urut++;
+      });
+      if (k < raksasa.length) {
+        const baris = contoh[k];
+        tabel_raksasa.push({
+          tabel: letak?.idRaksasa[k] ?? k,
+          sesudah_paragraf: urut - 1,
+          jumlah_baris: raksasa[k].rowCount,
+          jumlah_kolom: Math.max(0, ...baris.map((r) => r.cellCount ?? 0)),
+          contoh: baris.map((r) => (r.values?.[0] ?? []).map((v) => String(v))),
+        });
       }
     });
-    return hasil;
+    return { paragraf, tabel_raksasa };
   });
 }
 
@@ -247,13 +470,13 @@ const TAG_USUL = "DA-USUL-";
  * pada temuan berblok kuning, yang warna hurufnya tidak pernah disentuh alat.
  * Nomor unik dalam satu sesi analisis, sama seperti id.
  *
- * Peta ini hanya hidup di memori tab selama panel terbuka. Kalau Word ditutup
- * sebelum temuan diputuskan, add-in tidak lagi tahu format aslinya — yang bisa
- * dilakukan tinggal mencabut warna yang persis sama dengan warna milik alat.
- * Ini keterbatasan yang sudah disepakati, bukan kelalaian; penelaah wajib
- * memeriksa ulang naskahnya.
+ * Sejak 27 Sep 2026 peta ini ikut tersimpan di dalam berkas bersama daftar
+ * temuannya (`simpanDaftarDiNaskah`), jadi Tolak sesudah berkas dibuka ulang
+ * tetap memulihkan persis. Kalau simpanannya tidak ada — berkas lama, atau
+ * setelan dokumen tidak tersedia — yang bisa dilakukan tinggal mencabut
+ * warna yang persis sama dengan warna milik alat.
  */
-type FormatAsli = {
+export type FormatAsli = {
   color: string | null;
   strikeThrough: boolean | null;
   highlightColor: string | null;
@@ -364,12 +587,34 @@ function susunIsiKomentar(temuan: Temuan): string {
     status === "visual"
       ? ""
       : status === "turunan"
-        ? " (dasar turunan — butirnya mengatur hal lain yang berakibat ini)"
-        : " (belum diverifikasi visual)";
-  const rujukanStr =
-    butir && butir !== "..."
-      ? `${temuan.rujukan.sumber} butir ${butir}${penanda}`
-      : `${temuan.rujukan.sumber} (butir belum diisi)`;
+        ? " (dasar turunan)"
+        : " (belum diverifikasi)";
+
+  // Baris rujukan hanya ditulis kalau ia benar-benar MEMBAWA sesuatu yang
+  // bisa ditelusuri — yaitu nomor butirnya. Aturan yang tidak punya butir
+  // tidak menulis baris rujukan sama sekali.
+  //
+  // Dua kali diperbaiki, 26 Sep 2026, keduanya atas laporan penelaah:
+  //
+  //   "Prioritas penelaah — cara mendefinisikan ketentuan (brief bagian 4)
+  //    (butir belum diisi) — https://jdih.kemenkeu.go.id/ (T1)"
+  //
+  // Percobaan pertama memendekkannya jadi "Dasar: Prioritas penelaah — ...",
+  // dan itu masih ditolak: baris yang tidak bisa ditelusuri ke mana pun tidak
+  // menolong, sependek apa pun. Dasar aturannya tetap terbaca penelaah di
+  // panel Pengaturan, tempat yang memang untuk itu.
+  //
+  // `pdf_url` juga dibuang SELURUHNYA — tiap entri tabel rujukan menunjuk
+  // https://jdih.kemenkeu.go.id/, yaitu beranda, bukan peraturannya. Beranda
+  // bukan rujukan. Penggantinya nomor halaman PDF KMK 527, yang memang bisa
+  // langsung dibuka.
+  const adaButir = !!butir && butir !== "...";
+  const halaman = temuan.rujukan.halaman?.trim();
+  const rujukanStr = adaButir
+    ? `${temuan.rujukan.sumber} butir ${butir}` +
+      (halaman ? ` (hlm ${halaman})` : "") +
+      penanda
+    : "";
 
   const baris = [`Temuan:`, temuan.catatan];
 
@@ -382,13 +627,42 @@ function susunIsiKomentar(temuan: Temuan): string {
   const sasaran = temuan.sasaran?.trim();
   if (sasaran) baris.push(`Perbaiki di: ${sasaran}`);
 
+  // Kesalahan yang sama di tempat lain. Satu kesalahan yang terulang jadi
+  // SATU komentar di kemunculan pertamanya (ditetapkan penelaah 27 Sep 2026,
+  // sesudah PMK 104 mendapat satu komentar per baris "RPKBUNP SPAN") — dan
+  // kemunculan lainnya tidak disorot, jadi baris inilah satu-satunya petunjuk
+  // ke mana lagi penelaah harus melihat. Juga ditulis pada temuan hijau:
+  // hijaunya hanya di sini, sisanya diperbaiki penelaah sendiri.
+  const jugaDi = (temuan.juga_di ?? []).filter((x) => x.trim());
+  if (jugaDi.length > 0) baris.push(`Juga di: ${jugaDi.join("; ")}`);
+
   // Temuan lama (dan temuan Fase 1 yang belum dipisah medannya) bisa datang
   // tanpa `saran`. Blok Saran ditinggalkan kosong-melompong lebih buruk
   // daripada tidak ada blok sama sekali — dan sejak 23 Sep 2026 backend
   // sengaja mengosongkannya ketika penggantinya memang tidak diketahui,
   // daripada mengisinya dengan anjuran hampa.
+  //
+  // TEMUAN HIJAU MELEWATI BLOK INI. Bentuk komentarnya ditetapkan penelaah
+  // 27 Sep 2026: "komentar ringkas" — cukup Temuan dan rujukannya.
+  //
+  // Alasannya bukan penghematan ruang. Pada temuan hijau, penggantinya SUDAH
+  // tertulis hijau di sebelah coretannya, jadi blok Saran mengulang kalimat
+  // yang sedang dibaca penelaah pada baris yang sama. Yang TIDAK terbaca dari
+  // naskah cuma dua: kenapa itu salah, dan atas dasar apa — dan dua itulah
+  // yang tetap ditulis.
+  //
+  // Keputusan ini mengganti yang 26 Sep, waktu itu hijau tidak berkomentar
+  // sama sekali. Yang berubah: penelaah bisa membaca APA yang diusulkan dari
+  // naskah, tetapi tidak KENAPA.
   const saran = temuan.saran?.trim();
-  if (saran) baris.push(`Saran:`, saran);
+  const hijau = temuan.jenis_tanda === "penggantian" && !!temuan.usulan_rumusan;
+  if (saran && !hijau) baris.push(`Saran:`, saran);
+
+  // Sumber rumusan hijau. WAJIB ada kalau temuannya hijau — inilah yang
+  // membuat penelaah bisa memeriksa sendiri bahwa usulan itu bukan asal
+  // klaim, dan ia satu-satunya bagian blok Saran yang tetap ditulis.
+  const sumber = temuan.sumber_usulan?.trim();
+  if (hijau && sumber) baris.push(`Sumber usulan: ${sumber}`);
 
   // Keberatan model atas temuan ini. Ditempelkan, BUKAN menggantikan temuannya
   // — AI tidak pernah menghapus temuan yang kesalahannya sudah terbukti
@@ -396,8 +670,14 @@ function susunIsiKomentar(temuan: Temuan): string {
   const catatanAi = temuan.catatan_ai?.trim();
   if (catatanAi) baris.push(`Catatan AI:`, catatanAi);
 
+  // Penanda (T-n) WAJIB ada di tiap komentar, juga yang tanpa rujukan: ia
+  // yang dipakai mencari komentar ini kembali saat temuannya ditolak atau
+  // naskahnya dibersihkan. Tanpa penanda, komentarnya jadi yatim di naskah
+  // penelaah dan cuma bisa dihapus dengan tangan.
   baris.push(
-    `${rujukanStr} — ${temuan.rujukan.pdf_url} ${penandaKomentar(temuan)}`
+    rujukanStr
+      ? `${rujukanStr} ${penandaKomentar(temuan)}`
+      : penandaKomentar(temuan)
   );
   return baris.join("\n");
 }
@@ -407,8 +687,8 @@ function susunIsiKomentar(temuan: Temuan): string {
  *
  * Nomor temuan, bukan aturan_id: inilah yang dibaca penelaah. Konsekuensinya,
  * dua kali analisis pada dokumen yang sama menghasilkan komentar bernomor sama
- * — karena itu panel menolak analisis ulang selama masih ada temuan yang belum
- * diputuskan.
+ * — karena itu panel menolak analisis ulang selama NASKAHNYA masih memuat
+ * tanda alat (`hitungTandaAlat`), bukan cuma selama daftar kartunya berisi.
  */
 function penandaKomentar(temuan: Temuan): string {
   return `(T${temuan.nomor})`;
@@ -566,190 +846,227 @@ export async function tandaiSemuaTemuan(
       const { modeAwal, berhasilMati } = await matikanPelacakan(context);
       hasil.pelacakanMati = berhasilMati;
 
-      // --- Tahap 1: cari rentang presisi seluruh temuan sekaligus ---
-      const pencarian = daftar.map((t) => {
-        const p = paragraphs.items[t.lokasi.paragraf_index];
-        if (!p || !layakDicari(t)) return null;
-        const r = p.search(kunciTemuan(t).kunci, { matchCase: true });
-        r.load("items");
-        return r;
-      });
-      await context.sync();
+      // Pelacakan WAJIB dikembalikan apa pun yang terjadi di bawah. Dulu
+      // pengembaliannya di ujung blok, sehingga satu sync yang gagal di
+      // tengah jalan meninggalkan Track Changes penelaah mati diam-diam.
+      try {
+        // --- Tahap 1: cari rentang presisi seluruh temuan sekaligus ---
+        const pencarian = daftar.map((t) => {
+          const p = paragraphs.items[t.lokasi.paragraf_index];
+          if (!p || !layakDicari(t)) return null;
+          const r = p.search(kunciTemuan(t).kunci, { matchCase: true });
+          r.load("items");
+          return r;
+        });
+        await context.sync();
 
-      const rentang = daftar.map((t, i) => {
-        const hasilCari = pencarian[i];
-        if (!hasilCari || hasilCari.items.length === 0) return null;
-        const { kunci, offset } = kunciTemuan(t);
-        const n = ordinalKemunculan(
-          teksParagraf[t.lokasi.paragraf_index] ?? "",
-          kunci,
-          offset
-        );
-        return hasilCari.items[Math.min(n, hasilCari.items.length - 1)];
-      });
-
-      // --- Tahap 2: rekam format asli ---
-      const fonts = rentang.map((r) => {
-        if (!r) return null;
-        const f = r.font;
-        f.load("color,strikeThrough,highlightColor");
-        return f;
-      });
-      await context.sync();
-
-      // --- Tahap 3: pasang tanda, dari BAWAH ke ATAS ---
-      const antrean = daftar
-        .map((t, i) => ({ t, i }))
-        .filter((x) => rentang[x.i] !== null)
-        .sort(
-          (a, b) =>
-            b.t.lokasi.paragraf_index - a.t.lokasi.paragraf_index ||
-            b.t.lokasi.offset_mulai - a.t.lokasi.offset_mulai
-        );
-
-      const ketemu = new Set(antrean.map((x) => x.t.id));
-      hasil.idTidakDitandai = daftar
-        .filter((t) => !ketemu.has(t.id))
-        .map((t) => t.id);
-
-      // Dua tanda tidak boleh berbagi atau bersarang di satu rentang.
-      //
-      // Ditambahkan 18 Sep 2026. Dua aturan yang berbeda kadang berimpit —
-      // F1-002 mempersoalkan kata terakhir judul Menetapkan karena berbeda dari
-      // judul pembuka, F1-012 mempersoalkan kata yang sama karena titik
-      // penutupnya hilang; F1-004 mempersoalkan bunyi satu butir Menimbang,
-      // F1-008 mempersoalkan karakter terakhir butir yang sama. Semuanya benar.
-      // Tapi kalau dua-duanya digambar, Word menyarangkan content control yang
-      // satu di dalam yang lain, dua komentar menumpuk di satu tempat, dan
-      // menolak yang luar ikut menghapus tanda yang di dalam tanpa ada yang
-      // memberi tahu panel.
-      //
-      // Pemenangnya ditentukan menurut URUTAN DOKUMEN, bukan urutan
-      // penggambaran. Penggambaran sengaja berjalan dari bawah ke atas supaya
-      // penyisipan usulan tidak menggeser rentang di bawahnya; kalau pemenang
-      // ditentukan di situ juga, temuan yang lebih bawah dan lebih sempit selalu
-      // mengalahkan temuan yang lebih atas dan lebih luas — padahal yang luas
-      // justru yang alasannya lebih lengkap.
-      //
-      // Yang kalah TIDAK digambar dan dilaporkan lewat idTidakDitandai, supaya
-      // kartunya di panel memuat alasannya sendiri. Temuannya tidak dibuang —
-      // menyembunyikan temuan yang benar lebih buruk daripada satu tanda yang
-      // tidak tergambar.
-      const bolehDigambar = new Set<string>();
-      const terpakai = new Map<number, [number, number][]>();
-      for (const { t } of [...antrean].sort(
-        (a, b) =>
-          a.t.lokasi.paragraf_index - b.t.lokasi.paragraf_index ||
-          a.t.lokasi.offset_mulai - b.t.lokasi.offset_mulai
-      )) {
-        const mulai = t.lokasi.offset_mulai;
-        const akhir = mulai + t.lokasi.panjang;
-        const sudah = terpakai.get(t.lokasi.paragraf_index) ?? [];
-        if (sudah.some(([m, a]) => mulai < a && m < akhir)) continue;
-        sudah.push([mulai, akhir]);
-        terpakai.set(t.lokasi.paragraf_index, sudah);
-        bolehDigambar.add(t.id);
-      }
-
-      // Komentar yang baru dipasang, disimpan supaya isinya bisa dibaca ulang
-      // sesudah sync — lihat Tahap 4 di bawah.
-      const komentarBaru: [Temuan, Word.Comment][] = [];
-
-      for (const { t, i } of antrean) {
-        if (!bolehDigambar.has(t.id)) {
-          hasil.idTidakDitandai.push(t.id);
-          continue;
-        }
-
-        const r = rentang[i] as Word.Range;
-        const f = fonts[i] as Word.Font;
-
-        formatAsliTemuan.set(t.nomor, {
-          color: f.color ?? null,
-          strikeThrough: f.strikeThrough ?? null,
-          highlightColor: f.highlightColor ?? null,
+        const rentang = daftar.map((t, i) => {
+          const hasilCari = pencarian[i];
+          if (!hasilCari || hasilCari.items.length === 0) return null;
+          const { kunci, offset } = kunciTemuan(t);
+          const n = ordinalKemunculan(
+            teksParagraf[t.lokasi.paragraf_index] ?? "",
+            kunci,
+            offset
+          );
+          return hasilCari.items[Math.min(n, hasilCari.items.length - 1)];
         });
 
-        const punyaUsulan =
-          t.jenis_tanda === "penggantian" && !!t.usulan_rumusan;
-        // Kesalahan yang perbaikannya MEMBUANG: dicoret merah, tanpa sisipan
-        // hijau. Teksnya tetap tidak dihapus kode — yang menghapus penelaah.
-        const usulHapus = t.jenis_tanda === "penghapusan";
+        // --- Tahap 2: rekam format asli ---
+        const fonts = rentang.map((r) => {
+          if (!r) return null;
+          const f = r.font;
+          f.load("color,strikeThrough,highlightColor");
+          return f;
+        });
+        await context.sync();
 
-        try {
-          // Urutannya penting. Warna dulu, lalu sisipkan usulan di sebelahnya,
-          // baru dibungkus content control. Kalau dibungkus lebih dulu,
-          // penyisipan "After" bisa mendarat DI DALAM bungkusnya.
-          if (punyaUsulan) {
-            // Ada jawabannya: teks lama merah dan dicoret, penggantinya hijau.
-            r.font.color = WARNA_SALAH;
-            r.font.strikeThrough = true;
+        // --- Tahap 3: pasang tanda, dari BAWAH ke ATAS ---
+        const antrean = daftar
+          .map((t, i) => ({ t, i }))
+          .filter((x) => rentang[x.i] !== null)
+          .sort(
+            (a, b) =>
+              b.t.lokasi.paragraf_index - a.t.lokasi.paragraf_index ||
+              b.t.lokasi.offset_mulai - a.t.lokasi.offset_mulai
+          );
 
-            const usulan = r.insertText(` ${t.usulan_rumusan}`, "After");
-            usulan.font.color = WARNA_USULAN;
-            usulan.font.strikeThrough = false;
-            usulan.font.highlightColor = null as unknown as string;
-            bungkusContentControl(usulan, `${TAG_USUL}${t.nomor}`, t.nomor);
-            hasil.diusulkan++;
-            hasil.dicoretMerah++;
-          } else if (usulHapus) {
-            // Diusulkan dibuang. Merah dan dicoret sama seperti penggantian,
-            // tetapi TIDAK ADA yang disisipkan — memang tidak ada rumusan
-            // pengganti yang masuk akal untuk definisi yang tidak terpakai.
-            r.font.color = WARNA_SALAH;
-            r.font.strikeThrough = true;
-            hasil.dicoretMerah++;
-          } else {
-            // Tidak ada rumusan pengganti tunggal — ini peringatan, bukan usul
-            // penghapusan. Blok kuning, warna hurufnya TIDAK disentuh: merah
-            // membuat alat seolah menyuruh membuang teks itu.
-            r.font.highlightColor = WARNA_CATATAN;
-            hasil.diblokKuning++;
+        const ketemu = new Set(antrean.map((x) => x.t.id));
+        hasil.idTidakDitandai = daftar
+          .filter((t) => !ketemu.has(t.id))
+          .map((t) => t.id);
+
+        // Dua tanda tidak boleh berbagi atau bersarang di satu rentang.
+        //
+        // Ditambahkan 18 Sep 2026. Dua aturan yang berbeda kadang berimpit —
+        // F1-002 mempersoalkan kata terakhir judul Menetapkan karena berbeda dari
+        // judul pembuka, F1-012 mempersoalkan kata yang sama karena titik
+        // penutupnya hilang; F1-004 mempersoalkan bunyi satu butir Menimbang,
+        // F1-008 mempersoalkan karakter terakhir butir yang sama. Semuanya benar.
+        // Tapi kalau dua-duanya digambar, Word menyarangkan content control yang
+        // satu di dalam yang lain, dua komentar menumpuk di satu tempat, dan
+        // menolak yang luar ikut menghapus tanda yang di dalam tanpa ada yang
+        // memberi tahu panel.
+        //
+        // Pemenangnya ditentukan menurut URUTAN DOKUMEN, bukan urutan
+        // penggambaran. Penggambaran sengaja berjalan dari bawah ke atas supaya
+        // penyisipan usulan tidak menggeser rentang di bawahnya; kalau pemenang
+        // ditentukan di situ juga, temuan yang lebih bawah dan lebih sempit selalu
+        // mengalahkan temuan yang lebih atas dan lebih luas — padahal yang luas
+        // justru yang alasannya lebih lengkap.
+        //
+        // Yang kalah TIDAK digambar dan dilaporkan lewat idTidakDitandai, supaya
+        // kartunya di panel memuat alasannya sendiri. Temuannya tidak dibuang —
+        // menyembunyikan temuan yang benar lebih buruk daripada satu tanda yang
+        // tidak tergambar.
+        const bolehDigambar = new Set<string>();
+        const terpakai = new Map<number, [number, number][]>();
+        for (const { t } of [...antrean].sort(
+          (a, b) =>
+            a.t.lokasi.paragraf_index - b.t.lokasi.paragraf_index ||
+            a.t.lokasi.offset_mulai - b.t.lokasi.offset_mulai
+        )) {
+          const mulai = t.lokasi.offset_mulai;
+          const akhir = mulai + t.lokasi.panjang;
+          const sudah = terpakai.get(t.lokasi.paragraf_index) ?? [];
+          if (sudah.some(([m, a]) => mulai < a && m < akhir)) continue;
+          sudah.push([mulai, akhir]);
+          terpakai.set(t.lokasi.paragraf_index, sudah);
+          bolehDigambar.add(t.id);
+        }
+
+        // Komentar yang baru dipasang, disimpan supaya isinya bisa dibaca ulang
+        // sesudah sync — lihat Tahap 4 di bawah.
+        const komentarBaru: [Temuan, Word.Comment][] = [];
+
+        for (const { t, i } of antrean) {
+          if (!bolehDigambar.has(t.id)) {
+            hasil.idTidakDitandai.push(t.id);
+            continue;
           }
 
-          // Satu komentar per temuan. Tidak lebih.
+          const r = rentang[i] as Word.Range;
+          const f = fonts[i] as Word.Font;
+          const asli: FormatAsli = {
+            color: f.color ?? null,
+            strikeThrough: f.strikeThrough ?? null,
+            highlightColor: f.highlightColor ?? null,
+          };
+
+          const punyaUsulan =
+            t.jenis_tanda === "penggantian" && !!t.usulan_rumusan;
+          // Kesalahan yang perbaikannya MEMBUANG: dicoret merah, tanpa sisipan
+          // hijau. Teksnya tetap tidak dihapus kode — yang menghapus penelaah.
+          const usulHapus = t.jenis_tanda === "penghapusan";
+
+          // Tiap temuan dipasang dan di-sync SENDIRI.
           //
-          // DIPASANG SEBELUM PEMBUNGKUSAN, dan itu disengaja. Alasannya sama
-          // dengan yang sudah berlaku untuk penyisipan usulan hijau di atas:
-          // `insertContentControl()` membungkus ulang rentangnya, dan apa pun
-          // yang dikerjakan pada `r` sesudah itu bisa mendarat di tempat yang
-          // bukan lagi rentang semula. Diduga inilah sebab balon komentar
-          // kosong yang dilaporkan 25 Sep 2026.
-          if (bisaKomentar) {
-            komentarBaru.push([t, r.insertComment(susunIsiKomentar(t))]);
-            hasil.dikomentari++;
+          // Diubah 27 Sep 2026. Dulu satu kelompok di-sync sekali di ujung.
+          // Office.js berhenti di operasi pertama yang gagal dan TIDAK
+          // membatalkan yang sudah jalan: satu content control yang ditolak Word
+          // meninggalkan komentar dan coretan merah TANPA bungkus bertag, sisa
+          // kelompoknya tidak tergambar, dan tidak ada yang melaporkannya. Tolak
+          // lalu tidak menemukan tandanya, dan teksnya tetap merah (PMK 45).
+          // Sync per temuan mengurung kegagalan pada temuannya sendiri, dan
+          // bekas setengah jadinya bisa dicabut di `cabutSisaGagal`.
+          let komentar: Word.Comment | null = null;
+          let usulan: Word.Range | null = null;
+          try {
+            // KOMENTAR DIPASANG PALING DULU, sebelum `r` disentuh sama sekali.
+            //
+            // Naik ke sini 27 Sep 2026 saat temuan hijau ikut diberi komentar.
+            // Sebelumnya ia dipasang sesudah usulan hijau disisipkan dan usulan
+            // itu dibungkus content control — dua operasi yang mengubah tetangga
+            // `r`. Balon komentar kosong sudah pernah terjadi di proyek ini
+            // (25 Sep 2026) justru karena komentar dipasang pada rentang yang
+            // sudah bergeser. Memasangnya lebih dulu menghapus seluruh kelas
+            // masalah itu, bukan cuma mengurangi peluangnya.
+            if (bisaKomentar) komentar = r.insertComment(susunIsiKomentar(t));
+
+            // Urutannya penting. Warna dulu, lalu sisipkan usulan di sebelahnya,
+            // baru dibungkus content control. Kalau dibungkus lebih dulu,
+            // penyisipan "After" bisa mendarat DI DALAM bungkusnya.
+            if (punyaUsulan) {
+              // Ada jawabannya: teks lama merah dan dicoret, penggantinya hijau.
+              r.font.color = WARNA_SALAH;
+              r.font.strikeThrough = true;
+
+              usulan = r.insertText(` ${t.usulan_rumusan}`, "After");
+              usulan.font.color = WARNA_USULAN;
+              usulan.font.strikeThrough = false;
+              usulan.font.highlightColor = null as unknown as string;
+              bungkusContentControl(usulan, `${TAG_USUL}${t.nomor}`, t.nomor);
+            } else if (usulHapus) {
+              // Diusulkan dibuang. Merah dan dicoret sama seperti penggantian,
+              // tetapi TIDAK ADA yang disisipkan — memang tidak ada rumusan
+              // pengganti yang masuk akal untuk definisi yang tidak terpakai.
+              r.font.color = WARNA_SALAH;
+              r.font.strikeThrough = true;
+            } else if (t.tanpa_sorot) {
+              // Anchor netral (F1-002 jalur cadangan, F1-003) — lihat
+              // `Temuan.tanpa_sorot`. Lokasinya cuma tempat komentar
+              // menempel, BUKAN klaim bahwa teks di situ salah, jadi warnanya
+              // sengaja TIDAK disentuh sama sekali. Komentar dan content
+              // control di atas tetap terpasang seperti biasa — itu yang
+              // membuat Terima/Tolak berfungsi normal untuk temuan ini,
+              // ditambahkan 27 Sep 2026 supaya temuan begini tidak lagi
+              // hilang begitu saja tanpa jejak di Word.
+            } else {
+              // Tidak ada rumusan pengganti tunggal — ini peringatan, bukan usul
+              // penghapusan. Blok kuning, warna hurufnya TIDAK disentuh: merah
+              // membuat alat seolah menyuruh membuang teks itu.
+              r.font.highlightColor = WARNA_CATATAN;
+            }
+
+            bungkusContentControl(r, `${TAG_ASLI}${t.nomor}`, t.nomor);
+            await context.sync();
+
+            // Dihitung SESUDAH sync berhasil. Hitungan yang mendahului buktinya
+            // bisa berbohong — dulu temuan yang gagal di tengah kelompok tetap
+            // terhitung "dicoret merah".
+            formatAsliTemuan.set(t.nomor, asli);
+            if (komentar) {
+              komentarBaru.push([t, komentar]);
+              hasil.dikomentari++;
+            }
+            if (punyaUsulan) {
+              hasil.diusulkan++;
+              hasil.dicoretMerah++;
+            } else if (usulHapus) {
+              hasil.dicoretMerah++;
+            } else if (!t.tanpa_sorot) {
+              hasil.diblokKuning++;
+            }
+          } catch (err) {
+            console.warn(`Tanda T${t.nomor} gagal dipasang:`, err);
+            hasil.idTidakDitandai.push(t.id);
+            await cabutSisaGagal(context, t, r, asli, komentar, usulan);
           }
-
-          bungkusContentControl(r, `${TAG_ASLI}${t.nomor}`, t.nomor);
-        } catch (err) {
-          console.warn(`Tanda T${t.nomor} gagal dipasang:`, err);
-          hasil.idTidakDitandai.push(t.id);
         }
-      }
-      await context.sync();
 
-      // --- Tahap 4: buktikan komentarnya benar-benar berisi ---------------
-      //
-      // Menulis lalu percaya sudah terjadi bukan pembuktian. Yang kosong
-      // dihitung supaya panel bisa mengatakannya; kegagalan yang diam tidak
-      // bisa dibedakan dari alat yang rusak.
-      if (komentarBaru.length > 0) {
-        try {
-          komentarBaru.forEach(([, k]) => k.load("content"));
-          await context.sync();
-          for (const [t, k] of komentarBaru) {
-            if ((k.content ?? "").trim() !== "") continue;
-            hasil.komentarKosong++;
-            console.warn(`Komentar T${t.nomor} terpasang tetapi kosong.`);
+        // --- Tahap 4: buktikan komentarnya benar-benar berisi ---------------
+        //
+        // Menulis lalu percaya sudah terjadi bukan pembuktian. Yang kosong
+        // dihitung supaya panel bisa mengatakannya; kegagalan yang diam tidak
+        // bisa dibedakan dari alat yang rusak.
+        if (komentarBaru.length > 0) {
+          try {
+            komentarBaru.forEach(([, k]) => k.load("content"));
+            await context.sync();
+            for (const [t, k] of komentarBaru) {
+              if ((k.content ?? "").trim() !== "") continue;
+              hasil.komentarKosong++;
+              console.warn(`Komentar T${t.nomor} terpasang tetapi kosong.`);
+            }
+          } catch (err) {
+            // Gagal membaca ulang bukan alasan menggagalkan penandaan yang
+            // sudah terlanjur benar. Cukup dicatat.
+            console.warn("Gagal memeriksa isi komentar:", err);
           }
-        } catch (err) {
-          // Gagal membaca ulang bukan alasan menggagalkan penandaan yang
-          // sudah terlanjur benar. Cukup dicatat.
-          console.warn("Gagal memeriksa isi komentar:", err);
         }
+      } finally {
+        await kembalikanPelacakan(context, modeAwal);
       }
-
-      await kembalikanPelacakan(context, modeAwal);
     });
   } catch (err) {
     console.warn("Gagal menandai temuan di dokumen:", err);
@@ -762,9 +1079,13 @@ export async function tandaiSemuaTemuan(
  * Membungkus rentang dengan content control bertag, penampilannya disembunyikan.
  *
  * Inilah satu-satunya cara add-in mengenali kembali tandanya sendiri: Word
- * tidak menyimpan apa pun tentang "usulan mesin". Kegagalan di sini tidak
- * menggagalkan penandaan — tandanya tetap terpasang, hanya lebih sulit dicabut
- * otomatis nanti.
+ * tidak menyimpan apa pun tentang "usulan mesin".
+ *
+ * Kegagalan Word menolak pembungkusnya baru muncul saat `context.sync()` —
+ * `try` di sini cuma menangkap galat yang terlempar seketika. Sejak 27 Sep
+ * 2026 kegagalan itu TIDAK lagi dibiarkan: tanda tanpa bungkus tidak bisa
+ * dicabut Tolak maupun Bersihkan, jadi `tandaiSemuaTemuan` mencabut seluruh
+ * tanda temuan itu dan melaporkannya "tidak ditandai".
  */
 function bungkusContentControl(
   rentang: Word.Range,
@@ -781,6 +1102,71 @@ function bungkusContentControl(
   } catch (err) {
     console.warn(`Content control ${tag} gagal dipasang:`, err);
   }
+}
+
+/**
+ * Mencabut bekas setengah jadi sebuah tanda yang GAGAL dipasang.
+ *
+ * Office.js tidak membatalkan operasi yang sudah jalan sebelum operasi yang
+ * gagal. Tanpa pencabutan ini, temuan yang gagal meninggalkan komentar dan
+ * coretan merah tanpa bungkus bertag — tanda yatim yang tidak bisa dicabut
+ * Tolak maupun Bersihkan, persis keadaan PMK 45 pada 27 Sep 2026.
+ *
+ * Tiap pencabutan di-sync sendiri-sendiri: proxy milik operasi yang tidak
+ * sempat jalan tidak sah, dan gagal mencabut yang satu tidak boleh
+ * menghalangi yang lain. Yang dipulihkan hanya sifat yang memang diubah alat
+ * untuk jenis tanda itu — warna milik penyusun tidak disentuh.
+ */
+async function cabutSisaGagal(
+  context: Word.RequestContext,
+  t: Temuan,
+  r: Word.Range,
+  asli: FormatAsli,
+  komentar: Word.Comment | null,
+  usulan: Word.Range | null
+): Promise<void> {
+  const coba = async (apa: string, langkah: () => void | Promise<void>) => {
+    try {
+      await langkah();
+      await context.sync();
+    } catch (err) {
+      console.warn(`Sisa T${t.nomor} (${apa}) gagal dicabut:`, err);
+    }
+  };
+
+  if (komentar) await coba("komentar", () => komentar.delete());
+
+  // Usulan hijau: kalau sempat dibungkus, dicabut berikut isinya lewat
+  // tagnya; kalau belum sempat, lewat rentangnya sendiri.
+  let usulanTercabut = false;
+  await coba("usulan hijau", async () => {
+    const cc = context.document.body.contentControls.getByTag(`${TAG_USUL}${t.nomor}`);
+    cc.load("items");
+    await context.sync();
+    cc.items.forEach((c) => c.delete(false));
+    usulanTercabut = cc.items.length > 0;
+  });
+  if (usulan && !usulanTercabut) await coba("usulan hijau", () => usulan.delete());
+
+  // Bungkus teks asli, kalau ternyata sempat terpasang: dilepas, isinya tetap.
+  await coba("bungkus", async () => {
+    const cc = context.document.body.contentControls.getByTag(`${TAG_ASLI}${t.nomor}`);
+    cc.load("items");
+    await context.sync();
+    cc.items.forEach((c) => c.delete(true));
+  });
+
+  const coret =
+    (t.jenis_tanda === "penggantian" && !!t.usulan_rumusan) ||
+    t.jenis_tanda === "penghapusan";
+  await coba("warna", () => {
+    if (coret) {
+      if (asli.color) r.font.color = asli.color;
+      r.font.strikeThrough = asli.strikeThrough ?? false;
+    } else if (!t.tanpa_sorot) {
+      r.font.highlightColor = (asli.highlightColor ?? null) as unknown as string;
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -963,6 +1349,157 @@ export async function bersihkanSemuaTanda(): Promise<HasilPembersihan> {
   return hasil;
 }
 
+/** Tanda dan komentar milik alat yang masih ada di naskah. */
+export type TandaDiNaskah = { tanda: number; komentar: number };
+
+/**
+ * Menghitung tanda (content control `DA-*`) dan komentar milik alat yang
+ * MASIH ADA di naskah — dari naskahnya sendiri, bukan dari daftar panel.
+ *
+ * Ditambahkan 27 Sep 2026. Sebelumnya pengaman analisis-berulang cuma
+ * memeriksa daftar kartu, dan daftar itu hilang tiap kali panel ditutup, Word
+ * dimulai ulang, atau berkas dibuka esok harinya — sementara tandanya tetap
+ * di naskah. Analisis berikutnya lalu menomori ulang dari T1 di atas tanda
+ * lama: komentar ganda, dan Tolak mencabut tanda milik temuan lain (PMK 45).
+ *
+ * Content control dibaca lewat WordApi 1.1; komentar lewat 1.4 dan di-sync
+ * terpisah, supaya komentar yang terkunci lisensi (CLAUDE.md butir 9) tidak
+ * ikut membutakan hitungan tandanya.
+ */
+export async function hitungTandaAlat(): Promise<TandaDiNaskah> {
+  const kosong: TandaDiNaskah = { tanda: 0, komentar: 0 };
+  if (!isOfficeAvailable()) return kosong;
+  try {
+    return await Word.run(async (context) => {
+      const kontrol = context.document.body.contentControls;
+      kontrol.load("items/tag");
+      await context.sync();
+      const tanda = kontrol.items.filter(
+        (cc) => cc.tag?.startsWith(TAG_ASLI) || cc.tag?.startsWith(TAG_USUL)
+      ).length;
+
+      let komentar = 0;
+      if (checkApiSupport("1.4")) {
+        try {
+          const semua = context.document.body.getComments();
+          semua.load("items/content");
+          await context.sync();
+          komentar = semua.items.filter((k) =>
+            /\(T\d+\)$/.test((k.content ?? "").trim())
+          ).length;
+        } catch (err) {
+          console.warn("Komentar alat tidak bisa dihitung:", err);
+        }
+      }
+      return { tanda, komentar };
+    });
+  } catch (err) {
+    console.warn("Tanda alat di naskah tidak bisa dihitung:", err);
+    return kosong;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Daftar temuan yang ikut tersimpan di dalam berkas Word
+// ---------------------------------------------------------------------------
+//
+// Ditetapkan penelaah 27 Sep 2026 (K2 di docs/perbaiki bug.md). Tanda alat
+// hidup di naskah; daftar kartunya dulu cuma hidup di memori panel. Menutup
+// panel, memulai ulang Word, atau membuka berkas esok harinya menghapus
+// daftarnya — keputusan yang belum diambil ikut hilang, dan Terima/Tolak tidak
+// lagi bisa dikerjakan untuk tanda yang masih ada.
+//
+// Disimpan lewat Office.context.document.settings: ikut tersimpan DI DALAM
+// berkasnya saat berkas disimpan, jadi pindah bersama berkasnya. `set` hanya
+// mengubah salinan di memori — `saveAsync` yang menuliskannya ke dokumen.
+
+const KUNCI_DAFTAR = "drafterAnaliser.daftarTemuan";
+
+// Batas aman ukuran simpanan. Satu analisis wajar (≤50 temuan) jauh di bawah
+// ini; yang melewatinya lebih baik tidak disimpan daripada menggagalkan
+// penyimpanan seluruh setelan add-in.
+const BATAS_UKURAN_SIMPANAN = 1_500_000;
+
+/** Isi yang disimpan di dalam berkas. */
+export type DaftarTersimpan = {
+  versi: 1;
+  temuan: Temuan[];
+  idTidakDitandai: string[];
+  jenisDokumen: string | null;
+  /** Format asli tiap rentang — tanpa ini Tolak sesudah dibuka ulang hanya bisa menebak. */
+  formatAsli: [number, FormatAsli][];
+};
+
+function setelanDokumen(): Office.Settings | null {
+  try {
+    return Office.context?.document?.settings ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Menyimpan daftar temuan ke dalam berkas. Daftar kosong MENGHAPUS simpanannya.
+ * Mengembalikan false kalau setelan dokumen tidak tersedia atau gagal disimpan —
+ * pengaman 3a (hitungTandaAlat) tetap bekerja tanpanya.
+ */
+export async function simpanDaftarDiNaskah(data: {
+  temuan: Temuan[];
+  idTidakDitandai: string[];
+  jenisDokumen: string | null;
+}): Promise<boolean> {
+  if (!isOfficeAvailable()) return false;
+  const setelan = setelanDokumen();
+  if (!setelan) return false;
+  try {
+    if (data.temuan.length === 0) {
+      setelan.remove(KUNCI_DAFTAR);
+    } else {
+      const isi: DaftarTersimpan = {
+        versi: 1,
+        ...data,
+        formatAsli: [...formatAsliTemuan.entries()],
+      };
+      if (JSON.stringify(isi).length > BATAS_UKURAN_SIMPANAN) {
+        console.warn("Daftar temuan terlalu besar untuk disimpan di berkas.");
+        return false;
+      }
+      setelan.set(KUNCI_DAFTAR, isi);
+    }
+    return await new Promise<boolean>((selesai) =>
+      setelan.saveAsync((hasil) =>
+        selesai(hasil.status === Office.AsyncResultStatus.Succeeded)
+      )
+    );
+  } catch (err) {
+    console.warn("Daftar temuan gagal disimpan di berkas:", err);
+    return false;
+  }
+}
+
+/** Daftar yang tersimpan di berkas ini, atau null. Tidak mengubah apa pun. */
+export function bacaDaftarDariNaskah(): DaftarTersimpan | null {
+  if (!isOfficeAvailable()) return null;
+  try {
+    const isi = setelanDokumen()?.get(KUNCI_DAFTAR) as DaftarTersimpan | null;
+    if (!isi || isi.versi !== 1 || !Array.isArray(isi.temuan)) return null;
+    return {
+      ...isi,
+      idTidakDitandai: Array.isArray(isi.idTidakDitandai) ? isi.idTidakDitandai : [],
+      formatAsli: Array.isArray(isi.formatAsli) ? isi.formatAsli : [],
+    };
+  } catch (err) {
+    console.warn("Daftar temuan di berkas tidak terbaca:", err);
+    return null;
+  }
+}
+
+/** Kembalikan format asli dari simpanan, supaya Tolak memulihkan persis. */
+export function pulihkanFormatAsli(entri: [number, FormatAsli][]): void {
+  formatAsliTemuan.clear();
+  for (const [nomor, format] of entri) formatAsliTemuan.set(nomor, format);
+}
+
 /**
  * Menghapus SELURUH komentar milik alat dari naskah.
  *
@@ -1043,8 +1580,57 @@ export async function perbaruiKomentarTemuan(temuan: Temuan): Promise<boolean> {
   }
 }
 
+/**
+ * Melompat ke TEMPAT PERBAIKANNYA — bukan ke tempat temuannya.
+ *
+ * Dua tempat itu memang sering berbeda, dan itulah seluruh alasan medan
+ * `sasaran` ada: komentar menempel di Pasal 2 tempat frasanya bermasalah,
+ * sementara definisinya harus ditulis di Pasal 1. Sebelum ada tombol ini
+ * penelaah membaca "Perbaiki di: Pasal 1 angka 5" lalu menggulir mencarinya
+ * sendiri.
+ *
+ * Kenapa lewat tombol di kartu, BUKAN tautan di dalam komentar Word:
+ * `CommentContentRange.hyperlink` memang ada (WordApi 1.4), tetapi ia
+ * memasang tautan pada SELURUH isi komentar, bukan sepenggal kata — dan
+ * sasarannya menuntut bookmark ditanam di naskah penelaah. Menambah tanda
+ * permanen ke dokumen orang demi satu lompatan bukan pertukaran yang sepadan;
+ * tombol di panel tidak menyentuh naskah sama sekali.
+ */
+export async function lompatKeSasaran(temuan: Temuan): Promise<boolean> {
+  const index = temuan.sasaran_paragraf;
+  if (!isOfficeAvailable() || index === null || index === undefined) {
+    return false;
+  }
+
+  // Kursor yang berpindah sebentar lagi datang dari PANEL. Tanpa ini pemantau
+  // seleksi membacanya sebagai perpindahan penelaah, dan sorotan kartunya
+  // lepas tepat saat tombolnya ditekan.
+  seleksiDigerakkanPanel();
+
+  try {
+    return await Word.run(async (context) => {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items");
+      await context.sync();
+
+      const p = paragraphs.items[index];
+      if (!p) return false;
+
+      p.getRange().select();
+      await context.sync();
+      return true;
+    });
+  } catch (err) {
+    console.warn("Gagal melompat ke sasaran perbaikan:", err);
+    return false;
+  }
+}
+
 export async function selectFindingLocation(temuan: Temuan): Promise<boolean> {
   if (!isOfficeAvailable()) return false;
+
+  // Sama alasannya dengan `lompatKeSasaran` — lihat catatan di sana.
+  seleksiDigerakkanPanel();
 
   try {
     return await Word.run(async (context) => {
@@ -1088,4 +1674,165 @@ export async function selectFindingLocation(temuan: Temuan): Promise<boolean> {
     console.warn("Gagal memilih lokasi temuan:", err);
     return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Menyorot kartu menurut posisi kursor di naskah
+// ---------------------------------------------------------------------------
+//
+// Kebalikan "Lompat ke Teks": penelaah mengklik naskah, kartunya yang menyala.
+//
+// WORD TIDAK PUNYA EVENT GULIR. Seluruh API bernama `scroll*` di
+// @types/office-js milik `Window` Excel — `scrollRow`, `scrollColumn`. Word
+// tidak mengekspos posisi gulir maupun perubahannya, jadi "kartu mengikuti
+// saat digulir" memang tidak bisa dibangun. Yang bisa: `DocumentSelectionChanged`,
+// yang menyala saat SELEKSI berpindah — klik, tombol panah, mengetik.
+//
+// Praktiknya itu menjawab kebutuhannya: orang yang menelaah jarang menggulir
+// tanpa menaruh kursor.
+//
+// Pemetaan ke kartu memakai mesin yang SUDAH ADA, bukan yang baru: tiap temuan
+// yang tertandai dibungkus content control ber-tag `DA-ASLI-<nomor>`, jadi
+// cukup ditanya content control apa yang ada di paragraf terpilih. Semuanya
+// WordApi 1.1 (`Paragraph.contentControls`), satu `sync`, dan TIDAK menyentuh
+// naskah sama sekali — pemantau ini cuma membaca.
+//
+// Jalur yang sengaja TIDAK dipakai: `Paragraph.uniqueLocalId` menuntut WordApi
+// 1.6, dan CLAUDE.md butir 9 sudah mencatat bahwa requirement set yang
+// dilaporkan didukung pun masih bisa melempar NotImplemented.
+
+/**
+ * Jeda tahan sebelum seleksi dibaca. Tiap tombol panah menyalakan event.
+ *
+ * 120 ms, diturunkan dari 200 pada 27 Sep 2026 — penelaah melaporkan kartunya
+ * "baru tersorot sesudah beberapa detik". Cukup rapat untuk terasa seketika
+ * pada satu klik, masih cukup renggang untuk menelan hujan event saat tombol
+ * panah ditahan.
+ */
+const JEDA_PEMANTAU_MS = 120;
+
+/** Berapa lama event diabaikan sesudah PANEL sendiri yang memindahkan kursor. */
+const ABAIKAN_SELEKSI_SENDIRI_MS = 800;
+
+let lepasPemantau: (() => void) | null = null;
+let bacaanSedangJalan = false;
+let seleksiSendiriSampai = 0;
+let tundaPembacaan: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Tandai bahwa perpindahan kursor berikutnya datang dari PANEL, bukan penelaah.
+ *
+ * Tanpa ini "Lompat ke Perbaikan" memantul: ia memindahkan kursor ke Pasal 1,
+ * event menyala, pemantau membaca paragraf yang tidak punya tanda apa pun, dan
+ * sorotan kartunya lepas tepat saat penelaah menekannya.
+ */
+export function seleksiDigerakkanPanel(): void {
+  seleksiSendiriSampai = Date.now() + ABAIKAN_SELEKSI_SENDIRI_MS;
+}
+
+/** Nomor temuan yang tandanya ada di paragraf terpilih. Null berarti tidak ada. */
+async function bacaNomorDiSeleksi(): Promise<number | null> {
+  return await Word.run(async (context) => {
+    // SATU `sync`, bukan dua. `getFirst()` adalah operasi yang DIANTRIKAN,
+    // jadi paragrafnya tidak perlu dimuat lebih dulu sebelum content
+    // control-nya diminta. Versi dua-sync terasa lambat oleh penelaah: tiap
+    // klik menunggu dua perjalanan bolak-balik ke Word sebelum kartunya
+    // menyala.
+    //
+    // Content control DI DALAM paragrafnya, bukan yang persis membungkus
+    // kursor. Sengaja longgar: penelaah mengklik di mana saja pada baris yang
+    // bermasalah, bukan tepat di atas kata yang disorot.
+    const kontrol = context.document
+      .getSelection()
+      .paragraphs.getFirst()
+      .contentControls;
+    kontrol.load("items/tag");
+    await context.sync();
+
+    for (const k of kontrol.items) {
+      if ((k.tag ?? "").startsWith(TAG_ASLI)) {
+        const n = nomorDariTag(k.tag);
+        if (n !== null) return n;
+      }
+    }
+    return null;
+  });
+}
+
+/**
+ * Pasang pemantau seleksi. Mengembalikan false kalau tidak tersedia.
+ *
+ * `onSorot` dipanggil HANYA ketika sebuah temuan benar-benar ketemu. Paragraf
+ * tanpa tanda tidak memanggil apa pun — kalau ia melepas sorotan, sorotannya
+ * berkedip-kedip sepanjang penelaah mengetik, dan kartu yang sedang ditimbang
+ * hilang dari pandangan justru saat naskahnya sedang diperbaiki.
+ */
+export async function pasangPemantauSeleksi(
+  onSorot: (nomor: number) => void
+): Promise<boolean> {
+  if (!isOfficeAvailable()) return false;
+  if (lepasPemantau) return true;
+
+  const tangani = () => {
+    if (Date.now() < seleksiSendiriSampai) return;
+    if (tundaPembacaan) clearTimeout(tundaPembacaan);
+    tundaPembacaan = setTimeout(() => {
+      tundaPembacaan = null;
+      if (bacaanSedangJalan) return;
+      bacaanSedangJalan = true;
+      bacaNomorDiSeleksi()
+        .then((nomor) => {
+          if (nomor !== null) onSorot(nomor);
+        })
+        .catch((err) => console.warn("Gagal membaca seleksi:", err))
+        .finally(() => {
+          bacaanSedangJalan = false;
+        });
+    }, JEDA_PEMANTAU_MS);
+  };
+
+  try {
+    // JALUR CADANGAN RUNTIME, CLAUDE.md butir 9. Bukan cuma memeriksa
+    // requirement set: pemasangannya sendiri ditunggu hasilnya, dan kegagalan
+    // apa pun berakhir dengan fitur ini mati diam-diam — bukan panel rusak.
+    const terpasang = await new Promise<boolean>((resolve) => {
+      try {
+        Office.context.document.addHandlerAsync(
+          Office.EventType.DocumentSelectionChanged,
+          tangani,
+          (hasil) =>
+            resolve(hasil.status === Office.AsyncResultStatus.Succeeded)
+        );
+      } catch {
+        resolve(false);
+      }
+    });
+    if (!terpasang) return false;
+
+    lepasPemantau = () => {
+      try {
+        Office.context.document.removeHandlerAsync(
+          Office.EventType.DocumentSelectionChanged,
+          { handler: tangani }
+        );
+      } catch (err) {
+        console.warn("Pemantau seleksi gagal dilepas:", err);
+      }
+    };
+    return true;
+  } catch (err) {
+    console.warn("Pemantau seleksi tidak bisa dipasang:", err);
+    return false;
+  }
+}
+
+/** Lepas pemantau seleksi. Aman dipanggil walau belum pernah terpasang. */
+export function lepasPemantauSeleksi(): void {
+  if (tundaPembacaan) {
+    clearTimeout(tundaPembacaan);
+    tundaPembacaan = null;
+  }
+  const lepas = lepasPemantau;
+  lepasPemantau = null;
+  if (lepas) lepas();
 }

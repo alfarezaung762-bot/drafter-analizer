@@ -153,34 +153,24 @@ async def _cek_azure_openai_chat() -> dict[str, Any]:
         }
 
     try:
-        from openai import AzureOpenAI
+        # Lewat klien yang SAMA dengan analisis, supaya yang diuji memang
+        # jalurnya — termasuk penyesuaian untuk model yang menolak
+        # temperature=0 (seri GPT-5). Tanpa max_tokens: model penalaran
+        # menolaknya, dan batas sekecil itu bisa habis untuk penalaran saja.
+        from app.bersama.llm import KlienAzure
 
-        client = AzureOpenAI(
-            azure_endpoint=endpoint,
-            api_key=api_key,
-            api_version=api_version or "2025-03-01-preview",
-            timeout=10.0,
+        klien = KlienAzure(batas_waktu=30.0, coba_ulang=0)
+        jawab = await asyncio.to_thread(
+            lambda: klien.tanya("Kamu asisten.", "Jawab hanya: OK")
         )
-
-        resp = await asyncio.to_thread(
-            lambda: client.chat.completions.create(
-                model=deployment,
-                messages=[{"role": "user", "content": "Jawab hanya: OK"}],
-                max_tokens=5,
-                temperature=0,
-            )
-        )
-        jawaban = resp.choices[0].message.content.strip() if resp.choices else "?"
+        jawaban = jawab.teks.strip() or "?"
 
         return {
             "layanan": "Azure OpenAI - Chat",
             "terhubung": True,
             "pesan": f"Deployment \"{deployment}\" merespons: \"{jawaban}\"",
             "variabel": variabel,
-            "detail": {
-                "deployment": deployment,
-                "model": resp.model if resp.model else "?",
-            },
+            "detail": {"deployment": deployment},
         }
     except Exception as e:
         return {
