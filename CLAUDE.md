@@ -77,6 +77,11 @@ sesudah pembaruan.
 3. **Setiap temuan wajib membawa rujukan yang bisa diperiksa**, diambil dari
    tabel tetap di `rules/rujukan_kmk527.py`. **Tidak boleh dikarang.** Selama
    butirnya masih `"..."`, panel menampilkan penanda "belum diverifikasi".
+   Sejak Fase 4 (ditetapkan penelaah 30 Sep 2026) rujukan diambil dari baris
+   Dasar analisis; bila Dasar kosong, agen mencarikannya dan kode
+   membuktikan alamat serta kutipannya ada di teks skill `pmk-standar/` atau
+   di hasil korpus. Tidak ketemu → komentar tanpa rujukan, bukan dikarang.
+   Rinciannya di `docs/fase4-merapikan-backend.md` bagian 3.2.
 4. **Jangan menurunkan aturan dari hasil ekstraksi teks PDF KMK 527.**
    Salinannya hasil pemindaian dan OCR-nya rusak ("clan" untuk "dan", "MENTER!"
    untuk "MENTERI"). Aturan wajib diverifikasi manual dari naskah yang dibaca
@@ -92,7 +97,9 @@ sesudah pembaruan.
    2026, berlaku sejak Fase 4): perbaikan yang tempatnya di satuan lain boleh
    disisipkan sebagai **satuan baru** — angka definisi, ayat, atau pasal — di
    tempat perbaikan yang terbukti ada. Teks lama tetap tidak disentuh, dan
-   Tolak mencabut sisipannya bersih. Rinciannya di
+   Tolak mencabut sisipannya bersih. Isinya dicari dulu di korpus; tidak
+   ketemu → perkiraan agen dari naskah sendiri, hijau juga, dengan Sumber
+   usulan "(prediksi AI)" (ditetapkan 1 Okt 2026). Rinciannya di
    `docs/fase4-merapikan-backend.md` bagian 3.1 dan 5.6.
 6. **Temuan yang rentang presisinya tidak ketemu tidak ditandai sama sekali** —
    bukan diperlebar ke satu paragraf. Pelanggarannya pernah terjadi sekali dan

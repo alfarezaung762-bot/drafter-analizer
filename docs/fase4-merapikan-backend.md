@@ -42,9 +42,11 @@ backend/
 │   │
 │   ├── telaah/                    agen
 │   │   ├── alur.py
-│   │   ├── tahap1_bahan/          parser + naskah bernomor + bahan korpus (bila dibutuhkan)
-│   │   ├── tahap2_agen/           putaran, alat, pemuat analisis dan skill,
-│   │   │                          pengaman macet, peran dasar agen
+│   │   ├── tahap1_bahan/          menyiapkan bacaan: peta letak pasal/ayat (parser) ·
+│   │   │                          naskah berlabel untuk agen · peraturan lain yang
+│   │   │                          dirujuk naskah, dari korpus (bila dibutuhkan)
+│   │   ├── tahap2_agen/           pembagi kelompok pasal, putaran, alat, pemuat
+│   │   │                          analisis dan skill, pengaman macet, peran dasar
 │   │   ├── tahap3_verifikasi.py   gerbang — satu-satunya tempat temuan lahir
 │   │   └── ekspor/                bahan · jejak agen · verifikasi
 │   │
@@ -77,10 +79,11 @@ cukup menyalin formulir ini ke bagian baru di `analisis.md` lalu mengisinya:
 
 Berlaku untuk: pmk-standar     ← jenis naskah; boleh lebih dari satu, dipisah koma
 Respons: otomatis              ← otomatis · usulan · catatan · dibuang (bagian 3)
+Lingkup: per pasal             ← per pasal · seluruh naskah · lampiran (bagian 2)
 Komentar: lengkap              ← lengkap · ringkas
 Dasar: KMK 527 Lampiran II angka III huruf C.2 butir 72, hlm 46 (visual)
                                ← alamat lengkap; atau: prioritas penelaah;
-                                  boleh kosong (pertanyaan 2)
+                                  boleh kosong — agen mencarikan (bagian 3.2)
 Butuh: —                       ← mis. korpus; bahan korpus; pembaca diktum KMK
 
 ### Yang diperiksa
@@ -91,6 +94,8 @@ Butuh: —                       ← mis. korpus; bahan korpus; pembaca diktum K
 
 ### Cara memeriksa
 Untuk agen: di bagian naskah mana, kaidah (skill) dan alat apa yang dipakai.
+Boleh kosong — agen memilih sendiri dari alat yang ada; diisi supaya hasilnya
+sama tiap kali dijalankan.
 
 ### Bukan kesalahan
 Kapan agen harus diam — batas kewajaran.
@@ -99,11 +104,15 @@ Kapan agen harus diam — batas kewajaran.
 Satu temuan yang benar, satu yang bukan. Boleh kosong.
 ```
 
-Lima baris di atas dibaca kode: pemuat (jenis naskah, prasyarat), panel
-Pengaturan, dan gerbang (batas respons, bentuk komentar, rujukan). Bagian di
+Enam baris di atas dibaca kode: pemuat (jenis naskah, lingkup, prasyarat),
+panel Pengaturan, dan gerbang (batas respons, bentuk komentar, rujukan). Bagian di
 bawahnya dibaca agen; dua bagian pertama juga tampil di panel. Dasar yang
 diisi manusia dicocokkan dulu ke citra halaman PDF KMK 527 — `(visual)`, atau
 `(turunan)` bila aturannya akibat butir itu, bukan bunyinya.
+
+Agen tidak bisa membuat alat baru. Analisis yang butuh bacaan yang belum ada —
+mis. ukuran huruf atau marjin dari berkas Word — menunggu pembacanya dibuat di
+kode; menulis barisnya saja di `analisis.md` tidak cukup.
 
 **Yang hilang:** `rules/` — isi `format_baku.py` pindah ke `analisis.md`
 (yang terbaca dari teks) dan ke bagian 6.1 (kapital dari gaya huruf), tabel
@@ -116,56 +125,134 @@ diisi manusia dicocokkan dulu ke citra halaman PDF KMK 527 — `(visual)`, atau
 bagiannya sendiri walau sebagian kaidahnya sama — dirapikan kalau jenis kedua
 sudah ada. Versi pertama PMK biasa saja, sesuai skop sekarang.
 
+**Menambah jenis naskah = skill + pembaca struktur.** Skill (teks) memberi
+agen kaidahnya. Label satuan — `[pasal-5-ayat-2]` — tetap butuh pembaca
+struktur jenis itu di `tahap1_bahan/`: Pasal I naskah perubahan berisi
+pasal-pasal milik peraturan induk, dan omnibus mengubah beberapa peraturan
+sekaligus; tanpa label yang pasti, agen tidak bisa menunjuk tempat dan Word
+tidak bisa ditandai. Pembacanya ditulis kode, atau diusulkan AI lalu
+dibuktikan kode — dipilih saat jenis kedua digarap, diuji di naskah nyata.
+
 ## 2. Alur
 
-Yang tidak berubah: pembacaan naskah di Word, gerbang verifikasi, dan arti
-warna. **Agen bebas memilih langkah; ia tidak pernah bebas menandai naskah.**
-Model: versi OpenAI terbaru di Azure (Luna atau Terra), diatur di `.env`.
-Biaya tidak dibatasi.
+**Yang tidak berubah dari sekarang:** cara panel membaca naskah dari Word,
+gerbang verifikasi, dan arti warna. **Agen bebas memilih langkah, tetapi
+tidak pernah bebas menandai naskah** — semua yang ditemukannya lewat gerbang
+kode dulu. Model: versi OpenAI terbaru di Azure (Luna atau Terra), diatur di
+`.env`. Biaya tidak dibatasi.
 
 ```
-PENELAAH  memilih jenis naskah, lalu Jalankan Analisis
-                    │
-FASE 1   PROGRAM                                 kode · instan · gratis
-         pemeriksaan yang AI tidak bisa — di Fase 4: status dasar hukum
-         di korpus (F3-002); sisanya bila disetujui (bagian 6.1)
-         hasilnya langsung tampil, dan ikut diberikan ke agen supaya tidak
-         diulang
-                    │
-TAHAP 1  BAHAN                                   kode · detik
-         paragraf → naskah bernomor: seluruh paragraf berlabel satuan
-         [pasal-5-ayat-2], lampiran per baris sel
-         di atas ±100 rb token: tabel data sejenis di lampiran jadi
-         kerangka, isinya tetap bisa dibuka agen · tabel > 1.000 baris
-         selalu kerangka
-         parser → pohon satuan, dipakai gerbang untuk membuktikan letak
-         bila ada analisis yang membutuhkannya: BAHAN KORPUS — semua
-         peraturan yang disebut naskah dicari di korpus (status + teks
-         pasal yang dirujuk), dilampirkan sebagai pembanding
-                    │
-TAHAP 2  AGEN                                    model · jumlah langkah tidak tetap
-         kode memilih analisis dari analisis.md: cocok jenis naskahnya
-         dan prasyarat di baris Butuh tersedia
-         mulai: naskah + hasil Fase 1 + analisis terpilih + daftar skill
-         ┌─► agen memilih langkah berikutnya:
-         │     muat skill · cari teks · buka tabel · jumlah kolom ·
-         │     cari di korpus · catat calon temuan (disimpan kode)
-         │     kutipan > 200 huruf atau melewati paragraf → ditolak saat
-         │     itu juga, agen mengutip ulang bagian terpendek yang salah
-         └── ulang sampai agen memanggil SELESAI, melapor tiap analisis:
-             diperiksa · tidak relevan — yang terlewat, agen diminta lanjut
-         kode menjaga: putaran macet dihentikan · 429 → menunggu, bukan gagal
-                    │
-TAHAP 3  VERIFIKASI                              kode · detik · gratis
-         GERBANG TERAKHIR — pemeriksaan tahap 5 sekarang, ditambah:
-         + bentuk respons tidak boleh melewati baris Respons analisisnya
-         + rujukan dari baris Dasar, tidak pernah dikarang agen
-         + pembanding korpus wajib ada di hasil pencarian yang tercatat
-         + perbaikan di satuan lain: tempatnya wajib terbukti ada
-         dugaan yang tidak terbukti disimpan di jejak (pertanyaan 1)
-                    │
-PANEL DAN WORD   penandaan dan kartu — bagian 3
+1. PENELAAH       memilih jenis naskah (PMK), lalu menekan Jalankan Analisis.
+                  Panel membaca seluruh paragraf naskah dari Word; tabel
+                  > 1.000 baris hanya dibaca 5 baris contohnya.
+                       │
+2. ATURAN         aturan_deterministik/                kode · instan · gratis
+   DETERMINISTIK  Hanya pemeriksaan yang AI tidak bisa:
+                  · status dasar hukum di Mengingat, dicek ke korpus
+                  · bila disetujui (bagian 6.1): kapital judul dari gaya
+                    huruf, marjin dan ukuran kertas
+                  Temuannya LANGSUNG tampil di panel dan Word, lalu ikut
+                  diberikan ke agen supaya tidak diulang.
+                       │
+3. TAHAP 1        telaah/tahap1_bahan/                 kode · detik · gratis
+   BAHAN          · naskah bernomor — seluruh paragraf, satu baris per
+                    paragraf, tiap satuan berlabel [pasal-5-ayat-2], tabel
+                    lampiran per baris sel, gambar ditulis "tidak terbaca"
+                  · bahan di atas ±100 rb token → tabel data sejenis di
+                    lampiran diringkas jadi kerangka (judul kolom + 3 baris);
+                    isinya tetap bisa dibuka agen dengan alat
+                  · pohon satuan — letak tiap pasal, ayat, huruf, angka di
+                    Word; dipakai gerbang untuk membuktikan letak
+                  · bahan korpus, hanya bila ada analisis yang membutuhkannya:
+                    peraturan yang disebut naskah, status dan teks pasal
+                    yang dirujuknya
+                       │
+4. TAHAP 2        telaah/tahap2_agen/                  AI · menit
+   AGEN           a. Kode memilih analisis dari analisis.md: berlaku untuk
+                     PMK, dan prasyarat di baris Butuh tersedia.
+                  b. Kode membagi kerja menjadi putaran, menurut baris Lingkup:
+                       per pasal       satu putaran per kelompok ≤ 6 pasal
+                                       atau ≤ 4.000 token teks pasal
+                                       (PMK 45: 6 putaran). Pasal TIDAK
+                                       PERNAH dibelah: pasal yang membuat
+                                       kelompok lewat 4.000 pindah UTUH ke
+                                       kelompok berikutnya; satu pasal yang
+                                       sendirian > 4.000 jadi kelompok
+                                       sendiri, tetap utuh. Angka ini hanya
+                                       membagi TUGAS, tidak memotong bacaan.
+                       seluruh naskah  satu putaran
+                       lampiran        satu putaran, bila naskahnya berlampiran
+                  c. Semua putaran berjalan bersamaan. Tiap putaran mulai dengan:
+                       naskah bernomor UTUH · temuan langkah 2 · bahan korpus
+                       (bila ada) · analisis putaran itu · pasal fokus ·
+                       daftar skill
+                     Yang dibatasi hanya pasal yang wajib DINILAI; yang
+                     DIBACA tetap seluruh naskah.
+                  d. Di tiap putaran agen memilih sendiri langkahnya, berulang:
+                       muat_skill     membaca kaidah KMK 527 bagian naskah itu
+                       cari_teks      mencari di seluruh naskah, termasuk tabel
+                       buka_tabel     membuka baris tabel yang dikirim kerangkanya
+                       jumlah_kolom   menjumlah angka satu kolom tabel
+                       cari_korpus    mencari pembanding di peraturan lain;
+                                      hanya ada di putaran yang analisisnya
+                                      Butuh: korpus
+                       catat_temuan   mencatat calon temuan; kutipan > 200
+                                      huruf atau melewati satu paragraf
+                                      ditolak saat itu juga, agen mengutip ulang
+                  e. Agen menutup putaran dengan SELESAI: status tiap analisis
+                     untuk tiap pasal fokus (diperiksa · tidak relevan). Yang
+                     tidak dilaporkan ditagih sekali; tetap tidak → dicatat
+                     "tidak diperiksa", tidak pernah dianggap bersih.
+                  Kode menjaga: putaran macet dihentikan · kuota Azure penuh
+                  (429) → menunggu, bukan gagal · tiap langkah disimpan, jadi
+                  backend yang mati di tengah jalan melanjutkan tanpa bayar ulang.
+                  KELUAR: calon temuan + laporan tiap pasal + jejak langkah.
+                  Belum ada yang menyentuh Word.
+                       │
+5. TAHAP 3        telaah/tahap3_verifikasi.py          kode · detik · gratis
+   VERIFIKASI     Satu-satunya tempat temuan lahir. Tiap calon temuan diuji.
+                  GUGUR bila:
+                  · kutipannya tidak persis ada di satuan yang disebut
+                  · nomor pasal yang disebut tidak ada
+                  · skornya di bawah ambang
+                  · yang diklaim "tidak ada" ternyata ada di naskah
+                  · pembanding korpusnya tidak ada di hasil cari_korpus
+                  · tempat sisipan satuan barunya tidak ada di pohon
+                  DITURUNKAN jadi kuning bila:
+                  · bentuknya melewati baris Respons analisisnya
+                  · usulan tidak muat di tempat yang dicoret, kata
+                    tambahannya tidak bersumber, atau istilah berdefinisi
+                    tidak dieja persis → usulannya jadi contoh di Saran
+                  · dibuang bukan karena salah satu dari tiga alasan yang
+                    bisa dibuktikan kode (bagian 3.1)
+                  DILENGKAPI:
+                  · rujukan dari baris Dasar; Dasar kosong → rujukan agen
+                    yang terbukti ada di teks skill atau korpus; tidak
+                    terbukti → tanpa rujukan
+                  · isi sisipan cocok dengan korpus → Sumber usulan menyebut
+                    peraturannya; tidak → "(prediksi AI)"
+                  · calon kembar digabung ("+n tempat lain"); yang
+                    bertindihan dengan temuan langkah 2 dibuang
+                  · letak tidak pasti → hanya di panel, tidak ditandai
+                  Calon yang gugur tidak tampil di panel maupun Word.
+                       │
+6. PANEL DAN WORD Penandaan, dengan pelacakan perubahan dimatikan selama
+                  menandai: coret merah + hijau, kuning, komentar; sisipan
+                  satuan baru dipasang paling akhir, dari bawah ke atas.
+                  Kartu di panel; penelaah memutuskan lewat Terima / Tolak.
+                  Rinciannya bagian 3.
 ```
+
+**Kenapa kerja agen dibagi per kelompok pasal** (ditetapkan penelaah 1 Okt
+2026). Diuji berbayar pada PMK 45: kalau seluruh pasal dinilai dalam satu
+panggilan, AI tetap menjawab ke-29 pasal, tetapi penilaiannya dangkal —
+rata-rata 3,5 kesalahan nyata per kali analisis, dan hanya 1 kalau semua
+pemeriksaan digabung dalam satu panggilan. Dipecah per kelompok menemukan
+5,5. Yang membagi kode, bukan agen: pekerjaannya hanya menghitung pasal dan
+token, dan tiap pasal wajib masuk tepat satu kelompok.
+
+Contoh satu kesalahan nyata ditelusuri dari tahap 1 sampai Word:
+[`jelaskan.md`](jelaskan.md).
 
 ## 3. Daftar respons yang bisa diberikan agen
 
@@ -192,12 +279,20 @@ mentornya). Kalau perbaikannya ada di satuan lain — mis. kata "RCA" di Pasal
 langsung di tempatnya sebagai satuan baru** yang sesuai: angka definisi baru
 di Pasal 1, ayat baru, atau pasal baru. Komentar (Temuan, Saran, rujukan)
 menempel di sisipan itu. Di tempat temuan, kata "RCA" cukup **disorot tanpa
-komentar**; mengklik sorotan itu memusatkan kartunya di panel. Isi sisipan
-dicari dulu dari korpus — definisi yang sama di peraturan yang dilaksanakan
-atau PMK sebidang wajib sama rumusannya (Lampiran II angka III huruf C.1
-butir 62 dan 65, hlm 45); kalau tidak ketemu, isinya dirumuskan agen
-(tampilannya: pertanyaan 3). Penelaah tetap yang memutuskan lewat Terima dan
-Tolak.
+komentar**; mengklik sorotan itu memusatkan kartunya di panel. Penelaah
+tetap yang memutuskan lewat Terima dan Tolak.
+
+**Isi sisipan** (ditetapkan penelaah 1 Okt 2026):
+1. **Dicari dulu di korpus OpenSearch** — mis. arti "RCA" di peraturan lain
+   yang masih berlaku. Definisi yang sama di peraturan yang dilaksanakan
+   atau PMK sebidang memang wajib sama rumusannya (Lampiran II angka III
+   huruf C.1 butir 62 dan 65, hlm 45). Ketemu → disalin persis, dan baris
+   **Sumber usulan** menyebut peraturan dan pasalnya.
+2. **Tidak ketemu → agen memperkirakan artinya dari isi naskah sendiri**,
+   dan baris Sumber usulan tertulis **(prediksi AI)**.
+3. Tidak bisa diperkirakan → tidak disisipkan; tempat temuan disorot kuning.
+
+Sisipan 1 dan 2 sama-sama hijau; pembedanya di baris Sumber usulan.
 
 Tiga keadaan lain ditentukan kode, bukan dipilih:
 
@@ -215,9 +310,24 @@ Tiga keadaan lain ditentukan kode, bukan dipilih:
 | **Perbaiki di:** | agen menunjuk, kode membuktikan tempatnya ada | ya — tidak muncul bila perbaikannya di tempat temuan itu, atau bila perbaikannya sudah disisipkan di tempatnya |
 | **Juga di:** | kode, menggabung kesalahan kembar | ya |
 | **Saran:** | agen | ya — dilewati pada `usulan`, dikosongkan bila tidak ada jalan keluar yang pasti |
-| **Sumber usulan:** | kode, dari bukti yang lolos gerbang | wajib pada `usulan` |
+| **Sumber usulan:** | kode, dari bukti yang lolos gerbang; sisipan yang isinya tidak ketemu di korpus: **(prediksi AI)** | wajib pada `usulan` dan sisipan |
 | **Pembanding:** *(baru)* | agen mengutip, kode membuktikan ada di hasil pencarian korpus | wajib bila temuannya bersandar pada peraturan lain |
-| Rujukan + **(T-n)** | baris Dasar — alamat lengkap KMK 527; (T-n) oleh kode | rujukan tidak muncul bila dasarnya prioritas penelaah; (T-n) selalu ada |
+| Rujukan + **(T-n)** | baris Dasar — alamat lengkap KMK 527; bila Dasar kosong, dicarikan agen dan dibuktikan kode; (T-n) oleh kode | rujukan tidak muncul bila dasarnya prioritas penelaah, atau Dasar kosong dan agen tidak menemukannya; (T-n) selalu ada |
+
+**Dasar kosong** (ditetapkan penelaah 30 Sep 2026): agen mencarikan
+rujukannya sendiri, dari dua tempat saja —
+- kaidah KMK 527: teks skill `pmk-standar/`, yang ditulis dari rangkuman
+  yang sudah dicocokkan ke citra PDF, lengkap dengan alamatnya. Kode
+  memeriksa alamat dan kutipan yang disebut agen benar-benar ada di teks
+  skill itu;
+- peraturan lain: hasil `cari_korpus`. Kode memeriksa peraturan dan pasalnya
+  ada di hasil pencarian.
+
+Rujukan yang dicarikan agen berlencana "rujukan belum diverifikasi" sampai
+alamatnya disalin ke baris Dasar. Tidak ketemu → komentar tanpa baris
+rujukan, tidak dikarang. KMK 527 sendiri tidak dicari di korpus: dicek 30 Sep
+2026, KMK 527 tercatat di korpus tetapi isinya tidak terindeks per butir, dan
+teks salinannya hasil OCR (CLAUDE.md butir 4).
 
 `Komentar: ringkas` hanya membuang yang opsional — Saran. Temuan, Sumber
 usulan, Pembanding, dan rujukan tetap, karena itulah bukti yang bisa
@@ -241,6 +351,22 @@ kewajiban yang sama.
 (T7)
 ```
 
+Komentar di sisipan definisi baru — isinya dari korpus, dan perkiraan agen:
+
+```
+Temuan:
+"RCA" dipakai di Pasal 5 ayat (2) tetapi belum didefinisikan di Pasal 1.
+Sumber usulan: PMK 12/2024 Pasal 1 angka 9 (masih berlaku)
+KMK 527/KMK.01/2022 Lampiran II angka III huruf C.1 butir 58 huruf b, hlm 44 (T9)
+```
+
+```
+Temuan:
+"RCA" dipakai di Pasal 5 ayat (2) tetapi belum didefinisikan di Pasal 1.
+Sumber usulan: (prediksi AI)
+KMK 527/KMK.01/2022 Lampiran II angka III huruf C.1 butir 58 huruf b, hlm 44 (T9)
+```
+
 ### 3.3 Kartu di panel
 
 | Bagian kartu | Muncul bila |
@@ -251,8 +377,11 @@ kewajiban yang sama.
 | Tombol **Lihat sorotan** | perbaikannya disisipkan di satuan lain — melompat ke kata yang disorot di tempat temuan |
 | Lencana "+n tempat lain" | ada kesalahan kembar |
 | Lencana "tidak ditandai di naskah" + tombol **Alasan** | temuan hanya di panel |
-| Lencana "rujukan belum diverifikasi" · "dasar turunan" | status rujukannya bukan visual |
-| Lencana "tidak terbukti" *(baru)* | penelaah mencentang tampilkan dugaan tidak terbukti (pertanyaan 1) |
+| Lencana "rujukan belum diverifikasi" · "dasar turunan" | status rujukannya bukan visual — termasuk rujukan yang dicarikan agen |
+
+Calon temuan yang tidak lolos gerbang tidak punya kartu (ditetapkan penelaah
+30 Sep 2026): temuan tanpa bukti dianggap halusinasi, jadi tidak tampil di panel
+maupun di Word.
 
 ## 4. Urutan pengerjaan
 
@@ -275,7 +404,11 @@ kewajiban yang sama.
 7. **Alur lama tetap ada di balik saklar `.env` sampai agen terbukti.** Uji
    berbayar yang sama: temuan benar tidak berkurang, salah tandai tidak
    bertambah, tidak ada analisis yang gagal karena kuota atau gagal ditandai
-   karena kutipan terlalu panjang.
+   karena kutipan terlalu panjang. Temuan lemah (pertanyaan 1) dan beda hasil
+   antar-run (pertanyaan 2) dihitung terpisah. Empat pemeriksaan yang sekarang
+   dikerjakan kode — rujukan ada, nomor berurut, angka dan huruf bilangan
+   cocok, istilah Pasal 1 dipakai — jadi kunci jawaban: agen wajib menemukan
+   semua yang ditemukan kode.
 8. **Hapus alur lama dan aturan kode lama;** CLAUDE.md dan dokumen disamakan.
 
 ## 5. Rincian pengerjaan — untuk model yang mengerjakan
@@ -289,8 +422,8 @@ sebelum pertanyaannya dijawab.
   satu bagian `## Kode · Judul`. `_TEMPLATE.md` di folder yang sama, tidak
   dimuat sebagai analisis.
 - Kepala tiap bagian berupa baris `Kunci: nilai` persis seperti formulir.
-  Wajib: Kode, Judul, Berlaku untuk, Respons. Opsional: Komentar (bawaan
-  `lengkap`), Dasar (pertanyaan 2), Butuh.
+  Wajib: Kode, Judul, Berlaku untuk, Respons, Lingkup. Opsional: Komentar (bawaan
+  `lengkap`), Dasar (boleh kosong — agen mencarikan, bagian 3.2), Butuh.
 - Dasar ditulis sebagai alamat lengkap: Lampiran → angka → huruf/subbagian →
   butir → huruf/angka di dalam butir → halaman PDF.
 - Nilai di luar pilihan, kunci wajib kosong, atau kode kembar → backend
@@ -303,8 +436,7 @@ sebelum pertanyaannya dijawab.
 
 - Dikirim ke agen bila: Berlaku untuk memuat jenis naskah yang dipilih
   penelaah; tiap isi Butuh tersedia (korpus: Fase 3 dinyalakan dan
-  OpenSearch terhubung; pembaca struktur jenis naskah ada). Pilihan penelaah
-  di Pengaturan: pertanyaan 1.
+  OpenSearch terhubung; pembaca struktur jenis naskah ada).
 - Yang tidak memenuhi tidak dikirim; panel menyebut alasannya — "belum
   tersedia untuk KMK", "korpus tidak terhubung".
 - **Bahan korpus** hanya disusun bila ada analisis terpilih ber-`Butuh:
@@ -314,9 +446,19 @@ sebelum pertanyaannya dijawab.
   dirujuk dari korpus. Hasilnya dilampirkan sebagai pembanding, bukan temuan.
   Korpus dibaca saat analisis berjalan, jadi selalu mutakhir; teksnya hasil
   pemindaian, jadi kutipannya berpenanda "belum diverifikasi visual".
-- **Teks seluruh analisis terpilih dikirim di awal**, bukan dimuat sesuai
-  kebutuhan: agen harus tahu semua pesanan sejak langkah pertama. Skills
-  (kaidah) yang dimuat sesuai kebutuhan.
+- **Pembagian putaran** menurut baris Lingkup (bagian 2): `per pasal` →
+  satu putaran per kelompok pasal, dibentuk `kelompok_fokus` yang sekarang
+  (≤ 6 pasal atau ≤ 4.000 token teks pasal). Pasal tidak pernah dibelah;
+  tes penjaganya ikut dipindah: `test_pasal_dikelompokkan_tanpa_dibelah` dan
+  `test_satu_pasal_panjang_tetap_satu_kelompok`. Angka 6 sudah di `.env`
+  (`FASE2_PASAL_PER_FOKUS`); 4.000 masih tertanam di kode
+  (`TOKEN_PER_FOKUS`) dan dipindah ke `.env`. `seluruh naskah` → satu
+  putaran; `lampiran` → satu
+  putaran bila naskahnya berlampiran.
+- **Teks analisis dikirim di awal tiap putaran** — hanya analisis yang
+  lingkupnya cocok dengan putaran itu, bukan dimuat sesuai kebutuhan: agen
+  harus tahu semua pesanannya sejak langkah pertama. Skills (kaidah) yang
+  dimuat sesuai kebutuhan.
 
 ### 5.3 Agen
 
@@ -326,17 +468,17 @@ sebelum pertanyaannya dijawab.
 - **Model:** deployment di `.env` (Luna atau Terra). Keduanya model penalaran
   yang menolak `temperature=0`; `llm.py` sudah menanganinya.
 - Urutan pesan awal: peran dasar → naskah (awalan sama persis di tiap
-  langkah) → hasil Fase 1 → bahan korpus (bila ada) → analisis terpilih →
-  daftar skill (nama + deskripsi).
+  langkah dan di tiap putaran) → hasil Fase 1 → bahan korpus (bila ada) →
+  analisis putaran itu → pasal fokus → daftar skill (nama + deskripsi).
 - Alat:
 
   | Alat | Gunanya |
   |---|---|
   | `muat_skill` | membaca `SKILL.md` sebuah skill |
   | `cari_teks`, `buka_tabel`, `jumlah_kolom` | seperti `tahap4_memastikan/alat.py` sekarang |
-  | `cari_korpus` | pembanding di OpenSearch, hanya membaca; hasilnya dicatat kode untuk gerbang |
-  | `catat_temuan` | kode analisis, satuan, kutipan persis, bentuk, temuan, saran, usulan, sasaran, pembanding, skor — bentuknya dicek saat itu juga |
-  | `selesai` | status tiap analisis: diperiksa · tidak relevan, dengan alasan singkat |
+  | `cari_korpus` | pembanding di OpenSearch, hanya membaca. Hanya ditawarkan di putaran yang analisisnya `Butuh: korpus`. Hasilnya ≤ 5 peraturan yang masih berlaku, satu pasal paling mirip masing-masing — potongan, bukan peraturan utuh; dicatat kode untuk gerbang. "Tidak ketemu" tidak pernah jadi temuan |
+  | `catat_temuan` | kode analisis, satuan, kutipan persis, bentuk, temuan, saran, usulan, sasaran, pembanding, rujukan (bila Dasar kosong), skor — bentuknya dicek saat itu juga |
+  | `selesai` | status tiap analisis untuk tiap pasal fokus: diperiksa · tidak relevan, dengan alasan singkat |
 
 - **Kutipan wajib bisa ditandai di Word.** Kutipan (`teks_asli`) adalah
   bagian terpendek yang benar-benar salah, paling panjang 200 huruf, di dalam
@@ -344,6 +486,10 @@ sebelum pertanyaannya dijawab.
   temuan hanya bisa menandai satu paragraf. Kutipan yang melanggar ditolak
   `catat_temuan` saat itu juga, dan agen diminta mengutip ulang. Bahan yang
   **dibaca** agen tetap utuh; yang dibatasi hanya yang **ditandai**.
+- **Satu putaran = beberapa request.** AI tidak punya ingatan: tiap langkah
+  mengirim ulang naskah + riwayat putaran itu. Yang dihemat jumlah
+  langkahnya — agen boleh memanggil beberapa alat dan mencatat beberapa
+  temuan dalam satu langkah.
 - **Tanpa batas biaya, token, atau jumlah langkah.** Yang dijaga hanya
   **putaran macet**: alat yang sama dengan argumen yang sama berulang, atau
   sekian langkah tanpa temuan maupun status baru → agen dihentikan dan panel
@@ -361,19 +507,23 @@ sebelum pertanyaannya dijawab.
   tidak pernah hijau; `usulan` dan `otomatis` → hijau hanya bila syarat bukti
   lolos; `dibuang` → hanya untuk tiga alasan yang bisa dibuktikan kode (bagian 3.1); selain itu turun jadi `catatan`.
 - Rujukan dari baris Dasar, ditulis di komentar sebagai alamat lengkap; Dasar
-  "prioritas penelaah" → tanpa baris rujukan; Dasar kosong → pertanyaan 2.
+  "prioritas penelaah" → tanpa baris rujukan. Dasar kosong → rujukan yang
+  dicarikan agen (medan `rujukan` di `catat_temuan`: alamat + kutipan) wajib
+  ditemukan kode di teks skill `pmk-standar/` atau di hasil `cari_korpus`
+  yang tercatat; tidak ketemu → rujukannya dibuang, temuannya tetap.
 - Pembanding yang tidak ada di hasil `cari_korpus` tercatat → temuan gugur.
 - **Perbaikan di satuan lain:** sasaran wajib satuan yang terbukti ada di
   pohon; bentuk sisipannya mengikuti tempatnya (angka definisi, ayat, pasal);
   isinya dicocokkan dulu ke hasil korpus (definisi yang wajib sama menurut
   Lampiran II angka III huruf C.1 butir 62 dan 65, hlm 45) — cocok berarti
-  bersumber; tidak cocok berarti rumusan agen (pertanyaan 3).
+  bersumber, Sumber usulan menyebut peraturannya; tidak cocok berarti
+  perkiraan agen dari naskah, Sumber usulan "(prediksi AI)" (bagian 3.1).
 - Temuan ketiadaan yang tidak bisa disisipkan dipasang tanpa sorot; klaim
   "tidak ada"-nya dibuktikan pencarian kode.
-- Dugaan yang tidak terbukti (kurang bukti, mis. skor di bawah ambang)
-  disimpan di jejak; tampil hanya menurut pertanyaan 1. Dugaan yang
-  **terbantah** — kutipannya tidak ada, atau klaim "tidak ada" ternyata ada
-  — tidak pernah ditampilkan.
+- Calon temuan yang tidak lolos — kurang bukti (mis. skor di bawah ambang) atau
+  terbantah (kutipannya tidak ada, atau klaim "tidak ada" ternyata ada) —
+  **gugur**: tidak tampil di panel maupun Word. Alasannya gugur hanya
+  tercatat di ekspor jejak agen, untuk diagnosa pengembang.
 
 ### 5.5 Aturan deterministik — `app/aturan_deterministik/`
 
@@ -405,9 +555,12 @@ sebelum pertanyaannya dijawab.
   supaya kartu yang mengikuti kursor tetap menemukannya; tombol **Lihat
   sorotan** di kartu melompat ke sana.
 - Daftar Pengaturan dibaca dari backend: `analisis.md` +
-  `aturan_deterministik/aturan.json`; bentuknya menurut pertanyaan 1. Kartu
-  tetap ringkas.
-- Ekspor jejak agen menggantikan ekspor tahap 3 dan 4.
+  `aturan_deterministik/aturan.json`, bentuknya seperti daftar sekarang.
+  Kartu tetap ringkas.
+- Ekspor jejak agen menggantikan ekspor tahap 3 dan 4. Isinya tiap langkah
+  dan hasil alatnya, kutipan yang ditolak `catat_temuan`, laporan `selesai`
+  per pasal, dan calon yang gugur di gerbang beserta alasannya — tidak ada
+  yang dibuang diam-diam.
 - Isi `analisis.md` pertama diambil dari `aturan-fase1.ts`,
   `aturan-fase2.ts` (diperiksa / tidak diperiksa), `prompt.py` (instruksi),
   `rujukan_kmk527.py` (Dasar, diubah ke alamat lengkap), dan
@@ -461,6 +614,8 @@ ke citra PDF 30 Sep 2026.
 ✓ sudah dibangun · ½ sebagian · *baru* belum ada di katalog
 
 ### 6.1 Deterministik — AI tidak bisa (35)
+
+*Pembagian ini sedang ditinjau — pertanyaan 4.*
 
 **Format berkas dan tata letak** — AI hanya membaca teks; ukuran, jarak, dan
 letak dibaca program dari berkasnya.
@@ -721,49 +876,56 @@ administratif huruf E.
 ## 7. Pertanyaan yang belum diputuskan
 
 Yang sudah dijawab dihapus dari sini, dan keputusannya ditulis ke bagian
-terkait.
+terkait. Pertanyaan 1–3 lahir dari uji berbayar PMK 45 (1 Okt 2026).
 
-1. **Panel Pengaturan: centang "tampilkan dugaan tidak terbukti".** Idemu:
-   penelaah memilih dugaan tidak terbukti ditampilkan atau tidak, supaya
-   panel dan Word tidak penuh. Yang perlu dipastikan:
-   - (a) Bila dicentang, dugaan itu tampil **di panel saja**, berlencana
-     "tidak terbukti", **tidak pernah di Word** — yang ditandai di naskah
-     wajib benar-benar salah (CLAUDE.md butir 1). Setuju? Yang dimaksud
-     tidak terbukti hanya yang **kurang bukti**; yang **terbantah** —
-     kutipannya tidak ada di naskah, atau klaim "tidak ada" ternyata ada —
-     tidak pernah ditampilkan.
-   - (b) Daftar centang per aturan yang sekarang **dihapus** — semua analisis
-     selalu jalan, penelaah hanya memilih centang ini — atau **tetap ada**,
-     dilipat di bawahnya, sebagai rem bila satu aturan terbukti salah
-     tandai? **Rekomendasi:** tetap ada, dilipat.
-2. **Rujukan untuk analisis baru yang Dasar-nya belum diketahui.** Setiap
-   analisis punya baris Dasar — alamat lengkap kaidahnya, mis. *Lampiran II
-   angka III huruf C.2 butir 72, hlm 46*. Baris itu yang tampil sebagai
-   rujukan di komentar Word; agen tidak pernah mengarangnya. Pertanyaannya:
-   bagaimana kalau pembuat analisis belum tahu alamatnya?
-   **Rekomendasi:** Dasar boleh dikosongkan, lalu agen yang mencarikan —
-   dari dua tempat saja:
-   - kaidah KMK 527: dari teks skill `pmk-standar/`, yang ditulis dari
-     rangkuman yang sudah dicocokkan ke citra PDF, lengkap dengan alamatnya.
-     Kode memeriksa alamat dan kutipan yang disebut agen benar-benar ada di
-     teks skill itu;
-   - peraturan lain: dari hasil `cari_korpus`. Kode memeriksa peraturan dan
-     pasalnya ada di hasil pencarian.
+1. **Temuan lemah yang lolos gerbang.** Gerbang membuktikan kutipan, letak,
+   dan sumber kata — tetapi tidak bisa menilai apakah dua tafsiran sebuah
+   rumusan sama-sama masuk akal. Di PMK 45, 4 temuan seperti itu lolos, 2 di
+   antaranya hijau (Pasal 1 angka 3, Pasal 2 ayat (4)). Padahal yang
+   ditandai wajib benar-benar salah (CLAUDE.md butir 1).
+   - (a) Dibiarkan — penelaah menolaknya lewat Tolak.
+   - (b) Temuan "rumusan dua arah" selalu kuning, tidak pernah hijau. Ikut
+     mengorbankan 8 usulan hijau yang benar di uji itu.
+   - (c) Penilai kedua: sebelum gerbang, satu request per putaran menilai
+     ulang calon temuan yang berdasar penilaian (dua arah, pemikul,
+     tabrakan); yang tidak disetujui gugur.
 
-   Rujukan yang dicarikan agen tampil berlencana "rujukan belum
-   diverifikasi" sampai manusia menyalinnya ke baris Dasar; kalau tidak
-   ketemu, komentar tanpa baris rujukan — tidak dikarang. Kenapa bukan dari
-   korpus untuk KMK 527 sendiri: dicek 30 Sep 2026, KMK 527 tercatat di
-   korpus, tetapi isinya tidak terindeks per butir, dan teks salinannya
-   hasil OCR (CLAUDE.md butir 4). Akibatnya CLAUDE.md butir 3 ("diambil dari
-   tabel tetap") diubah: rujukan boleh dicarikan agen, asal dibuktikan kode.
-   Pilihan lain: Dasar wajib diisi manusia — analisis baru belum bisa
-   dipakai sebelum alamatnya dicari.
-3. **Tampilan sisipan yang isinya dirumuskan agen.** Sisipan yang isinya
-   ketemu di korpus — mis. definisi yang sama di peraturan yang
-   dilaksanakan — hijau biasa, bersumber. Kalau tidak ketemu, isinya
-   dirumuskan agen dan belum bersumber, padahal hijau selama ini berarti
-   terbukti dan bersumber. Pilihan: (a) tetap hijau, komentarnya menyebut
-   "rumusan agen — periksa isinya"; (b) warna lain, mis. biru, khusus
-   rumusan agen yang belum bersumber. **Rekomendasi:** (b) — arti tiap warna
-   tetap satu.
+   **Rekomendasi:** (c) — tambahannya satu request per putaran; hasilnya
+   diukur di langkah 7.
+2. **Hasil berbeda tiap kali dijalankan.** Dua run dengan cara yang sama di
+   PMK 45 hanya sama di 4 dari 8 temuan. Penelaah yang menjalankan ulang
+   naskah yang sama akan melihat hasil berbeda. Satu run menemukan rata-rata
+   7,5 kesalahan nyata; gabungan dua run 11.
+   - (a) Diterima; panel menyebut hasil AI bisa berbeda tiap kali dijalankan.
+   - (b) Tiap putaran dijalankan dua kali bersamaan, hasilnya digabung.
+     Biaya 2×; temuan lemah juga bisa bertambah (pertanyaan 1).
+   - (c) Hasil disimpan per naskah: naskah yang tidak berubah memakai hasil
+     tersimpan — selalu sama, tetapi tidak menambah temuan.
+
+   **Rekomendasi:** (b) dan (c) — lebih lengkap sekali jalan, dan tetap sama
+   bila dijalankan ulang.
+3. **Rujukan yang menunjuk pasal yang salah belum diperiksa.** Pemeriksaan
+   rujukan yang ada hanya memastikan pasal atau ayat yang dirujuk ADA.
+   Contoh yang lolos di PMK 45, Pasal 10 ayat (2) huruf b: "jangka waktu
+   pengimporan sebagaimana dimaksud dalam Pasal 9 ayat (11)" — ayat (11)
+   mengatur jangka waktu penelitian; jangka waktu impor ada di ayat (13). AI
+   sempat menduganya, tetapi gugur karena dicatat sebagai "rumusan dua arah".
+
+   **Rekomendasi:** tambah analisis baru (AI, lingkup per pasal): acuan
+   "sebagaimana dimaksud dalam …" menunjuk ketentuan yang isinya sesuai
+   dengan yang dimaksud kalimatnya. Dasar (turunan): akibat Lampiran II angka
+   III huruf C butir 54 huruf d dan h, hlm 40 — sama dengan dua pemeriksaan
+   rujukan yang ada.
+4. **Judul bagian 6.1 "AI tidak bisa" tidak sepenuhnya benar.** Yang AI tidak
+   bisa hanya MEMBACA format, gaya huruf, dan gambar — semuanya tidak ada di
+   teks. MENILAI-nya bisa AI kalau kode menuliskan hasil bacaannya ke bahan,
+   mis. `[rata kanan · menjorok 3,5 cm · 2 baris kosong sebelumnya]`.
+   - (a) Tetap — 31 pemeriksaan format ditulis sebagai program.
+   - (b) Satu pembaca format (kode) menuliskan format tiap paragraf ke bahan.
+     Angka pasti — huruf, ukuran, kertas, marjin, spasi, nomor halaman (10) —
+     tetap kode, ditulis sebagai baris data di `aturan.json`. Sisanya — tata
+     letak, kapital dari gaya huruf, kepala halaman (21) — jadi analisis AI.
+     Aturan baru cukup menambah baris.
+
+   **Rekomendasi:** (b) — sesuai CLAUDE.md butir 12. Cara membaca formatnya
+   dibuktikan dulu di Word penelaah (CLAUDE.md butir 9).

@@ -1,6 +1,6 @@
 # Dokumentasi Drafter Analiser
 
-Tujuh berkas di sini, plus `CLAUDE.md` di akar. Kalau ada yang bertentangan,
+Delapan berkas di sini, plus `CLAUDE.md` di akar. Kalau ada yang bertentangan,
 **`fase1 drafter.md` yang berlaku** — dokumen itu disamakan dengan kode setiap
 kali kode berubah.
 
@@ -11,6 +11,7 @@ kali kode berubah.
 | [`cek list fase 1.md`](cek%20list%20fase%201.md) | **Apa yang benar-benar diperiksa, disusun per bagian naskah** (Judul, Menimbang, Mengingat, Menetapkan, batang tubuh, Lampiran) — untuk PMK dan KMK. Memuat juga Fase 2 dan 3, yang TIDAK diperiksa, dan kapan aturan memilih diam | Sambil membuka rancangan, untuk tahu mana yang masih harus diperiksa sendiri |
 | [`fase-2dan-3drafter.md`](fase-2dan-3drafter.md) | **Alur, batasan, dan teknologi** Fase 2 & 3: bagaimana model membaca naskah utuh tanpa ada paragraf yang terlewat, apa yang membatasi rancangannya, dan apa saja yang dibutuhkan. **Sudah dibangun; dokumen ini disamakan dengan kodenya** | Sebelum menyentuh `app/telaah/` |
 | [`fase4-merapikan-backend.md`](fase4-merapikan-backend.md) | **Rancangan Fase 4 — agen penuh dengan skills:** yang ditelaah Biro Hukum, struktur folder berikut formulir analisis, alur, daftar respons agen, urutan dan rincian pengerjaan, daftar lengkap 193 fitur yang bisa dianalisis, beralamat lengkap di KMK 527; pertanyaan yang belum diputuskan di paling bawah | Sebelum mengerjakan Fase 4 |
+| [`jelaskan.md`](jelaskan.md) | **Penjelasan tiga tahap `telaah/` di rancangan Fase 4**, dengan contoh kesalahan nyata PMK 45: apa yang masuk, dikerjakan, dan keluar dari tahap bahan, agen, dan verifikasi | Saat membaca bagian 1–2 `fase4-merapikan-backend.md` dan bingung "tahap ini sebenarnya ngapain" |
 | [`panduan-officejs.md`](panduan-officejs.md) | API Word yang sudah diverifikasi ke `index.d.ts`, dan jebakan yang sudah terbukti | Sebelum memakai API Word yang belum pernah dipakai |
 | [`perbaiki bug.md`](perbaiki%20bug.md) | **Catatan bug**: yang belum selesai berikut pilihan perbaikan dan akibatnya kalau dibiarkan; untuk yang sudah selesai cukup tes penjaganya — supaya tidak kambuh sesudah pembaruan berikutnya | Sebelum mengubah parser, bahan yang dikirim ke model, atau penandaan di Word |
 | [`../CLAUDE.md`](../CLAUDE.md) | Aturan kerja repo yang tidak boleh dilanggar | Otomatis dibaca Claude Code |
