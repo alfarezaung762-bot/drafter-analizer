@@ -216,6 +216,13 @@ cd backend && python tools/cek_docx.py <berkas.docx> --lanjut --fase3    # + kor
 # Naskah uji: tools/contoh/tempat pmk/ — satu naskah per perintah; PMK 108
 # (tabel 2,6 juta token) terlalu berat untuk laptop pengembang.
 
+# Fase 4 — agen penuh, BERBIAYA (panel memakainya bila FASE2_ALUR=agen).
+# Ekspor bahan, jejak agen, dan gerbang disimpan ke folder; jawaban model ikut
+# tersimpan (jawaban.json), jadi jalan ulang atas naskah yang sama gratis.
+cd backend && python tools/cek_docx.py <berkas.docx> --agen --simpan-ekspor <folder>
+cd backend && python tools/cek_docx.py <berkas.docx> --agen --analisis F2-101,I-37 --simpan-ekspor <folder>
+cd backend && python tools/cek_docx.py <berkas.docx> --agen --fase3 --simpan-ekspor <folder>  # + korpus
+
 # Baca butir KMK 527 dari CITRA halaman, bukan dari ekstraksi teks (butir 4)
 cd backend && python tools/halaman_pdf.py "tools/contoh/527KMK.012022Kep 1.pdf" 45-47
 

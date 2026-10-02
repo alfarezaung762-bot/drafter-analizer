@@ -121,7 +121,15 @@ class RujukanTemuan(BaseModel):
             "(dari teks OCR, belum dibaca manusia), atau 'visual' (sudah "
             "diketik ulang manusia dari naskah). Antarmuka menyalakan gate "
             "legal untuk apa pun yang BUKAN 'visual' — keterisian butir "
-            "bukan bukti keandalan."
+            "bukan bukti keandalan.\n"
+            "\n"
+            "Fase 4 menambah tiga nilai: 'agen' (Dasar analisisnya kosong, "
+            "rujukannya dicarikan agen dan alamat serta kutipannya terbukti "
+            "ada di teks skill atau hasil korpus — tetap berlencana belum "
+            "diverifikasi), 'prioritas' (Dasar = prioritas penelaah — tidak "
+            "ada baris rujukan), dan 'tanpa' (Dasar kosong dan agen tidak "
+            "menemukan rujukan yang terbukti — tidak ada baris rujukan, tidak "
+            "dikarang)."
         ),
     )
 
@@ -321,6 +329,139 @@ class Temuan(BaseModel):
         default=StatusTemuan.BELUM_DITINJAU
     )
 
+    # --- Fase 4 ---------------------------------------------------------
+    pembanding: str = Field(
+        default="",
+        description=(
+            "Peraturan lain yang jadi sandaran temuan, mis. 'PMK 5/2023 Pasal 8 "
+            "(masih berlaku)'. Disalin dari hasil pencarian korpus yang "
+            "tercatat, dibuktikan gerbang. Baris 'Pembanding:' di komentar."
+        ),
+    )
+    sisipan: Optional["Sisipan"] = Field(
+        default=None,
+        description=(
+            "Perbaikan yang tempatnya di satuan LAIN, disisipkan di sana "
+            "sebagai satuan baru (CLAUDE.md butir 5, Fase 4). Bila terisi, "
+            "komentar menempel di sisipan, dan `lokasi` temuan cuma disorot "
+            "tanpa komentar."
+        ),
+    )
+
+
+class Sisipan(BaseModel):
+    """Satuan baru yang disisipkan di tempat perbaikannya — hijau, bisa dicabut Tolak.
+
+    Disisipkan SEBAGAI SATUAN TERAKHIR di tempat sasaran — angka definisi
+    terakhir Pasal 1, ayat terakhir pasal — supaya nomor satuan yang sudah
+    ada tidak bergeser. Teks lama tidak pernah disentuh.
+    """
+
+    sasaran: str = Field(..., description="Id satuan tempat sisipan, mis. 'pasal-1'.")
+    sesudah_paragraf: int = Field(
+        ...,
+        description=(
+            "Index paragraf terakhir satuan sasaran — paragraf baru disisipkan "
+            "SESUDAH paragraf ini."
+        ),
+    )
+    bentuk: str = Field(..., description="angka · huruf · ayat · pasal")
+    penanda: str = Field(
+        default="",
+        description="Nomor satuan baru seperti tertulis, mis. '18.' atau '(4)'. Kosong bila tidak bisa ditentukan.",
+    )
+    teks: str = Field(..., description="Isi satuan baru, tanpa penandanya.")
+    sumber: str = Field(
+        ...,
+        description=(
+            "Peraturan dan pasal asal rumusannya bila ketemu di korpus, atau "
+            "'(prediksi AI)' bila disusun agen dari isi naskah sendiri."
+        ),
+    )
+    letak_ideal: str = Field(
+        default="",
+        description="Letak idealnya bila berbeda dari 'terakhir', mis. menurut urutan definisi butir 68.",
+    )
+    format_dari: int = Field(
+        default=-1,
+        description=(
+            "Index paragraf pembuka satuan sejenis terakhir di tempat sasaran — "
+            "menjorok sisipan disamakan dengannya. -1 bila tidak ada."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Format naskah — dibaca panel, dipakai putaran format dan gerbang (Fase 4)
+# ---------------------------------------------------------------------------
+
+
+class BagianFormat(BaseModel):
+    """Sepotong paragraf yang gayanya berbeda dari gaya utama paragrafnya."""
+
+    keterangan: str = Field(..., description="mis. 'miring', 'Times New Roman 11', 'tebal'.")
+    kutipan: str = Field(..., description="Teks potongan itu, persis.")
+
+
+class FormatParagraf(BaseModel):
+    """Format satu paragraf seperti dibaca Office.js (atau alat uji).
+
+    Kode TIDAK menilai satu pun nilai di sini — ia cuma membacanya dan
+    menuliskannya ke naskah berformat. Penilaian di skill dan analisis.
+    Medan yang None berarti tidak terbaca, BUKAN bernilai bawaan.
+    """
+
+    huruf: Optional[str] = None
+    ukuran: Optional[float] = None
+    tebal: Optional[bool] = None
+    miring: Optional[bool] = None
+    garis_bawah: Optional[bool] = None
+    kapital_gaya: Optional[bool] = Field(
+        default=None, description="Ditampilkan kapital lewat gaya (All Caps)."
+    )
+    warna: Optional[str] = None
+    rata: Optional[str] = Field(
+        default=None,
+        description="'rata kiri' · 'tengah' · 'rata kanan' · 'rata kiri-kanan' — sama dengan office.ts dan tools/baca_format.py",
+    )
+    kiri_cm: Optional[float] = None
+    kanan_cm: Optional[float] = None
+    baris_pertama_cm: Optional[float] = Field(
+        default=None, description="Negatif berarti menggantung (hanging)."
+    )
+    spasi_baris: Optional[float] = Field(
+        default=None, description="Kelipatan baris, mis. 1.0; atau titik bila tetap."
+    )
+    spasi_sebelum_pt: Optional[float] = None
+    spasi_sesudah_pt: Optional[float] = None
+    tersembunyi: list[str] = Field(
+        default_factory=list,
+        description="Potongan teks bergaya hidden — tidak tampil di Word, tetap tersimpan.",
+    )
+    bagian_beda: list[BagianFormat] = Field(default_factory=list)
+
+
+class FormatHalaman(BaseModel):
+    """Format satu bagian (section) Word — kertas, marjin, kepala halaman."""
+
+    bagian: int = 0
+    lebar_cm: Optional[float] = None
+    tinggi_cm: Optional[float] = None
+    marjin_atas_cm: Optional[float] = None
+    marjin_bawah_cm: Optional[float] = None
+    marjin_kiri_cm: Optional[float] = None
+    marjin_kanan_cm: Optional[float] = None
+    halaman_pertama_beda: Optional[bool] = None
+    kepala_pertama: str = Field(default="", description="Teks kepala halaman pertama.")
+    kepala_berikut: str = Field(default="", description="Teks kepala halaman berikutnya.")
+    gambar_kepala_pertama: int = 0
+    nomor_halaman: Optional[bool] = Field(
+        default=None, description="Kepala halaman berikutnya memuat kolom nomor halaman."
+    )
+
+
+Temuan.model_rebuild()
+
 
 # ---------------------------------------------------------------------------
 # Request / Response untuk endpoint analisis
@@ -415,6 +556,14 @@ class ParagrafInput(BaseModel):
             "`index`-nya urutan baca, bukan nomor paragraf Word. Temuan di sini "
             "tetap dilaporkan di panel tetapi TIDAK PERNAH ditandai di naskah "
             "(CLAUDE.md butir 6)."
+        ),
+    )
+    format: Optional[FormatParagraf] = Field(
+        default=None,
+        description=(
+            "Fase 4: format paragraf seperti dibaca Office.js. None berarti "
+            "tidak dibaca — panel lama, atau pembacanya gagal — bukan "
+            "berformat bawaan."
         ),
     )
 

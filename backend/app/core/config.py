@@ -51,6 +51,20 @@ class Settings(BaseSettings):
     FASE2_PANGGILAN_BERBARENGAN: int = 4
     FASE2_AMBANG_SKOR: float = 0.7
 
+    # Fase 4 — agen penuh dengan skills. Saklar alur: `lama` (lima tahap) atau
+    # `agen`. Alur lama tetap ada sampai agen terbukti (rancangan Fase 4
+    # bagian 4 langkah 8).
+    #
+    # TOKEN_PER_FOKUS   batas token teks pasal per putaran per kelompok pasal
+    # MACET_ULANG       alat yang sama dengan argumen sama sebanyak ini → macet
+    # MACET_LANGKAH     langkah berturut-turut tanpa calon maupun status → macet
+    # TUNGGU_429        detik menunggu kuota Azure bila tanpa Retry-After
+    FASE2_ALUR: str = "lama"
+    FASE2_TOKEN_PER_FOKUS: int = 4000
+    FASE4_MACET_ULANG: int = 3
+    FASE4_MACET_LANGKAH: int = 12
+    FASE4_TUNGGU_429: float = 30.0
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 

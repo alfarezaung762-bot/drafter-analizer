@@ -1869,35 +1869,30 @@ berlaku untuk PMK, KMK, dan peraturan/keputusan pimpinan unit.
   untuk baris lanjutan butir Menimbang yang lebih dari satu baris.
 
 **Posisi horizontal — diukur dari margin kiri** (bagan halaman 74 dan 83,
-resolusi penuh). Keempat penanda saling mengunci dan membentuk satu susunan yang
-utuh:
+dibaca ulang dari citra yang diperbesar, 2 Okt 2026 — bacaan lama "3 → 4 →
+3,5 cm" keliru):
 
 | Penanda | Menandai | Nilai dari margin kiri |
 |---|---|---|
-| `0,5 cm` | jarak dari akhir label `Menimbang` / `Menetapkan` ke isinya | — |
-| `3 cm` | kolom huruf abjad butir Menimbang — `a.` `b.` `c.` | **3 cm** |
-| `1 cm` | jarak dari huruf abjad ke teks butirnya | **4 cm** (3 + 1) |
-| `3,5 cm` | baris lanjutan butir Menimbang, **dan** seluruh paragraf badan | **3,5 cm** |
+| `3 cm` | titik dua label `Menimbang` / `Mengingat` / `Menetapkan` | **3 cm** |
+| `0,5 cm` | jarak dari titik dua ke isinya | **3,5 cm** |
+| — | kolom huruf abjad butir Menimbang — `a.` `b.` `c.` | **3,5 cm** |
+| `1 cm` | jarak dari huruf abjad ke teks butirnya | **4,5 cm** |
+| — | baris lanjutan butir Menimbang | sejajar teks butir, **4,5 cm** |
+| `3,5 cm` | paragraf badan pasal dan frasa pembuka Ketentuan Umum | **3,5 cm** |
 
-Jadi butir Menimbang memakai indentasi menggantung yang tidak lazim: penanda
-huruf menjorok keluar ke 3 cm, teks baris pertama mulai di 4 cm, dan baris
-lanjutannya turun ke 3,5 cm. Angka 3,5 cm itu bukan angka khusus konsiderans —
-ia posisi yang sama dengan paragraf badan mana pun. Dua contoh pada bagan
-memperlihatkannya: `Dalam Peraturan Menteri ini yang dimaksud dengan:` (halaman
-74) dan `Peraturan Direktur Jenderal ini mulai berlaku pada tanggal ditetapkan.`
-(halaman 83), keduanya ditunjuk penanda 3,5 cm.
-
-**Ringkasnya:** teks badan pasal dan frasa pembuka Ketentuan Umum mulai di
-**3,5 cm** dari margin kiri; label pembukaan (`Menimbang`, `Mengingat`,
-`Menetapkan`) mulai di margin kiri; isinya berjarak **0,5 cm** dari akhir label;
-kolom huruf abjad rincian konsiderans di **3 cm**; dan setiap turun satu tingkat
+Jadi butir Menimbang memakai indentasi menggantung biasa: huruf abjad keluar
+di 3,5 cm, teks dan baris lanjutannya di 4,5 cm. Contoh paragraf badan pada
+bagan: `Dalam Peraturan Menteri ini yang dimaksud dengan:` (halaman 74) dan
+`Peraturan Direktur Jenderal ini mulai berlaku pada tanggal ditetapkan.`
+(halaman 83), keduanya ditunjuk penanda 3,5 cm. Setiap turun satu tingkat
 pada rincian bertabulasi menambah **1 cm**.
 
-**Catatan.** Susunan menggantung 3 → 4 → 3,5 cm itu terbaca jelas pada bagan,
-tetapi jarang ditemui pada tata naskah pada umumnya. Sebelum dijadikan aturan
-keras di alat pemeriksa, sebaiknya dicocokkan sekali dengan satu berkas .docx PMK
-asli — bukan karena bagannya meragukan, melainkan karena praktik penulisan di
-lapangan bisa saja sudah menyederhanakannya.
+**Yang dinilai alat** (ditetapkan penelaah 2 Okt 2026): bagan tidak berskala,
+dan PMK 45 yang sudah diundangkan pun tidak tepat angka bagan — huruf
+Menimbang 3,1–3,7 cm, teksnya 4,4–5,0 cm, berbeda antarbutir. Angka cm di
+atas hanya penunjuk; yang dinilai bentuk menggantung dan keseragaman
+antarbutir (rancangan Fase 4 bagian 6.2, F-13 sampai F-16).
 
 **Perbedaan pemrosesan elektronik dan selain elektronik.** Bagan angka II dan IV
 (elektronik) memakai `Keputusan Menteri ini disampaikan kepada:`, sedangkan
@@ -2143,8 +2138,8 @@ sumber yang tidak terbaca.
 | Jarak antarblok dalam satuan enter, delapan format | **pasti** | 9.24.1 |
 | Indentasi 0,5 cm pada label dan 1 cm per tingkat rincian | **pasti** | 9.24.1 |
 | Marjin, ukuran kertas, huruf, spasi, nomor halaman | **pasti** | 9.24 |
-| Posisi horizontal 0,5 / 3 / 1 / 3,5 cm pada bagan halaman 74 dan 83 | **pasti** — terbaca dari tangkapan layar resolusi penuh | 9.24.1 |
-| Apakah praktik di lapangan masih memakai susunan menggantung 3 → 4 → 3,5 cm | belum diuji | cocokkan sekali dengan satu .docx PMK asli |
+| Posisi horizontal pada bagan halaman 74 dan 83 | **dibaca ulang 2 Okt 2026** — huruf Menimbang 3,5 cm, teks 4,5 cm, baris lanjutan sejajar teks; bacaan lama 3 / 4 / 3,5 cm keliru | 9.24.1 |
+| Apakah naskah nyata memakai angka bagan | **diuji** pada PMK 45: tidak tepat (huruf 3,1–3,7 cm, teks 4,4–5,0 cm) — angka bagan tidak dinilai, ditetapkan penelaah 2 Okt 2026 | rancangan Fase 4 bagian 6.2 |
 
 ## Lampiran A — Indeks butir 1–132
 

@@ -125,19 +125,34 @@ class _Tabel:
         self.kolom = 0
 
 
-def baca_docx(path: Path) -> tuple[list[dict], list[dict]]:
+def baca_docx(path: Path, dengan_format: bool = False) -> tuple[list[dict], list[dict]]:
     """Paragraf naskah, dan kerangka tabel raksasa yang tidak dibaca per paragraf.
 
     Tiap paragraf: teks, penanda, tingkat, dari_tabel, tabel, baris, sel,
     gambar, rumus, letak_pasti — medannya sama dengan `ParagrafInput`.
+    `dengan_format` ikut membaca format tiap paragraf (Fase 4, putaran
+    format) — lihat `tools/baca_format.py`.
     """
     with zipfile.ZipFile(path) as z:
         nomor = Penomoran.dari_xml(_numbering(z))
+        gaya = None
+        if dengan_format:
+            from tools.baca_format import Gaya
+
+            gaya = Gaya(z)
         with z.open("word/document.xml") as f:
-            return _baca(f, nomor)
+            return _baca(f, nomor, gaya)
 
 
-def _baca(f: BinaryIO, nomor: Penomoran) -> tuple[list[dict], list[dict]]:
+def baca_halaman_docx(path: Path) -> list[dict]:
+    """Format tiap bagian (section): kertas, marjin, kepala halaman."""
+    from tools.baca_format import baca_halaman
+
+    with zipfile.ZipFile(path) as z:
+        return baca_halaman(z)
+
+
+def _baca(f: BinaryIO, nomor: Penomoran, gaya=None) -> tuple[list[dict], list[dict]]:
     paragraf: list[dict] = []
     kerangka: list[dict] = []
     tumpuk: list[_Tabel] = []
@@ -216,6 +231,7 @@ def _baca(f: BinaryIO, nomor: Penomoran) -> tuple[list[dict], list[dict]]:
                     "sel": dalam.sel if dalam else -1,
                     "gambar": _hitung_di_luar_fallback(el, _WP_INLINE),
                     "rumus": _hitung_di_luar_fallback(el, _M_OMATH),
+                    "format": gaya.format_paragraf(el) if gaya is not None else None,
                 }
             )
         elif tag == _W_TBL and tumpuk:

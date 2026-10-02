@@ -319,6 +319,66 @@ def pekerjaan_terakhir(dokumen: str) -> Optional[int]:
         return baris
 
 
+# ---------------------------------------------------------------------------
+# Fase 4 — kemajuan per putaran, tombol Batal, dan hasil untuk ekspor
+# ---------------------------------------------------------------------------
+#
+# Memori saja, seperti temuan: yang perlu bertahan dari restart adalah
+# jawaban tiap langkah agen (lewat simpan_jawaban di atas), bukan keadaan
+# panelnya.
+
+_putaran: dict[int, dict[str, dict]] = {}
+_batal: dict[int, threading.Event] = {}
+_hasil_agen: dict[int, object] = {}
+_peringatan: dict[int, list[str]] = {}
+
+
+def catat_putaran(nomor: int, kode: str, keadaan: dict) -> None:
+    with _kunci:
+        _putaran.setdefault(nomor, {})[kode] = dict(keadaan)
+
+
+def ambil_putaran(nomor: int) -> list[dict]:
+    with _kunci:
+        return [dict(kode=k, **v) for k, v in _putaran.get(nomor, {}).items()]
+
+
+def tanda_batal(nomor: int) -> threading.Event:
+    """Event batal pekerjaan ini — dibuat sekali, dipegang utas analisisnya."""
+    with _kunci:
+        return _batal.setdefault(nomor, threading.Event())
+
+
+def batalkan(nomor: int) -> bool:
+    """Nyalakan Batal. False bila pekerjaannya tidak dikenal di proses ini."""
+    with _kunci:
+        e = _batal.get(nomor)
+    if e is None:
+        return False
+    e.set()
+    return True
+
+
+def simpan_hasil_agen(nomor: int, hasil: object) -> None:
+    with _kunci:
+        _hasil_agen[nomor] = hasil
+
+
+def ambil_hasil_agen(nomor: int) -> Optional[object]:
+    with _kunci:
+        return _hasil_agen.get(nomor)
+
+
+def simpan_peringatan(nomor: int, peringatan: list[str]) -> None:
+    with _kunci:
+        _peringatan[nomor] = list(peringatan)
+
+
+def ambil_peringatan(nomor: int) -> list[str]:
+    with _kunci:
+        return list(_peringatan.get(nomor, []))
+
+
 def bersihkan_memori() -> None:
     """Hanya untuk tes. Tidak menyentuh basis data."""
     with _kunci:
@@ -331,3 +391,7 @@ def bersihkan_memori() -> None:
         _pesan_tahap3.clear()
         _pesan_tahap4.clear()
         _ekspor_tahap5.clear()
+        _putaran.clear()
+        _batal.clear()
+        _hasil_agen.clear()
+        _peringatan.clear()

@@ -60,8 +60,96 @@ export interface RujukanTemuan {
    * benar dan bisa ditelusuri, yang perlu ditimbang penelaah cuma apakah
    * turunannya sah. Menyamakannya dengan "belum diverifikasi" membuang
    * keterangan yang sudah susah payah diperiksa.
+   *
+   * Fase 4 menambah tiga:
+   * - "agen"      — Dasar analisisnya kosong, agen yang mencarikan; alamat dan
+   *                 kutipannya terbukti ada di teks skill atau hasil korpus,
+   *                 tetapi belum disalin manusia ke baris Dasar
+   * - "prioritas" — dasarnya prioritas penelaah: tanpa baris rujukan
+   * - "tanpa"     — tidak ada rujukan yang terbukti: tidak dikarang
+   *
+   * Sejak Fase 4 `butir` berisi alamat lengkap berikut halamannya, mis.
+   * "Lampiran II angka III huruf A butir 8, hlm 30".
    */
-  status?: "placeholder" | "ekstraksi" | "turunan" | "visual";
+  status?: "placeholder" | "ekstraksi" | "turunan" | "visual" | "agen" | "prioritas" | "tanpa";
+}
+
+/**
+ * Satuan baru yang disisipkan di tempat perbaikannya (Fase 4) — hijau, satu
+ * paragraf, sesudah paragraf `sesudah_paragraf`. Teks lama tidak disentuh;
+ * Tolak mencabut paragrafnya bersih.
+ */
+export interface Sisipan {
+  /** Id satuan tempat sisipan, mis. "pasal-1". */
+  sasaran: string;
+  /** Index paragraf terakhir satuan sasaran — paragraf baru SESUDAH ini. */
+  sesudah_paragraf: number;
+  /** angka · huruf · ayat */
+  bentuk: string;
+  /** Nomor satuan baru seperti tertulis, mis. "18." atau "(4)". Boleh kosong. */
+  penanda: string;
+  /** Isi satuan baru, tanpa penandanya. */
+  teks: string;
+  /** Peraturan asal rumusannya, atau "(prediksi AI)". */
+  sumber: string;
+  letak_ideal?: string;
+  /** Index paragraf satuan sejenis terakhir — menjorok sisipan disamakan dengannya. -1 bila tidak ada. */
+  format_dari?: number;
+  /**
+   * HANYA DI PANEL: nomor paragraf sisipan di naskah sesudah dipasang. Dipakai
+   * menggeser nomor paragraf temuan lain saat sisipannya dicabut Tolak.
+   */
+  paragraf?: number;
+}
+
+/** Sepotong paragraf yang gayanya berbeda dari gaya utama paragrafnya. */
+export interface BagianFormat {
+  keterangan: string;
+  kutipan: string;
+}
+
+/**
+ * Format satu paragraf seperti dibaca Office.js. Medan yang kosong berarti
+ * TIDAK TERBACA, bukan bernilai bawaan — backend menuliskannya apa adanya ke
+ * naskah berformat, dan tidak menilai satu pun di antaranya.
+ */
+export interface FormatParagraf {
+  huruf?: string | null;
+  ukuran?: number | null;
+  tebal?: boolean | null;
+  miring?: boolean | null;
+  garis_bawah?: boolean | null;
+  kapital_gaya?: boolean | null;
+  warna?: string | null;
+  /** "rata kiri" · "tengah" · "rata kanan" · "rata kiri-kanan" — sama dengan tools/baca_format.py. */
+  rata?: string | null;
+  kiri_cm?: number | null;
+  kanan_cm?: number | null;
+  /** Negatif berarti menggantung. */
+  baris_pertama_cm?: number | null;
+  /** Kelipatan baris, mis. 1 atau 1,5. */
+  spasi_baris?: number | null;
+  spasi_sebelum_pt?: number | null;
+  spasi_sesudah_pt?: number | null;
+  /** Potongan teks bergaya hidden — tidak tampil di Word. */
+  tersembunyi?: string[];
+  bagian_beda?: BagianFormat[];
+}
+
+/** Format satu bagian (section) Word — kertas, marjin, kepala halaman. */
+export interface FormatHalaman {
+  bagian: number;
+  lebar_cm?: number | null;
+  tinggi_cm?: number | null;
+  marjin_atas_cm?: number | null;
+  marjin_bawah_cm?: number | null;
+  marjin_kiri_cm?: number | null;
+  marjin_kanan_cm?: number | null;
+  halaman_pertama_beda?: boolean | null;
+  kepala_pertama?: string;
+  kepala_berikut?: string;
+  gambar_kepala_pertama?: number;
+  nomor_halaman?: boolean | null;
 }
 
 export interface Temuan {
@@ -160,6 +248,17 @@ export interface Temuan {
    */
   tanpa_sorot?: boolean;
   rujukan: RujukanTemuan;
+  /**
+   * Peraturan lain yang jadi sandaran temuan, mis. "PMK 5 Tahun 2023 Pasal 8
+   * (masih berlaku)" — terbukti ada di hasil pencarian korpus (Fase 4).
+   */
+  pembanding?: string;
+  /**
+   * Perbaikannya disisipkan di satuan lain sebagai satuan baru (Fase 4).
+   * Komentarnya menempel di sisipan itu; di tempat temuan teksnya cuma
+   * disorot, tanpa komentar.
+   */
+  sisipan?: Sisipan | null;
   status: StatusTemuan;
 }
 
@@ -204,6 +303,8 @@ export interface ParagrafInput {
    * Temuan di paragraf begini tidak pernah ditandai di naskah.
    */
   letak_pasti?: boolean;
+  /** Format paragraf (Fase 4) — hanya dibaca bila alur agen menyala. */
+  format?: FormatParagraf;
 }
 
 /**
@@ -224,6 +325,8 @@ export interface KerangkaTabel {
 export interface NaskahTerbaca {
   paragraf: ParagrafInput[];
   tabel_raksasa: KerangkaTabel[];
+  /** Format tiap bagian (section) — hanya dibaca bila alur agen menyala. */
+  halaman?: FormatHalaman[];
 }
 
 export interface AnalisisRequest {
@@ -328,4 +431,85 @@ export interface KemajuanResponse {
    * komentarnya di naskah; temuannya sendiri tidak dihapus.
    */
   keberatan?: Temuan[];
+}
+
+// ---------------------------------------------------------------------------
+// Fase 4 — agen penuh dengan skills (saklar FASE2_ALUR=agen di backend)
+// ---------------------------------------------------------------------------
+//
+// Satu pekerjaan untuk SELURUH pemeriksaan: tidak ada lagi Fase 1 yang
+// ditandai lebih dulu. Semua tanda dipasang sesudah gerbang, di akhir — itu
+// yang membuat tombol Batal bisa bersih.
+
+/** Alur yang menyala di backend: "lama" (Fase 1–3) atau "agen" (Fase 4). */
+export type AlurAnalisis = "lama" | "agen";
+
+/** Satu baris daftar Pengaturan, dibaca dari analisis.md / analisisformat.md. */
+export interface AnalisisPanel {
+  id: string;
+  judul: string;
+  /** "isi" atau "format". */
+  kelompok: string;
+  /** Batas atas bentuk tanda: otomatis · usulan · dibuang · catatan. */
+  respons: string;
+  lingkup: string;
+  butuh: string[];
+  /** Alamat KMK 527 lengkap, "prioritas penelaah", atau kosong. */
+  dasar: string;
+  /** visual · turunan · prioritas · "" (Dasar kosong). */
+  dasar_status: string;
+  diperiksa: string[];
+  tidakDiperiksa: string[];
+  tersedia: boolean;
+  /** Kenapa tidak tersedia — mis. "belum tersedia untuk KMK". */
+  alasan: string;
+}
+
+export interface DaftarAnalisisResponse {
+  alur: AlurAnalisis;
+  jenis: string;
+  analisis: AnalisisPanel[];
+}
+
+export interface AnalisisAgenRequest {
+  paragraf: ParagrafInput[];
+  halaman?: FormatHalaman[];
+  tabel_raksasa?: KerangkaTabel[];
+  dokumen?: string;
+  jenis_dokumen: JenisDokumen;
+  /** Kode analisis yang dicentang. Dihilangkan berarti semua. */
+  aturan_aktif?: string[];
+  /** Nomor temuan pertama — Periksa ulang melanjutkan nomor terakhir. */
+  mulai_nomor?: number;
+  /** Periksa ulang: temuan sebelumnya berikut keputusan penelaah. */
+  temuan_lama?: Temuan[];
+  /** Nomor pekerjaan lama yang jawabannya dipakai ulang — tidak dibayar dua kali. */
+  lanjutkan?: number;
+}
+
+/** Keadaan satu putaran agen, untuk kemajuan per putaran di panel. */
+export interface KeadaanPutaran {
+  kode: string;
+  /** "Putaran 1/6 · Pasal 1–6", "Lintas naskah", "Lampiran", "Format". */
+  judul: string;
+  /** menunggu · berjalan · menilai · selesai · macet · dibatalkan · gagal */
+  keadaan: string;
+  langkah: number;
+  calon: number;
+}
+
+export interface KemajuanAgenResponse {
+  pekerjaan: number;
+  status: StatusPekerjaan;
+  /** "1 bahan" · "2 agen" · "3 gerbang" · "selesai" · "dibatalkan". */
+  tahap: string;
+  putaran: KeadaanPutaran[];
+  panggilan: number;
+  token_masuk: number;
+  token_keluar: number;
+  /** Alasan gagal, atau kenapa analisis tidak dijalankan. */
+  pesan: string;
+  /** Analisis yang tidak dikirim, putaran macet, pasal tidak diperiksa. */
+  peringatan: string[];
+  temuan: Temuan[];
 }

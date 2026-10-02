@@ -129,6 +129,41 @@ class CalonTemuan(BaseModel):
     )
 
 
+class CalonAgen(BaseModel):
+    """Fase 4: calon temuan yang dicatat agen lewat `catat_temuan`. BELUM temuan.
+
+    Jalannya: agen mencatat → penilai kedua setuju/tolak → gerbang kode
+    (`tahap3_verifikasi.py`) membuktikan lalu melahirkan Temuan. Yang gugur di
+    mana pun tidak tampil di panel maupun Word — hanya di ekspor jejak.
+    """
+
+    nomor: str = Field(default="", description="C1, C2, … dalam satu putaran.")
+    putaran: str = ""
+    analisis: str
+    letak: str = Field(..., description="Label satuan, atau ¶n / ¶a-b.")
+    kutipan: str
+    bentuk: str = Field(default="catatan", description="usulan · dibuang · catatan")
+    temuan: str
+    saran: str = ""
+    usulan: str = ""
+    sasaran: str = ""
+    sisipan: Optional[dict] = Field(
+        default=None, description="{sasaran, bentuk, penanda, teks, sumber, pembanding}"
+    )
+    pembanding: str = ""
+    bacaan: list[str] = Field(default_factory=list)
+    tidak_ada: list[str] = Field(default_factory=list)
+    alasan_buang: str = ""
+    bukti_letak: str = Field(default="", description="Untuk dibuang/mengulang: letak teks kembarnya.")
+    bukti_format: str = ""
+    status_peraturan: str = ""
+    rujukan: Optional[dict] = Field(default=None, description="{alamat, kutipan} bila Dasar kosong.")
+    ketiadaan: bool = False
+    skor: float = 0.0
+    penilai: str = Field(default="", description="setuju · tolak · tidak dijawab")
+    alasan_penilai: str = ""
+
+
 class Pekerjaan(BaseModel):
     """Keadaan satu kali analisis panjang.
 

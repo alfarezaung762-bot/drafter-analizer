@@ -51,7 +51,15 @@
  * terpisah lewat ekspor.
  */
 
-import { KerangkaTabel, NaskahTerbaca, ParagrafInput, Temuan } from "./types";
+import {
+  BagianFormat,
+  FormatHalaman,
+  FormatParagraf,
+  KerangkaTabel,
+  NaskahTerbaca,
+  ParagrafInput,
+  Temuan,
+} from "./types";
 
 /**
  * Cek apakah Office.js runtime tersedia.
@@ -327,6 +335,466 @@ async function bacaGambar(): Promise<number[][]> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Format paragraf dan halaman — Fase 4
+// ---------------------------------------------------------------------------
+//
+// Dibaca HANYA bila alur agen menyala: putaran format membaca naskah
+// berformat, dan gerbang mencocokkan klaim format agen ke bacaan ini. Kode
+// tidak menilai satu pun nilainya — ia cuma menuliskan apa yang dibaca.
+//
+// Bentuk nilainya WAJIB sama dengan alat uji `backend/tools/baca_format.py`
+// (nama rata, sentimeter, kelipatan baris, keterangan beda gaya), supaya
+// diagnosa tanpa Word membaca hal yang sama. Kalau keduanya berbeda, yang
+// benar Word.
+//
+// BELUM DIBUKTIKAN DI WORD PENELAAH (rancangan Fase 4 bagian 4 langkah 3):
+// `font.allCaps` pernah tidak terbaca di sana — itu sebab F1-001 dimatikan.
+// Tiap sifat Word desktop dibaca di Word.run sendiri dengan jalur cadangan
+// (CLAUDE.md butir 9); gagal membacanya berarti medannya kosong, bukan
+// analisis yang gagal.
+
+/** Nama rata — WAJIB sama dengan `_RATA` di backend/tools/baca_format.py. */
+const RATA: Record<string, string> = {
+  Left: "rata kiri",
+  Centered: "tengah",
+  Right: "rata kanan",
+  Justified: "rata kiri-kanan",
+};
+
+const PT_PER_CM = 28.3465;
+
+function keCm(pt: number | null | undefined, digit = 2): number | null {
+  return typeof pt === "number" && Number.isFinite(pt)
+    ? Number((pt / PT_PER_CM).toFixed(digit))
+    : null;
+}
+
+function angkaAtauNull(x: number | null | undefined): number | null {
+  return typeof x === "number" && Number.isFinite(x) ? x : null;
+}
+
+/** Gaya huruf yang dibandingkan antar-bagian paragraf. */
+type GayaHuruf = {
+  huruf: string | null;
+  ukuran: number | null;
+  tebal: boolean;
+  miring: boolean;
+  garis: boolean;
+  kapital: boolean;
+};
+
+const kunciGaya = (g: GayaHuruf) =>
+  JSON.stringify([g.huruf, g.ukuran, g.tebal, g.miring, g.garis, g.kapital]);
+
+/**
+ * Gaya sebuah rentang, atau null bila hurufnya CAMPURAN. Word mengembalikan
+ * null (atau nama kosong) untuk sifat yang tidak seragam di rentang itu —
+ * perilaku `font.name` pada isi campuran tidak tertulis di index.d.ts, jadi
+ * keduanya dianggap campuran.
+ */
+function gayaDari(f: Word.Font, kapital: boolean): GayaHuruf | null {
+  if (!f.name || f.size == null || f.bold == null || f.italic == null) return null;
+  if ((f.underline as string) === "Mixed") return null;
+  if (kapital && f.allCaps == null) return null;
+  return {
+    huruf: f.name,
+    ukuran: f.size,
+    tebal: !!f.bold,
+    miring: !!f.italic,
+    garis: (f.underline as string) !== "None",
+    kapital: kapital ? !!f.allCaps : false,
+  };
+}
+
+/** Keterangan beda gaya — WAJIB sama bunyinya dengan `_keterangan` di baca_format.py. */
+function keteranganBeda(utama: GayaHuruf, lain: GayaHuruf): string {
+  const bag: string[] = [];
+  if (lain.huruf !== utama.huruf || lain.ukuran !== utama.ukuran) {
+    bag.push(
+      [lain.huruf ?? "", lain.ukuran ? String(lain.ukuran) : ""].filter(Boolean).join(" ")
+    );
+  }
+  const pasangan: [boolean, boolean, string][] = [
+    [lain.tebal, utama.tebal, "tebal"],
+    [lain.miring, utama.miring, "miring"],
+    [lain.garis, utama.garis, "garis bawah"],
+    [lain.kapital, utama.kapital, "KAPITAL dari gaya"],
+  ];
+  for (const [ada, utamaAda, nama] of pasangan) {
+    if (ada && !utamaAda) bag.push(nama);
+    else if (utamaAda && !ada) bag.push("tidak " + nama);
+  }
+  return bag.filter(Boolean).join(" ") || "gaya lain";
+}
+
+/**
+ * Potongan teks tersembunyi: selisih teks LENGKAP dan teks TAMPAK paragraf
+ * yang sama. Potongan yang hanya dipisah spasi dirangkai berikut spasinya —
+ * PMK 4/2025 menyimpan "jJ jJ" sebagai dua potongan dipisah satu spasi biasa,
+ * sama dengan `_potongan_tersembunyi` di baca_format.py.
+ *
+ * Spasi di UJUNG potongan dibuang: spasi yang sama bisa dicocokkan ke kiri
+ * atau ke kanan, jadi milik siapa ia tidak bisa dipastikan — dan naskah
+ * berformat merapatkan spasi itu juga.
+ */
+function potonganTersembunyi(semua: string, tampak: string): string[] {
+  if (semua === tampak) return [];
+  const hasil: string[] = [];
+  let kini: string | null = null;
+  let spasi = "";
+  let j = 0;
+  const simpan = () => {
+    const x = (kini ?? "").trim();
+    if (x) hasil.push(x);
+    kini = null;
+    spasi = "";
+  };
+  for (let i = 0; i < semua.length; i++) {
+    const c = semua[i];
+    if (j < tampak.length && c === tampak[j]) {
+      j++;
+      if (kini !== null && /\s/.test(c)) spasi += c;
+      else if (kini !== null) simpan();
+    } else {
+      kini = kini === null ? c : kini + spasi + c;
+      spasi = "";
+    }
+  }
+  simpan();
+  return hasil;
+}
+
+/** Sifat paragraf yang dibaca untuk tiap paragraf — WordApi 1.1. */
+const SIFAT_PARAGRAF = [
+  "text",
+  "alignment",
+  "leftIndent",
+  "rightIndent",
+  "firstLineIndent",
+  "lineSpacing",
+  "spaceBefore",
+  "spaceAfter",
+  "font/name",
+  "font/size",
+  "font/bold",
+  "font/italic",
+  "font/underline",
+  "font/color",
+];
+
+/** Paragraf berhuruf campuran yang dibaca per kata dalam satu `sync`. */
+const PARAGRAF_PER_SYNC = 150;
+
+/** Paragraf yang teks lengkap dan teks tampaknya dibaca dalam satu `sync`. */
+const PARAGRAF_GETTEXT_PER_SYNC = 500;
+
+/**
+ * Format tiap paragraf, per potongan naskah (sejajar dengan `bacaPenanda`).
+ *
+ * `kapital` dan `sembunyi` menyalakan sifat Word desktop: `font.allCaps`
+ * (WordApiDesktop 1.3) dan `font.hidden` (WordApiDesktop 1.2). Teks
+ * tersembunyi lebih dulu dibaca lewat `getText({IncludeHiddenText})`
+ * (WordApi 1.7) — selisih teks lengkap dan teks tampak, tanpa sifat desktop.
+ */
+async function bacaFormatDi(
+  context: Word.RequestContext,
+  kapital: boolean,
+  sembunyi: boolean
+): Promise<FormatParagraf[][]> {
+  const { bagian } = await susunPotongan(context);
+  const sifat = [...SIFAT_PARAGRAF];
+  if (kapital) sifat.push("font/allCaps");
+  if (sembunyi) sifat.push("font/hidden");
+  bagian.forEach((b) => b?.load(sifat.map((s) => `items/${s}`).join(",")));
+  await context.sync();
+
+  const semua = bagian.map((b) => (b ? b.items : []));
+
+  // --- Teks tersembunyi: selisih teks lengkap dan teks tampak (WordApi 1.7).
+  const tersembunyi: string[][][] = semua.map((isi) => isi.map(() => []));
+  let sembunyiTerbaca = false;
+  if (checkApiSupport("1.7")) {
+    try {
+      const alamat: [number, number][] = semua.flatMap((isi, k) =>
+        isi.map((_, j) => [k, j] as [number, number])
+      );
+      // Dua hasil per paragraf; dipecah supaya naskah besar tidak menumpuk
+      // puluhan ribu hasil dalam satu `sync`.
+      for (let a = 0; a < alamat.length; a += PARAGRAF_GETTEXT_PER_SYNC) {
+        const potong = alamat.slice(a, a + PARAGRAF_GETTEXT_PER_SYNC).map(([k, j]) => ({
+          k,
+          j,
+          lengkap: semua[k][j].getText({ IncludeHiddenText: true }),
+          tampak: semua[k][j].getText({ IncludeHiddenText: false }),
+        }));
+        await context.sync();
+        for (const x of potong) {
+          tersembunyi[x.k][x.j] = potonganTersembunyi(x.lengkap.value ?? "", x.tampak.value ?? "");
+        }
+      }
+      sembunyiTerbaca = true;
+    } catch (err) {
+      console.warn("Teks tersembunyi tidak terbaca lewat getText.", err);
+    }
+  }
+  if (!sembunyiTerbaca && sembunyi) {
+    // Cadangan Word desktop: paragraf yang seluruhnya tersembunyi. Yang
+    // tersembunyi sebagian dibaca per kata di bawah.
+    semua.forEach((isi, k) =>
+      isi.forEach((p, j) => {
+        if (p.font.hidden === true && p.text.trim()) tersembunyi[k][j] = [p.text];
+      })
+    );
+  }
+
+  // --- Paragraf berhuruf campuran: dibaca per kata (WordApi 1.3).
+  const perKata = semua.map((isi) => isi.map(() => null as Word.RangeCollection | null));
+  if (checkApiSupport("1.3")) {
+    const campur: [number, number][] = [];
+    semua.forEach((isi, k) =>
+      isi.forEach((p, j) => {
+        const sebagianSembunyi = sembunyi && !sembunyiTerbaca && p.font.hidden == null;
+        if (p.text.trim() && (gayaDari(p.font, kapital) === null || sebagianSembunyi)) {
+          campur.push([k, j]);
+        }
+      })
+    );
+    const sifatKata = ["text", "font/name", "font/size", "font/bold", "font/italic", "font/underline"];
+    if (kapital) sifatKata.push("font/allCaps");
+    if (sembunyi) sifatKata.push("font/hidden");
+    for (let a = 0; a < campur.length; a += PARAGRAF_PER_SYNC) {
+      try {
+        const potong = campur.slice(a, a + PARAGRAF_PER_SYNC);
+        for (const [k, j] of potong) {
+          const r = semua[k][j].getTextRanges([" "], true);
+          r.load(sifatKata.map((s) => `items/${s}`).join(","));
+          perKata[k][j] = r;
+        }
+        await context.sync();
+      } catch (err) {
+        console.warn("Huruf campuran tidak terbaca per kata.", err);
+        break;
+      }
+    }
+  }
+
+  return semua.map((isi, k) =>
+    isi.map((p, j) => {
+      const f: FormatParagraf = {
+        rata: RATA[p.alignment as string] ?? null,
+        kiri_cm: keCm(p.leftIndent),
+        kanan_cm: keCm(p.rightIndent),
+        baris_pertama_cm: keCm(p.firstLineIndent),
+        spasi_baris:
+          typeof p.lineSpacing === "number" && p.lineSpacing > 0
+            ? Number((p.lineSpacing / 12).toFixed(2))
+            : null,
+        spasi_sebelum_pt: angkaAtauNull(p.spaceBefore),
+        spasi_sesudah_pt: angkaAtauNull(p.spaceAfter),
+        tersembunyi: tersembunyi[k][j],
+        bagian_beda: [],
+      };
+      const warna = p.font.color;
+      if (warna) f.warna = warna;
+
+      const seragam = gayaDari(p.font, kapital);
+      const kata = perKata[k][j];
+      if (!p.text.trim() || (seragam && !kata)) {
+        f.huruf = p.font.name || null;
+        f.ukuran = angkaAtauNull(p.font.size);
+        if (seragam) {
+          f.tebal = seragam.tebal;
+          f.miring = seragam.miring;
+          f.garis_bawah = seragam.garis;
+          f.kapital_gaya = kapital ? seragam.kapital : null;
+        }
+        return f;
+      }
+      if (!kata) return f; // campuran tetapi tidak terbaca per kata: huruf tidak ditulis
+
+      // Gaya utama = gaya dengan huruf terbanyak; kata tersembunyi tidak ikut.
+      const sisaSembunyi = (tersembunyi[k][j] ?? []).join(" ").split(/\s+/).filter(Boolean);
+      const tampak: [string, GayaHuruf][] = [];
+      const sembunyiKata: string[] = [];
+      for (const w of kata.items) {
+        const t = w.text ?? "";
+        if (!t.trim()) continue;
+        const iniSembunyi = sembunyi ? w.font.hidden === true : sisaSembunyi.includes(t);
+        if (iniSembunyi) {
+          sembunyiKata.push(t);
+          const i = sisaSembunyi.indexOf(t);
+          if (i >= 0) sisaSembunyi.splice(i, 1);
+          continue;
+        }
+        const g = gayaDari(w.font, kapital);
+        if (g) tampak.push([t, g]);
+      }
+      if (!sembunyiTerbaca && sembunyiKata.length > 0) {
+        f.tersembunyi = [sembunyiKata.join(" ")];
+      }
+      if (tampak.length === 0) return f;
+
+      const bobot = new Map<string, { g: GayaHuruf; n: number }>();
+      for (const [t, g] of tampak) {
+        const x = bobot.get(kunciGaya(g)) ?? { g, n: 0 };
+        x.n += t.trim().length;
+        bobot.set(kunciGaya(g), x);
+      }
+      const utama = [...bobot.values()].sort((a, b) => b.n - a.n)[0].g;
+      f.huruf = utama.huruf;
+      f.ukuran = utama.ukuran;
+      f.tebal = utama.tebal;
+      f.miring = utama.miring;
+      f.garis_bawah = utama.garis;
+      f.kapital_gaya = kapital ? utama.kapital : null;
+
+      const beda: BagianFormat[] = [];
+      for (const [t, g] of tampak) {
+        if (kunciGaya(g) === kunciGaya(utama)) continue;
+        const ket = keteranganBeda(utama, g);
+        const akhir = beda[beda.length - 1];
+        if (akhir && akhir.keterangan === ket) akhir.kutipan += " " + t;
+        else beda.push({ keterangan: ket, kutipan: t });
+      }
+      // Potongan yang isinya cuma tanda baca tidak ditulis — sama dengan
+      // baca_format.py: tidak membawa kata yang bisa dinilai.
+      f.bagian_beda = beda.filter((b) => /[\p{L}\p{N}]/u.test(b.kutipan));
+      return f;
+    })
+  );
+}
+
+/**
+ * Format tiap paragraf, sejajar dengan potongan naskah. Daftar kosong bila
+ * tidak terbaca sama sekali — naskah tetap dikirim, putaran format menyebut
+ * bacaannya tidak ada.
+ */
+async function bacaFormat(): Promise<FormatParagraf[][]> {
+  const kapital = checkApiSupport("1.3", "WordApiDesktop");
+  const sembunyi = checkApiSupport("1.2", "WordApiDesktop");
+  // Dua percobaan: dengan sifat Word desktop, lalu tanpa. Requirement set
+  // didukung belum tentu diizinkan (CLAUDE.md butir 9), dan konteks yang gagal
+  // di tengah jalan tidak dipakai ulang — tiap percobaan Word.run sendiri.
+  const percobaan: [boolean, boolean][] =
+    kapital || sembunyi ? [[kapital, sembunyi], [false, false]] : [[false, false]];
+  for (const [k, s] of percobaan) {
+    try {
+      return await Word.run((context) => bacaFormatDi(context, k, s));
+    } catch (err) {
+      console.warn(`Format paragraf tidak terbaca${k || s ? " dengan sifat Word desktop" : ""}.`, err);
+    }
+  }
+  return [];
+}
+
+/** Kertas, marjin, dan kepala halaman dari OOXML — cadangan tanpa WordApiDesktop 1.3. */
+function halamanDariOoxml(ooxml: string, h: FormatHalaman): void {
+  const twipCm = (v: string | undefined) =>
+    v !== undefined && /^\d+$/.test(v) ? Number((Number(v) / 567).toFixed(1)) : null;
+  const atr = (tag: string, nama: string) =>
+    new RegExp(`<w:${tag}\\b[^>]*\\bw:${nama}="(\\d+)"`).exec(ooxml)?.[1];
+  if (h.lebar_cm == null) h.lebar_cm = twipCm(atr("pgSz", "w"));
+  if (h.tinggi_cm == null) h.tinggi_cm = twipCm(atr("pgSz", "h"));
+  if (h.marjin_atas_cm == null) h.marjin_atas_cm = twipCm(atr("pgMar", "top"));
+  if (h.marjin_bawah_cm == null) h.marjin_bawah_cm = twipCm(atr("pgMar", "bottom"));
+  if (h.marjin_kiri_cm == null) h.marjin_kiri_cm = twipCm(atr("pgMar", "left"));
+  if (h.marjin_kanan_cm == null) h.marjin_kanan_cm = twipCm(atr("pgMar", "right"));
+  if (h.halaman_pertama_beda == null && /<w:sectPr\b/.test(ooxml)) {
+    h.halaman_pertama_beda = /<w:titlePg(?:\s*\/>|\s+w:val="(?:1|true|on)")/.test(ooxml);
+  }
+}
+
+/**
+ * Format tiap bagian (section): kertas dan marjin (`Section.pageSetup`,
+ * WordApiDesktop 1.3; cadangannya OOXML paragraf pertama bagian itu), kepala
+ * halaman pertama dan berikutnya (WordApi 1.1), dan kolom nomor halaman
+ * (`Body.fields`, WordApi 1.4). Tiap bacaan dicoba sendiri — gagal satu tidak
+ * menggagalkan yang lain.
+ */
+async function bacaHalaman(): Promise<FormatHalaman[]> {
+  try {
+    return await Word.run(async (context) => {
+      const sections = context.document.sections;
+      sections.load("items");
+      await context.sync();
+      const hasil: FormatHalaman[] = sections.items.map((_, i) => ({ bagian: i }));
+
+      try {
+        const kepala = sections.items.map((s) => ({
+          pertama: s.getHeader("FirstPage"),
+          berikut: s.getHeader("Primary"),
+        }));
+        const gambar = kepala.map((k) => {
+          k.pertama.load("text");
+          k.berikut.load("text");
+          const g = k.pertama.inlinePictures;
+          g.load("items");
+          return g;
+        });
+        await context.sync();
+        kepala.forEach((k, i) => {
+          hasil[i].kepala_pertama = (k.pertama.text ?? "").trim();
+          hasil[i].kepala_berikut = (k.berikut.text ?? "").trim();
+          hasil[i].gambar_kepala_pertama = gambar[i].items.length;
+        });
+        if (checkApiSupport("1.4")) {
+          const kolom = kepala.map((k) => {
+            const f = k.berikut.fields;
+            f.load("items/code");
+            return f;
+          });
+          await context.sync();
+          kolom.forEach((f, i) => {
+            hasil[i].nomor_halaman = f.items.some((x) => /\bPAGE\b/i.test(x.code ?? ""));
+          });
+        }
+      } catch (err) {
+        console.warn("Kepala halaman tidak terbaca.", err);
+      }
+
+      let setelanTerbaca = false;
+      if (checkApiSupport("1.3", "WordApiDesktop")) {
+        try {
+          const setelan = sections.items.map((s) => {
+            const ps = s.pageSetup;
+            ps.load(
+              "pageWidth,pageHeight,topMargin,bottomMargin,leftMargin,rightMargin,differentFirstPageHeaderFooter"
+            );
+            return ps;
+          });
+          await context.sync();
+          setelan.forEach((ps, i) => {
+            hasil[i].lebar_cm = keCm(ps.pageWidth, 1);
+            hasil[i].tinggi_cm = keCm(ps.pageHeight, 1);
+            hasil[i].marjin_atas_cm = keCm(ps.topMargin, 1);
+            hasil[i].marjin_bawah_cm = keCm(ps.bottomMargin, 1);
+            hasil[i].marjin_kiri_cm = keCm(ps.leftMargin, 1);
+            hasil[i].marjin_kanan_cm = keCm(ps.rightMargin, 1);
+            hasil[i].halaman_pertama_beda = ps.differentFirstPageHeaderFooter;
+          });
+          setelanTerbaca = true;
+        } catch (err) {
+          console.warn("Setelan halaman tidak terbaca lewat pageSetup.", err);
+        }
+      }
+      if (!setelanTerbaca && checkApiSupport("1.3")) {
+        try {
+          const ooxml = sections.items.map((s) => s.body.paragraphs.getFirst().getOoxml());
+          await context.sync();
+          ooxml.forEach((x, i) => halamanDariOoxml(x.value ?? "", hasil[i]));
+        } catch (err) {
+          console.warn("Setelan halaman tidak terbaca lewat OOXML.", err);
+        }
+      }
+      return hasil;
+    });
+  } catch (err) {
+    console.warn("Format halaman tidak terbaca.", err);
+    return [];
+  }
+}
+
 /**
  * Membaca naskah: paragrafnya, dan kerangka tabel yang terlalu besar dibaca.
  *
@@ -338,7 +806,8 @@ async function bacaGambar(): Promise<number[][]> {
  * Temuan di paragraf begitu dilaporkan di panel tetapi tidak pernah ditandai.
  */
 export async function bacaNaskah(
-  scope: "all" | "selection" = "all"
+  scope: "all" | "selection" = "all",
+  opsi: { format?: boolean } = {}
 ): Promise<NaskahTerbaca> {
   if (!isOfficeAvailable()) {
     throw new Error("Office.js tidak tersedia dalam lingkungan ini.");
@@ -355,6 +824,10 @@ export async function bacaNaskah(
   const penanda = await bacaPenanda();
   const letak = await bacaLetak();
   const gambar = await bacaGambar();
+  // Format hanya untuk alur agen (Fase 4) — alur lama tidak membacanya, dan
+  // membacanya menambah waktu baca naskah besar.
+  const format = opsi.format ? await bacaFormat() : [];
+  const halaman = opsi.format ? await bacaHalaman() : undefined;
 
   return Word.run(async (context) => {
     const { bagian, raksasa } = await susunPotongan(context);
@@ -397,6 +870,7 @@ export async function bacaNaskah(
       const pen = selaras(penanda[k], items.length);
       const let_ = selaras(letak?.letak[k], items.length);
       const gam = selaras(gambar[k], items.length);
+      const fmt = selaras(format[k], items.length);
       items.forEach((p, j) => {
         const l = let_?.[j] ?? TANPA_LETAK;
         const isi: ParagrafInput = {
@@ -410,6 +884,7 @@ export async function bacaNaskah(
           gambar: gam?.[j] ?? 0,
           letak_pasti: k === 0,
         };
+        if (fmt?.[j]) isi.format = fmt[j];
         if (!terpilih || terpilih[j]) paragraf.push(isi);
         urut++;
       });
@@ -424,8 +899,141 @@ export async function bacaNaskah(
         });
       }
     });
-    return { paragraf, tabel_raksasa };
+    return halaman ? { paragraf, tabel_raksasa, halaman } : { paragraf, tabel_raksasa };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Periksa ulang — naskah sesudah keputusan penelaah (Fase 4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Paragraf yang teksnya diubah untuk Periksa ulang: teks sebenarnya di Word,
+ * dan rentang yang dibuang darinya (awal, panjang) — koordinat teks
+ * sebenarnya, urut, tidak bertindih.
+ */
+export type PetaPeriksaUlang = Map<number, { asli: string; buang: [number, number][] }>;
+
+/**
+ * Naskah untuk PERIKSA ULANG, dibaca SESUDAH keputusan penelaah: usulan yang
+ * diterima dianggap berlaku — teks merah yang dicoret dibuang, hijaunya
+ * dipakai; coretan "dibuang" yang diterima ikut dibuang. Tanda lama TIDAK
+ * disentuh: yang diubah cuma salinan teks yang dikirim ke backend.
+ *
+ * Nomor paragraf tetap nomor Word apa adanya — termasuk paragraf sisipan yang
+ * sudah terpasang — jadi temuan baru ditandai di paragraf yang benar. Yang
+ * bergeser cuma offset di dalam paragraf yang coretannya dibuang;
+ * `keKoordinatNaskah` mengembalikannya.
+ *
+ * Letak coretan dibaca dari bungkusnya (`DA-ASLI-n`): jarak dari awal
+ * paragraf ke awal bungkus (WordApi 1.3). Bila teks paragraf tidak lagi cocok
+ * dengan bungkusnya — naskah disunting sejak ditandai — fungsi ini MENOLAK
+ * dengan pesan yang bisa dibaca: Periksa ulang di atas teks yang tidak pasti
+ * melahirkan temuan yang tidak pasti.
+ */
+export async function bacaNaskahSesudahKeputusan(
+  temuan: Temuan[]
+): Promise<{ naskah: NaskahTerbaca; peta: PetaPeriksaUlang }> {
+  const naskah = await bacaNaskah("all", { format: true });
+  const peta: PetaPeriksaUlang = new Map();
+  const coret = temuan.filter(
+    (t) =>
+      t.status === "diterima" &&
+      (t.jenis_tanda === "penghapusan" || (t.jenis_tanda === "penggantian" && !!t.usulan_rumusan))
+  );
+  if (coret.length === 0) return { naskah, peta };
+  if (!checkApiSupport("1.3")) {
+    throw new Error(
+      "Periksa ulang butuh WordApi 1.3 untuk membaca letak coretan yang sudah diterima."
+    );
+  }
+
+  const ukuran = await Word.run(async (context) => {
+    const body = context.document.body;
+    const daftar = coret.map((t) => {
+      const cc = body.contentControls.getByTag(`${TAG_ASLI}${t.nomor}`).getFirstOrNullObject();
+      cc.load("isNullObject,text");
+      return { t, cc };
+    });
+    await context.sync();
+    const ukur = daftar
+      .filter(({ cc }) => !cc.isNullObject)
+      .map(({ t, cc }) => {
+        const par = cc.getRange("Whole").paragraphs.getFirst();
+        par.load("text");
+        const sebelum = par.getRange("Start").expandTo(cc.getRange("Start"));
+        sebelum.load("text");
+        return { t, cc, par, sebelum };
+      });
+    await context.sync();
+    return ukur.map(({ t, cc, par, sebelum }) => ({
+      t,
+      coret: cc.text ?? "",
+      paragraf: par.text ?? "",
+      awal: (sebelum.text ?? "").length,
+    }));
+  });
+
+  const buang = new Map<number, [number, number][]>();
+  for (const u of ukuran) {
+    // Paragrafnya: yang teksnya persis sama, terdekat ke nomor tersimpan.
+    const calon = naskah.paragraf
+      .filter((p) => p.teks === u.paragraf)
+      .sort(
+        (a, b) =>
+          Math.abs(a.index - u.t.lokasi.paragraf_index) - Math.abs(b.index - u.t.lokasi.paragraf_index)
+      );
+    const p = calon[0];
+    if (!p || u.paragraf.slice(u.awal, u.awal + u.coret.length) !== u.coret || !u.coret) {
+      throw new Error(
+        `Coretan T${u.t.nomor} tidak cocok lagi dengan teks di sekitarnya — naskah sudah` +
+          " disunting sejak ditandai. Periksa ulang tidak bisa memastikan teks yang berlaku;" +
+          " bersihkan daftar lalu jalankan analisis baru."
+      );
+    }
+    let panjang = u.coret.length;
+    const sesudah = u.paragraf[u.awal + panjang];
+    const sebelum = u.awal > 0 ? u.paragraf[u.awal - 1] : " ";
+    // Usulan hijau disisipkan sebagai " usulan" — spasi depannya ikut
+    // dibuang bersama coretannya. Coretan "dibuang" yang diapit spasi
+    // membuang satu spasi, supaya tidak tersisa spasi ganda.
+    if (sesudah === " " && (u.t.jenis_tanda === "penggantian" || sebelum === " ")) panjang += 1;
+    const daftar = buang.get(p.index) ?? [];
+    daftar.push([u.awal, panjang]);
+    buang.set(p.index, daftar);
+  }
+
+  for (const [index, rentang] of buang) {
+    const p = naskah.paragraf.find((x) => x.index === index)!;
+    rentang.sort((a, b) => a[0] - b[0]);
+    let teks = "";
+    let dari = 0;
+    for (const [awal, panjang] of rentang) {
+      teks += p.teks.slice(dari, awal);
+      dari = Math.max(dari, awal + panjang);
+    }
+    teks += p.teks.slice(dari);
+    peta.set(index, { asli: p.teks, buang: rentang });
+    p.teks = teks;
+  }
+  return { naskah, peta };
+}
+
+/**
+ * Temuan Periksa ulang dikembalikan ke koordinat teks SEBENARNYA di Word.
+ * Null bila rentangnya tidak bisa dipastikan — mis. menyeberangi coretan yang
+ * dibuang. Temuan begitu tidak ditandai (CLAUDE.md butir 6).
+ */
+export function keKoordinatNaskah(t: Temuan, peta: PetaPeriksaUlang): Temuan | null {
+  const x = peta.get(t.lokasi.paragraf_index);
+  if (!x) return t;
+  let r = t.lokasi.offset_mulai;
+  for (const [awal, panjang] of x.buang) {
+    if (awal <= r) r += panjang;
+    else break;
+  }
+  if (x.asli.slice(r, r + t.lokasi.panjang) !== t.lokasi.teks_asli) return null;
+  return { ...t, lokasi: { ...t.lokasi, offset_mulai: r } };
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +1065,12 @@ const WARNA_NETRAL = "#000000";
 /** Awalan tag content control. Dipakai menemukan kembali tanda milik alat. */
 const TAG_ASLI = "DA-ASLI-";
 const TAG_USUL = "DA-USUL-";
+/**
+ * Satuan baru yang disisipkan di tempat perbaikannya (Fase 4) — satu
+ * paragraf hijau, dibungkus content control bertag ini. Tolak dan Bersihkan
+ * mencabut PARAGRAFNYA, bukan cuma isinya, supaya tidak tersisa baris kosong.
+ */
+const TAG_SISIP = "DA-SISIP-";
 
 /**
  * Format asli tiap rentang sebelum ditimpa, agar Tolak bisa memulihkannya.
@@ -608,11 +1222,21 @@ function susunIsiKomentar(temuan: Temuan): string {
   // https://jdih.kemenkeu.go.id/, yaitu beranda, bukan peraturannya. Beranda
   // bukan rujukan. Penggantinya nomor halaman PDF KMK 527, yang memang bisa
   // langsung dibuka.
-  const adaButir = !!butir && butir !== "...";
+  //
+  // Fase 4: dasar prioritas penelaah dan rujukan yang tidak terbukti
+  // ("tanpa") tidak menulis baris rujukan — tidak dikarang. `butir` berisi
+  // alamat lengkap berikut halamannya ("Lampiran II angka III huruf A butir 8,
+  // hlm 30"), jadi ditulis apa adanya tanpa kata "butir" dan "(hlm …)" lagi.
+  // Rujukan yang dicarikan agen berlencana "belum diverifikasi" sampai
+  // alamatnya disalin manusia ke baris Dasar (rancangan Fase 4 bagian 3.2).
+  const adaButir =
+    !!butir && butir !== "..." && status !== "prioritas" && status !== "tanpa";
   const halaman = temuan.rujukan.halaman?.trim();
+  const alamatLengkap = /^Lampiran\b/.test(butir) || status === "agen";
   const rujukanStr = adaButir
-    ? `${temuan.rujukan.sumber} butir ${butir}` +
-      (halaman ? ` (hlm ${halaman})` : "") +
+    ? (alamatLengkap
+        ? `${temuan.rujukan.sumber} ${butir}`
+        : `${temuan.rujukan.sumber} butir ${butir}` + (halaman ? ` (hlm ${halaman})` : "")) +
       penanda
     : "";
 
@@ -663,6 +1287,20 @@ function susunIsiKomentar(temuan: Temuan): string {
   // klaim, dan ia satu-satunya bagian blok Saran yang tetap ditulis.
   const sumber = temuan.sumber_usulan?.trim();
   if (hijau && sumber) baris.push(`Sumber usulan: ${sumber}`);
+
+  // Sisipan satuan baru (Fase 4): komentar ini menempel di sisipannya, jadi
+  // asal rumusannya wajib terbaca — peraturan dari korpus, atau
+  // "(prediksi AI)". Letak idealnya disebut bila bukan di akhir satuan.
+  if (temuan.sisipan) {
+    baris.push(`Sumber usulan: ${temuan.sisipan.sumber}`);
+    const ideal = temuan.sisipan.letak_ideal?.trim();
+    if (ideal) baris.push(`Letak ideal: ${ideal}`);
+  }
+
+  // Peraturan lain yang jadi sandaran temuan — terbukti ada di hasil
+  // pencarian korpus (Fase 4).
+  const pembanding = temuan.pembanding?.trim();
+  if (pembanding) baris.push(`Pembanding: ${pembanding}`);
 
   // Keberatan model atas temuan ini. Ditempelkan, BUKAN menggantikan temuannya
   // — AI tidak pernah menghapus temuan yang kesalahannya sudah terbukti
@@ -981,7 +1619,12 @@ export async function tandaiSemuaTemuan(
             // (25 Sep 2026) justru karena komentar dipasang pada rentang yang
             // sudah bergeser. Memasangnya lebih dulu menghapus seluruh kelas
             // masalah itu, bukan cuma mengurangi peluangnya.
-            if (bisaKomentar) komentar = r.insertComment(susunIsiKomentar(t));
+            //
+            // Temuan yang perbaikannya disisipkan sebagai satuan baru TIDAK
+            // berkomentar di sini: komentarnya menempel di sisipan itu
+            // (`pasangSisipan`), dan tempat temuan cuma disorot — rancangan
+            // Fase 4 bagian 3.1.
+            if (bisaKomentar && !t.sisipan) komentar = r.insertComment(susunIsiKomentar(t));
 
             // Urutannya penting. Warna dulu, lalu sisipkan usulan di sebelahnya,
             // baru dibungkus content control. Kalau dibungkus lebih dulu,
@@ -1104,6 +1747,184 @@ function bungkusContentControl(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Sisipan satuan baru — Fase 4
+// ---------------------------------------------------------------------------
+
+/** "pasal-2-ayat-3" → "Pasal 2 ayat (3)" — untuk kalimat di Saran. */
+function namaSatuan(id: string): string {
+  const bagian = id.split("-");
+  const kata: string[] = [];
+  for (let i = 0; i + 1 < bagian.length; i += 2) {
+    const [jenis, nomor] = [bagian[i], bagian[i + 1]];
+    if (jenis === "ayat") kata.push(`ayat (${nomor})`);
+    else if (jenis === "pasal") kata.push(`Pasal ${nomor.toUpperCase()}`);
+    else kata.push(`${jenis} ${nomor}`);
+  }
+  return kata.join(" ") || id;
+}
+
+/** Hasil pemasangan sisipan, untuk panel. */
+export type HasilSisipan = {
+  /**
+   * Sisipan yang terpasang, URUT seperti dipasang (dari bawah ke atas).
+   * Panel memakainya menggeser nomor paragraf temuan lain: tiap paragraf baru
+   * menggeser semua paragraf sesudah `sesudah` satu langkah.
+   */
+  terpasang: { id: string; sesudah: number }[];
+  /**
+   * Temuan yang sisipannya GAGAL dipasang, dalam bentuk barunya: tanpa
+   * sisipan, isi sisipannya pindah ke Saran, dan komentarnya dipasang di
+   * tempat temuan. Panel mengganti temuan lamanya dengan ini.
+   */
+  gagal: Temuan[];
+  komentarKosong: number;
+};
+
+/**
+ * Sisipan gagal: komentar temuan dipasang di tempat temuan (yang sudah
+ * disorot), isi sisipannya jadi contoh rumusan di Saran. Tempat temuan tanpa
+ * komentar sama dengan tanda bisu — itu yang dicegah di sini.
+ */
+async function komentarDiTempatTemuan(
+  context: Word.RequestContext,
+  t: Temuan,
+  bisaKomentar: boolean
+): Promise<Temuan> {
+  const s = t.sisipan!;
+  const contoh =
+    `Contoh rumusan ${s.bentuk} baru di ${namaSatuan(s.sasaran)} (gagal disisipkan ke naskah): ` +
+    `"${[s.penanda, s.teks].filter(Boolean).join(" ")}" — sumber: ${s.sumber}.`;
+  const baru: Temuan = {
+    ...t,
+    sisipan: null,
+    sumber_usulan: "",
+    saran: [t.saran?.trim(), contoh].filter(Boolean).join(" "),
+  };
+  if (!bisaKomentar) return baru;
+  try {
+    const cc = context.document.body.contentControls
+      .getByTag(`${TAG_ASLI}${t.nomor}`)
+      .getFirstOrNullObject();
+    cc.load("isNullObject");
+    await context.sync();
+    if (!cc.isNullObject) {
+      cc.getRange("Whole").insertComment(susunIsiKomentar(baru));
+      await context.sync();
+    }
+  } catch (err) {
+    console.warn(`Komentar cadangan T${t.nomor} gagal dipasang:`, err);
+  }
+  return baru;
+}
+
+/**
+ * Menyisipkan satuan baru (Fase 4) — DIPANGGIL PALING AKHIR, sesudah seluruh
+ * tanda lain terpasang: paragraf baru menggeser nomor paragraf sesudahnya,
+ * jadi penandaan apa pun yang memakai nomor paragraf harus sudah selesai.
+ * Dipasang dari BAWAH ke atas, supaya paragraf yang disisipkan di bawah tidak
+ * menggeser tempat sisipan lain di atasnya; dua sisipan di tempat yang sama
+ * dipasang nomor temuan terbesar dulu, jadi urutannya di naskah ikut nomor.
+ *
+ * Tiap sisipan satu paragraf hijau SESUDAH `sesudah_paragraf`, dibungkus
+ * content control `DA-SISIP-n`, berkomentar temuannya. Nomornya:
+ *   - paragraf baru ikut daftar bernomor Word DAN jangkarnya satuan sejenis →
+ *     nomor otomatis Word dibiarkan;
+ *   - selainnya → dilepas dari daftar, penandanya ditulis sebagai teks, dan
+ *     menjoroknya disamakan dengan satuan sejenis terakhir (`format_dari`).
+ *
+ * Kebutuhan API: WordApi 1.3 (getRange, isListItem, detachFromList),
+ * komentar 1.4. Gagal di mana pun → paragraf barunya dicabut, komentarnya
+ * pindah ke tempat temuan (jalur cadangan, CLAUDE.md butir 9).
+ */
+export async function pasangSisipan(daftar: Temuan[]): Promise<HasilSisipan> {
+  const hasil: HasilSisipan = { terpasang: [], gagal: [], komentarKosong: 0 };
+  const dengan = daftar.filter((t) => !!t.sisipan);
+  if (!isOfficeAvailable() || dengan.length === 0) return hasil;
+  const bisa = checkApiSupport("1.3");
+  const bisaKomentar = checkApiSupport("1.4");
+
+  try {
+    await Word.run(async (context) => {
+      const paragraphs = context.document.body.paragraphs;
+      paragraphs.load("items");
+      await context.sync();
+
+      const { modeAwal } = await matikanPelacakan(context);
+      try {
+        const urut = [...dengan].sort(
+          (a, b) =>
+            b.sisipan!.sesudah_paragraf - a.sisipan!.sesudah_paragraf || b.nomor - a.nomor
+        );
+        const komentarBaru: [Temuan, Word.Comment][] = [];
+        for (const t of urut) {
+          const s = t.sisipan!;
+          const jangkar = paragraphs.items[s.sesudah_paragraf];
+          const dari = s.format_dari ?? -1;
+          const contoh = dari >= 0 ? paragraphs.items[dari] : undefined;
+          let baru: Word.Paragraph | null = null;
+          try {
+            if (!bisa) throw new Error("WordApi 1.3 tidak tersedia");
+            if (!jangkar) throw new Error(`paragraf ${s.sesudah_paragraf} tidak ada`);
+            if (contoh) contoh.load("leftIndent,firstLineIndent");
+            baru = jangkar.insertParagraph(s.teks, "After");
+            baru.load("isListItem");
+            await context.sync();
+
+            const sejenis = dari === s.sesudah_paragraf;
+            if (baru.isListItem && !sejenis) baru.detachFromList();
+            if (!baru.isListItem || !sejenis) {
+              if (s.penanda) baru.insertText(`${s.penanda} `, "Start");
+              if (contoh) {
+                baru.leftIndent = contoh.leftIndent;
+                baru.firstLineIndent = contoh.firstLineIndent;
+              }
+            }
+            // Komentar dulu, baru warna dan bungkus — urutan yang sama dengan
+            // `tandaiSemuaTemuan`, alasannya di sana.
+            const isi = baru.getRange("Content");
+            const komentar = bisaKomentar ? isi.insertComment(susunIsiKomentar(t)) : null;
+            isi.font.color = WARNA_USULAN;
+            isi.font.strikeThrough = false;
+            isi.font.highlightColor = null as unknown as string;
+            bungkusContentControl(isi, `${TAG_SISIP}${t.nomor}`, t.nomor);
+            await context.sync();
+
+            if (komentar) komentarBaru.push([t, komentar]);
+            hasil.terpasang.push({ id: t.id, sesudah: s.sesudah_paragraf });
+          } catch (err) {
+            console.warn(`Sisipan T${t.nomor} gagal dipasang:`, err);
+            if (baru) {
+              try {
+                baru.delete();
+                await context.sync();
+              } catch (e) {
+                console.warn(`Sisa sisipan T${t.nomor} gagal dicabut:`, e);
+              }
+            }
+            hasil.gagal.push(await komentarDiTempatTemuan(context, t, bisaKomentar));
+          }
+        }
+
+        if (komentarBaru.length > 0) {
+          try {
+            komentarBaru.forEach(([, k]) => k.load("content"));
+            await context.sync();
+            hasil.komentarKosong = komentarBaru.filter(([, k]) => !(k.content ?? "").trim()).length;
+          } catch (err) {
+            console.warn("Gagal memeriksa isi komentar sisipan:", err);
+          }
+        }
+      } finally {
+        await kembalikanPelacakan(context, modeAwal);
+      }
+    });
+  } catch (err) {
+    console.warn("Gagal memasang sisipan:", err);
+  }
+  return hasil;
+}
+
 /**
  * Mencabut bekas setengah jadi sebuah tanda yang GAGAL dipasang.
  *
@@ -1173,14 +1994,27 @@ async function cabutSisaGagal(
 // Keputusan atas temuan
 // ---------------------------------------------------------------------------
 
+/** Hasil Tolak, untuk panel. */
+export type HasilTolak = {
+  /** Ada tanda yang dicabut. False: tandanya tidak ketemu lagi di naskah. */
+  berhasil: boolean;
+  /**
+   * Paragraf sisipan satuan baru ikut dicabut — panel menggeser nomor
+   * paragraf temuan sesudahnya satu langkah ke atas.
+   */
+  sisipanDicabut: boolean;
+};
+
 /**
- * Menolak sebuah temuan: usulan hijaunya dibuang, teks aslinya dipulihkan
- * persis seperti sebelum ditandai, komentarnya dihapus.
+ * Menolak sebuah temuan: usulan hijaunya dibuang, sisipan satuan barunya
+ * dicabut berikut paragrafnya, teks aslinya dipulihkan persis seperti sebelum
+ * ditandai, komentarnya dihapus.
  *
  * Sesudah ini tidak boleh ada bekas apa pun di naskah.
  */
-export async function tolakTemuan(temuan: Temuan): Promise<boolean> {
-  if (!isOfficeAvailable()) return false;
+export async function tolakTemuan(temuan: Temuan): Promise<HasilTolak> {
+  const gagal: HasilTolak = { berhasil: false, sisipanDicabut: false };
+  if (!isOfficeAvailable()) return gagal;
 
   try {
     return await Word.run(async (context) => {
@@ -1189,9 +2023,25 @@ export async function tolakTemuan(temuan: Temuan): Promise<boolean> {
 
       const ccUsul = body.contentControls.getByTag(`${TAG_USUL}${temuan.nomor}`);
       const ccAsli = body.contentControls.getByTag(`${TAG_ASLI}${temuan.nomor}`);
+      const ccSisip = body.contentControls.getByTag(`${TAG_SISIP}${temuan.nomor}`);
       ccUsul.load("items");
       ccAsli.load("items");
+      ccSisip.load("items");
       await context.sync();
+
+      // Komentar dihapus LEBIH DULU, selagi jangkarnya masih bisa ditemukan
+      // lewat bungkusnya — sesudah bungkusnya dilepas atau sisipannya
+      // dicabut, yang tersisa cuma nomor paragraf, dan nomor paragraf
+      // bergeser begitu ada sisipan.
+      await hapusKomentarTemuanDi(context, temuan, [...ccAsli.items, ...ccSisip.items]);
+
+      // Sisipan satuan baru: PARAGRAFNYA dicabut, bukan cuma isinya —
+      // mencabut isinya saja meninggalkan baris kosong di naskah orang.
+      const bisaCabutParagraf = checkApiSupport("1.3");
+      ccSisip.items.forEach((cc) => {
+        if (bisaCabutParagraf) cc.getRange("Whole").paragraphs.getFirst().delete();
+        else cc.delete(false);
+      });
 
       // Usulan hijau dibuang berikut isinya — keepContent = false.
       ccUsul.items.forEach((cc) => cc.delete(false));
@@ -1211,27 +2061,62 @@ export async function tolakTemuan(temuan: Temuan): Promise<boolean> {
       });
       await context.sync();
 
-      const adaTanda = ccUsul.items.length > 0 || ccAsli.items.length > 0;
+      const adaTanda =
+        ccUsul.items.length > 0 || ccAsli.items.length > 0 || ccSisip.items.length > 0;
       formatAsliTemuan.delete(temuan.nomor);
 
-      await hapusKomentarTemuanDi(context, temuan);
       await kembalikanPelacakan(context, modeAwal);
-      return adaTanda;
+      return {
+        berhasil: adaTanda,
+        sisipanDicabut: ccSisip.items.length > 0 && bisaCabutParagraf,
+      };
     });
   } catch (err) {
     console.warn(`Gagal menolak temuan T${temuan.nomor}:`, err);
-    return false;
+    return gagal;
   }
 }
 
 /**
  * Menghapus komentar milik sebuah temuan, dicari lewat penanda (T{n}) di isinya.
+ *
+ * Jangkarnya dicari lewat BUNGKUS tandanya lebih dulu (`jangkar` — content
+ * control temuan itu): sejak Fase 4 menyisipkan paragraf baru, nomor paragraf
+ * yang tersimpan bisa bergeser, sedangkan bungkusnya selalu menempel di
+ * tempatnya. Nomor paragraf tinggal cadangan.
  */
 async function hapusKomentarTemuanDi(
   context: Word.RequestContext,
-  temuan: Temuan
+  temuan: Temuan,
+  jangkar: Word.ContentControl[] = []
 ): Promise<boolean> {
   if (!checkApiSupport("1.4")) return false;
+  const penanda = penandaKomentar(temuan);
+  if (jangkar.length > 0) {
+    try {
+      const kumpulan = jangkar.map((cc) => {
+        const k = cc.getRange("Whole").getComments();
+        k.load("items/content");
+        return k;
+      });
+      await context.sync();
+      let ada = false;
+      kumpulan.forEach((k) =>
+        k.items.forEach((x) => {
+          if (x.content && x.content.includes(penanda)) {
+            x.delete();
+            ada = true;
+          }
+        })
+      );
+      if (ada) {
+        await context.sync();
+        return true;
+      }
+    } catch (err) {
+      console.warn("Komentar tidak ketemu lewat bungkus tandanya:", err);
+    }
+  }
   try {
     const paragraphs = context.document.body.paragraphs;
     paragraphs.load("items");
@@ -1247,7 +2132,6 @@ async function hapusKomentarTemuanDi(
     komentar.load("items/content");
     await context.sync();
 
-    const penanda = penandaKomentar(temuan);
     let adaYangDihapus = false;
     komentar.items.forEach((k) => {
       if (k.content && k.content.includes(penanda)) {
@@ -1292,7 +2176,14 @@ export async function bersihkanSemuaTanda(): Promise<HasilPembersihan> {
 
       const usul = kontrol.items.filter((cc) => cc.tag?.startsWith(TAG_USUL));
       const asli = kontrol.items.filter((cc) => cc.tag?.startsWith(TAG_ASLI));
+      const sisip = kontrol.items.filter((cc) => cc.tag?.startsWith(TAG_SISIP));
 
+      // Sisipan satuan baru: paragrafnya dicabut utuh, sama seperti Tolak.
+      const bisaCabutParagraf = checkApiSupport("1.3");
+      sisip.forEach((cc) => {
+        if (bisaCabutParagraf) cc.getRange("Whole").paragraphs.getFirst().delete();
+        else cc.delete(false);
+      });
       usul.forEach((cc) => cc.delete(false));
 
       asli.forEach((cc) => {
@@ -1335,7 +2226,7 @@ export async function bersihkanSemuaTanda(): Promise<HasilPembersihan> {
       });
       await context.sync();
 
-      hasil.tanda = usul.length + asli.length;
+      hasil.tanda = usul.length + asli.length + sisip.length;
       formatAsliTemuan.clear();
 
       hasil.komentar = await hapusSemuaKomentarAlat(context);
@@ -1375,7 +2266,10 @@ export async function hitungTandaAlat(): Promise<TandaDiNaskah> {
       kontrol.load("items/tag");
       await context.sync();
       const tanda = kontrol.items.filter(
-        (cc) => cc.tag?.startsWith(TAG_ASLI) || cc.tag?.startsWith(TAG_USUL)
+        (cc) =>
+          cc.tag?.startsWith(TAG_ASLI) ||
+          cc.tag?.startsWith(TAG_USUL) ||
+          cc.tag?.startsWith(TAG_SISIP)
       ).length;
 
       let komentar = 0;
@@ -1568,7 +2462,7 @@ export async function perbaruiKomentarTemuan(temuan: Temuan): Promise<boolean> {
       await context.sync();
       if (cc.items.length === 0) return false;
 
-      await hapusKomentarTemuanDi(context, temuan);
+      await hapusKomentarTemuanDi(context, temuan, cc.items);
 
       cc.items[0].getRange().insertComment(susunIsiKomentar(temuan));
       await context.sync();
@@ -1635,11 +2529,19 @@ export async function selectFindingLocation(temuan: Temuan): Promise<boolean> {
   try {
     return await Word.run(async (context) => {
       const body = context.document.body;
-      const cc = body.contentControls.getByTag(`${TAG_ASLI}${temuan.nomor}`);
-      cc.load("items");
+      // Temuan bersisipan: komentarnya di sisipan, jadi ke sanalah "Lompat ke
+      // Teks" — kata yang disorot di tempat temuan dicapai lewat "Lihat
+      // sorotan" (`lihatSorotan`).
+      const tag = [...(temuan.sisipan ? [TAG_SISIP] : []), TAG_ASLI];
+      const kumpulan = tag.map((x) => {
+        const cc = body.contentControls.getByTag(`${x}${temuan.nomor}`);
+        cc.load("items");
+        return cc;
+      });
       await context.sync();
 
-      if (cc.items.length > 0) {
+      const cc = kumpulan.find((k) => k.items.length > 0);
+      if (cc) {
         cc.items[0].getRange().select();
         await context.sync();
         return true;
@@ -1672,6 +2574,30 @@ export async function selectFindingLocation(temuan: Temuan): Promise<boolean> {
     });
   } catch (err) {
     console.warn("Gagal memilih lokasi temuan:", err);
+    return false;
+  }
+}
+
+/**
+ * Tombol "Lihat sorotan" (Fase 4): melompat ke kata yang disorot TANPA
+ * komentar di tempat temuan, untuk temuan yang perbaikannya disisipkan di
+ * satuan lain. False bila sorotannya tidak ada lagi di naskah.
+ */
+export async function lihatSorotan(temuan: Temuan): Promise<boolean> {
+  if (!isOfficeAvailable()) return false;
+  seleksiDigerakkanPanel();
+  try {
+    return await Word.run(async (context) => {
+      const cc = context.document.body.contentControls.getByTag(`${TAG_ASLI}${temuan.nomor}`);
+      cc.load("items");
+      await context.sync();
+      if (cc.items.length === 0) return false;
+      cc.items[0].getRange().select();
+      await context.sync();
+      return true;
+    });
+  } catch (err) {
+    console.warn("Gagal melompat ke sorotan temuan:", err);
     return false;
   }
 }
@@ -1750,7 +2676,10 @@ async function bacaNomorDiSeleksi(): Promise<number | null> {
     await context.sync();
 
     for (const k of kontrol.items) {
-      if ((k.tag ?? "").startsWith(TAG_ASLI)) {
+      const tag = k.tag ?? "";
+      // Sisipan satuan baru ikut: komentarnya di sana, jadi kursor di
+      // sisipan wajib menyalakan kartunya juga.
+      if (tag.startsWith(TAG_ASLI) || tag.startsWith(TAG_SISIP)) {
         const n = nomorDariTag(k.tag);
         if (n !== null) return n;
       }

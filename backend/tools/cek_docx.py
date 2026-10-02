@@ -45,7 +45,9 @@ from app.telaah.tahap1_parser.struktur import bangun_pohon
 from app.telaah.tahap2_persiapan.mekanis_konsistensi import jalankan_mekanis
 
 
-def baca_naskah(path: Path) -> tuple[list[dict], list[ParagrafInput], list[KerangkaTabel]]:
+def baca_naskah(
+    path: Path, dengan_format: bool = False
+) -> tuple[list[dict], list[ParagrafInput], list[KerangkaTabel]]:
     """Entri mentah, paragraf siap kirim, dan kerangka tabel raksasa.
 
     Paragrafnya menurut urutan `body.paragraphs` di Word. Tiap entri berisi
@@ -60,7 +62,7 @@ def baca_naskah(path: Path) -> tuple[list[dict], list[ParagrafInput], list[Keran
     Pembacanya di `tools/baca_docx.py`: tiap sel dibaca SEKALI (bug 10), dan
     tabel raksasa jadi kerangka seperti di panel.
     """
-    entri, kerangka = baca_docx(path)
+    entri, kerangka = baca_docx(path, dengan_format=dengan_format)
     paragraf = [
         ParagrafInput(
             index=e["index"],
@@ -73,6 +75,7 @@ def baca_naskah(path: Path) -> tuple[list[dict], list[ParagrafInput], list[Keran
             gambar=e.get("gambar", 0),
             rumus=e.get("rumus", 0),
             letak_pasti=e.get("letak_pasti", True),
+            format=e.get("format"),
         )
         for e in entri
     ]
@@ -221,6 +224,113 @@ def _jalankan_lanjut(paragraf, tabel_raksasa, args) -> int:
     return 0
 
 
+def _jalankan_agen(paragraf, tabel_raksasa, args, path) -> int:
+    """Fase 4 — agen penuh. MEMANGGIL MODEL dan BERBIAYA.
+
+    Format paragraf dan halaman dibaca dari .docx (tools/baca_format.py) —
+    di add-in Office.js yang membacanya. Ekspor tahap 1–3 Fase 4 dicetak bila
+    diminta, persis seperti dari panel.
+    """
+    import time
+
+    from app.bersama.llm import KlienAzure, PerapalAzure
+    from app.bersama.opensearch import KorpusOpenSearch, PencariOpenSearch
+    from app.core.config import settings
+    from app.models.temuan import FormatHalaman
+    from app.telaah.alur import jalankan_agen
+    from app.telaah.ekspor.tahap1_bahan import susun_ekspor_tahap1_bahan
+    from app.telaah.ekspor.tahap2_jejak_agen import susun_ekspor_tahap2_jejak
+    from app.telaah.ekspor.tahap3_verifikasi import susun_ekspor_tahap3_verifikasi
+    from app.telaah.tahap2_agen.langkah3_jalankan_agen import Setelan
+    from tools.baca_docx import baca_halaman_docx
+
+    klien = KlienAzure()
+    if not klien.siap:
+        print("Azure OpenAI belum terkonfigurasi. Periksa lewat GET /cek-env.")
+        return 1
+    korpus = perapal = pencari = None
+    if args.fase3:
+        k, pr = KorpusOpenSearch(), PerapalAzure()
+        if k.siap and pr.siap:
+            korpus, perapal = k, pr
+        c = PencariOpenSearch()
+        pencari = c if c.siap else None
+    halaman = [FormatHalaman(**h) for h in baca_halaman_docx(path)]
+    kode = [x.strip() for x in args.analisis.split(",") if x.strip()] if args.analisis else None
+
+    def lapor(tahap, selesai, total):
+        print(f"  [{time.strftime('%H:%M:%S')}] tahap {tahap}: {selesai}/{total}", flush=True)
+
+    def lapor_putaran(kode_p, keadaan):
+        if keadaan.get("keadaan") in ("selesai", "macet", "gagal", "dibatalkan", "menilai"):
+            print(
+                f"  [{time.strftime('%H:%M:%S')}] {keadaan['judul']}: {keadaan['keadaan']} · "
+                f"{keadaan['langkah']} request · {keadaan['calon']} calon",
+                flush=True,
+            )
+
+    # Jawaban model disimpan di folder ekspor (jawaban.json): jalan ulang atas
+    # naskah dan pesan yang sama memakai jawaban itu tanpa membayar lagi —
+    # dipakai saat membetulkan gerbang lalu menguji ulang hasil yang sama.
+    import json
+    import threading
+
+    tersimpan: dict[str, str] = {}
+    kunci_berkas = threading.Lock()
+    berkas_jawaban = Path(args.simpan_ekspor) / "jawaban.json" if args.simpan_ekspor else None
+    if berkas_jawaban is not None and berkas_jawaban.exists():
+        tersimpan = json.loads(berkas_jawaban.read_text(encoding="utf-8"))
+        print(f"  {len(tersimpan)} jawaban tersimpan dipakai ulang dari {berkas_jawaban}")
+
+    def simpan_jawaban(kunci: str, jawaban: str) -> None:
+        if berkas_jawaban is None:
+            return
+        with kunci_berkas:
+            tersimpan[kunci] = jawaban
+            berkas_jawaban.parent.mkdir(parents=True, exist_ok=True)
+            berkas_jawaban.write_text(json.dumps(tersimpan, ensure_ascii=False), encoding="utf-8")
+
+    print("=" * 78)
+    print("FASE 4 — AGEN (memanggil model, berbiaya)")
+    print("=" * 78)
+    mulai = time.monotonic()
+    hasil = jalankan_agen(
+        paragraf,
+        jenis_panel=args.jenis,
+        klien=klien,
+        kode_dipilih=kode,
+        korpus=korpus,
+        perapal=perapal,
+        pencari=pencari,
+        halaman=halaman,
+        tabel_raksasa=tabel_raksasa,
+        ambang=args.ambang if args.ambang is not None else settings.FASE2_AMBANG_SKOR,
+        tersimpan=tersimpan,
+        simpan=simpan_jawaban,
+        lapor=lapor,
+        lapor_putaran=lapor_putaran,
+        setelan=Setelan(settings.FASE4_MACET_ULANG, settings.FASE4_MACET_LANGKAH, settings.FASE4_TUNGGU_429),
+        anggaran=settings.FASE2_ANGGARAN_TOKEN,
+        per_fokus=settings.FASE2_PASAL_PER_FOKUS,
+        token_per_fokus=settings.FASE2_TOKEN_PER_FOKUS,
+        berbarengan=settings.FASE2_PANGGILAN_BERBARENGAN,
+    )
+    print(f"  Selesai dalam {time.monotonic() - mulai:.0f} dtk · ongkos: {hasil.ongkos.ringkas()}, cache {hasil.ongkos.token_cache}")
+    if args.simpan_ekspor:
+        folder = Path(args.simpan_ekspor)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "ekspor1_bahan.txt").write_text(susun_ekspor_tahap1_bahan(hasil), encoding="utf-8")
+        (folder / "ekspor2_jejak.txt").write_text(susun_ekspor_tahap2_jejak(hasil), encoding="utf-8")
+        (folder / "ekspor3_gerbang.txt").write_text(susun_ekspor_tahap3_verifikasi(hasil), encoding="utf-8")
+        print(f"  Ekspor disimpan di {folder}")
+    if args.tahap1:
+        print(susun_ekspor_tahap1_bahan(hasil))
+    if args.tahap2:
+        print(susun_ekspor_tahap2_jejak(hasil))
+    print(susun_ekspor_tahap3_verifikasi(hasil))
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Periksa rancangan .docx dengan aturan Fase 1")
     ap.add_argument("berkas", help="Path ke rancangan .docx")
@@ -237,6 +347,9 @@ def main() -> int:
     ap.add_argument("--tahap5", action="store_true", help="Bersama --lanjut: cetak nasib tiap dugaan — lolos atau gugur, berikut alasannya.")
     ap.add_argument("--ambang", type=float, default=None, help="Ambang skor tahap 5. Bawaan dari core/config.py.")
     ap.add_argument("--jenis", choices=["PMK", "KMK"], default="PMK", help="Jenis dokumen; di add-in ini dipilih penelaah (default PMK)")
+    ap.add_argument("--agen", action="store_true", help="FASE 4: jalankan agen penuh. MEMANGGIL MODEL dan BERBIAYA. Bersama --tahap1/--tahap2: cetak ekspor bahan/jejak.")
+    ap.add_argument("--analisis", default="", help="Bersama --agen: kode analisis yang dijalankan, dipisah koma (bawaan semua).")
+    ap.add_argument("--simpan-ekspor", default="", help="Bersama --agen: folder tempat ekspor tahap 1–3 disimpan.")
     args = ap.parse_args()
 
     path = Path(args.berkas)
@@ -244,7 +357,10 @@ def main() -> int:
         print(f"Berkas tidak ditemukan: {path}")
         return 1
 
-    entri, paragraf, tabel_raksasa = baca_naskah(path)
+    entri, paragraf, tabel_raksasa = baca_naskah(path, dengan_format=args.agen)
+
+    if args.agen:
+        return _jalankan_agen(paragraf, tabel_raksasa, args, path)
     jml_tabel = sum(1 for e in entri if e["dari_tabel"])
 
     # --tahap1 dan --tahap2 mencetak ekspornya SAJA — sama persis dengan

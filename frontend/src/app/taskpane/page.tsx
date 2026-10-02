@@ -13,6 +13,12 @@ import {
   KemajuanResponse,
   KeteranganAturan,
   NaskahTerbaca,
+  AlurAnalisis,
+  AnalisisPanel,
+  DaftarAnalisisResponse,
+  AnalisisAgenRequest,
+  KemajuanAgenResponse,
+  KeadaanPutaran,
 } from "@/lib/types";
 import {
   bacaNaskah,
@@ -29,7 +35,12 @@ import {
   simpanDaftarDiNaskah,
   bacaDaftarDariNaskah,
   pulihkanFormatAsli,
+  pasangSisipan,
+  lihatSorotan,
+  bacaNaskahSesudahKeputusan,
+  keKoordinatNaskah,
   type HasilPenandaan,
+  type PetaPeriksaUlang,
 } from "@/lib/office";
 import {
   ATURAN_FASE1,
@@ -100,6 +111,115 @@ function uraiKemajuan(k: { tahap: string; selesai: number; total: number }): str
   const nomor = k.tahap.split(" ")[0];
   const satuan = nomor === "3" ? " panggilan" : nomor === "4" ? " dugaan" : "";
   return `tahap ${k.tahap} · ${k.selesai}/${k.total}${satuan}`;
+}
+
+// ---------------------------------------------------------------------------
+// Fase 4 — agen penuh (saklar FASE2_ALUR=agen di backend)
+// ---------------------------------------------------------------------------
+
+/** Ekspor alat pengembang alur agen — menggantikan ekspor tahap 1–5. */
+const EKSPOR_AGEN: { tahap: number; keterangan: string }[] = [
+  {
+    tahap: 1,
+    keterangan:
+      "label satuan, peta letak, naskah berlabel dan naskah berformat persis yang dibaca agen. Gratis bila belum ada analisis.",
+  },
+  {
+    tahap: 2,
+    keterangan:
+      "jejak agen per putaran: tiap request, alat dan hasilnya, token, laporan selesai, dan putusan penilai kedua.",
+  },
+  {
+    tahap: 3,
+    keterangan:
+      "gerbang: calon yang lolos jadi temuan, yang ditolak penilai, gugur, atau diturunkan — berikut alasannya.",
+  },
+];
+
+/** Tulisan tombol Analisis selama alur agen berjalan. */
+function uraiTahapAgen(tahap: string, putaran: KeadaanPutaran[], berjalan: boolean): string {
+  if (!berjalan) return "Membaca naskah dan formatnya…";
+  if (tahap.startsWith("2")) {
+    const rampung = putaran.filter(
+      (p) => !["menunggu", "berjalan", "menilai"].includes(p.keadaan)
+    ).length;
+    return `Tahap 2 · agen ${rampung}/${putaran.length} putaran…`;
+  }
+  if (tahap.startsWith("3")) return "Tahap 3 · gerbang memeriksa bukti…";
+  return "Tahap 1 · menyiapkan bahan…";
+}
+
+/** Keadaan putaran dalam kalimat panel. */
+const KEADAAN_PUTARAN: Record<string, string> = {
+  menunggu: "menunggu",
+  berjalan: "berjalan",
+  menilai: "dinilai penilai kedua",
+  selesai: "selesai",
+  macet: "macet — dihentikan",
+  dibatalkan: "dibatalkan",
+  gagal: "gagal",
+};
+
+/** Cara tanda muncul di naskah, menurut baris Respons analisis. */
+const TANDA_RESPONS: Record<string, string> = {
+  otomatis:
+    "AI memilih per temuan: usulan hijau di sebelah coretan merah, dicoret merah tanpa pengganti, atau blok kuning — gerbang kode yang memastikan buktinya; yang tidak terbukti turun jadi blok kuning.",
+  usulan:
+    "Usulan hijau di sebelah coretan merah bila penggantinya terbukti; bila tidak, blok kuning dengan contoh rumusan di Saran.",
+  dibuang:
+    "Dicoret merah tanpa pengganti bila alasannya terbukti kode; bila tidak, blok kuning dengan saran hapus.",
+  catatan: "Blok kuning dan komentar. Warna huruf tidak disentuh.",
+};
+
+/** Satu baris daftar backend → kartu Pengaturan yang sudah ada bentuknya. */
+function keteranganDariPanel(a: AnalisisPanel): KeteranganAturan & { denganModel?: boolean } {
+  const sumber =
+    a.dasar_status === "visual"
+      ? `KMK 527/KMK.01/2022 ${a.dasar}.`
+      : a.dasar_status === "turunan"
+        ? `KMK 527/KMK.01/2022 ${a.dasar} — dasar turunan: aturan ini akibat butir itu, bukan bunyinya.`
+        : a.dasar_status === "prioritas"
+          ? "Prioritas penelaah — tidak ada butir KMK 527 yang dikutip."
+          : "Dasar kosong — AI mencarikan rujukannya; yang tidak terbukti ditulis tanpa rujukan, tidak dikarang.";
+  return {
+    id: a.id,
+    judul: `${a.id} · ${a.judul}`,
+    diperiksa: a.diperiksa,
+    tidakDiperiksa: a.tidakDiperiksa,
+    tanda: TANDA_RESPONS[a.respons] ?? TANDA_RESPONS.catatan,
+    catatanSumber: sumber,
+    dimatikan: a.tersedia ? undefined : a.alasan || "tidak tersedia",
+    // Seluruh analisis alur agen memakai AI — lencana "pakai AI" di tiap
+    // kartu tidak membedakan apa pun, dan label "Perlu diperiksa sendiri"
+    // keliru di depan alamat Dasar. Kartunya memakai label "Dasar aturannya".
+    denganModel: false,
+  };
+}
+
+/**
+ * Geser nomor paragraf temuan yang letaknya SESUDAH paragraf `sesudah` —
+ * paragraf sisipan baru dipasang (+1) atau dicabut (−1). Nomor paragraf
+ * dipakai Lompat ke Teks, Lompat ke Perbaikan, dan Periksa ulang; tanpa
+ * pergeseran ini semuanya meleset satu baris per sisipan.
+ */
+function geserParagraf(daftar: Temuan[], sesudah: number, delta: number): Temuan[] {
+  const geser = (i: number) => (i > sesudah ? i + delta : i);
+  return daftar.map((t) => ({
+    ...t,
+    lokasi: { ...t.lokasi, paragraf_index: geser(t.lokasi.paragraf_index) },
+    sasaran_paragraf: t.sasaran_paragraf == null ? t.sasaran_paragraf : geser(t.sasaran_paragraf),
+    sisipan: t.sisipan
+      ? {
+          ...t.sisipan,
+          sesudah_paragraf: geser(t.sisipan.sesudah_paragraf),
+          format_dari:
+            t.sisipan.format_dari == null || t.sisipan.format_dari < 0
+              ? t.sisipan.format_dari
+              : geser(t.sisipan.format_dari),
+          paragraf: t.sisipan.paragraf == null ? t.sisipan.paragraf : geser(t.sisipan.paragraf),
+        }
+      : t.sisipan,
+  }));
 }
 
 // Sesudah Track Changes ditinggalkan (17 Sep 2026), seluruh penandaan berjalan
@@ -281,6 +401,60 @@ export default function TaskpanePage() {
   // dimuat ulang tetap bisa mengekspor.
   const [nomorPekerjaan, setNomorPekerjaan] = useState<number | null>(null);
 
+  // --- Fase 4: alur agen ---------------------------------------------------
+  //
+  // Saklarnya di backend (FASE2_ALUR), dibaca lewat GET /analisis/daftar —
+  // panel tidak menebak. null = belum terbaca: panel berlaku seperti alur
+  // lama, persis seperti sebelum Fase 4 ada.
+  const [alur, setAlur] = useState<AlurAnalisis | null>(null);
+  // Daftar Pengaturan alur agen — dibaca dari analisis.md dan
+  // analisisformat.md, bukan dari berkas keterangan di frontend.
+  const [daftarAgen, setDaftarAgen] = useState<AnalisisPanel[]>([]);
+  const [aturanAgenAktif, setAturanAgenAktif] = useState<Set<string>>(() => new Set());
+  const centangAgenAwal = useRef(false);
+  // Kemajuan per putaran — supaya penelaah tahu apa yang sedang berjalan, dan
+  // apa yang dibatalkan bila ia menekan Batal.
+  const [putaranAgen, setPutaranAgen] = useState<KeadaanPutaran[]>([]);
+  const [tahapAgen, setTahapAgen] = useState("");
+  // Pekerjaan agen yang SEDANG berjalan — dipakai tombol Batal.
+  const [pekerjaanAgen, setPekerjaanAgen] = useState<number | null>(null);
+  const [membatalkan, setMembatalkan] = useState(false);
+  const pakaiAgen = alur === "agen";
+
+  useEffect(() => {
+    let aktif = true;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/analisis/daftar?jenis=${encodeURIComponent(jenisDokumen ?? "PMK")}`
+        );
+        if (!res.ok) return;
+        const data: DaftarAnalisisResponse = await res.json();
+        if (!aktif) return;
+        setAlur(data.alur);
+        setDaftarAgen(data.analisis);
+        if (!centangAgenAwal.current) {
+          centangAgenAwal.current = true;
+          // Bawaannya semua menyala KECUALI yang butuh korpus — sama dengan
+          // Kategori 3 alur lama: isi korpus belum diverifikasi langsung,
+          // jadi menyalakannya keputusan sadar penelaah.
+          setAturanAgenAktif(
+            new Set(
+              data.analisis
+                .filter((a) => !a.butuh.some((b) => b.includes("korpus")))
+                .map((a) => a.id)
+            )
+          );
+        }
+      } catch (err) {
+        console.warn("Daftar pemeriksaan backend tidak terbaca; panel memakai alur lama.", err);
+      }
+    })();
+    return () => {
+      aktif = false;
+    };
+  }, [jenisDokumen]);
+
   /**
    * Kosongkan SELURUH jejak analisis sebelumnya dari Rincian proses dan kotak
    * pesan — dipanggil tiap kali analisis baru dimulai dan tiap kali daftar
@@ -301,6 +475,8 @@ export default function TaskpanePage() {
     setFase2Kemajuan(null);
     setFase2Pesan(null);
     setJumlahFase2(null);
+    setPutaranAgen([]);
+    setTahapAgen("");
   };
 
   /** Konfirmasi sekali pakai. Hilang sendiri — lihat efek di bawah. */
@@ -535,9 +711,15 @@ export default function TaskpanePage() {
     };
   }, [inWord]);
 
+  /** Analisis alur agen yang menyala DAN tersedia untuk jenis naskah ini. */
+  const kodeAgenAktif = daftarAgen
+    .filter((a) => a.tersedia && aturanAgenAktif.has(a.id))
+    .map((a) => a.id);
+
   /** Tidak ada satu pun pemeriksaan dicentang — tombolnya tidak punya kerja. */
-  const tidakAdaYangDicentang =
-    aturanAktif.size === 0 && aturanFase2Aktif.size === 0;
+  const tidakAdaYangDicentang = pakaiAgen
+    ? kodeAgenAktif.length === 0
+    : aturanAktif.size === 0 && aturanFase2Aktif.size === 0;
 
   const adaYangBelumDiputuskan = useMemo(
     () =>
@@ -617,11 +799,17 @@ export default function TaskpanePage() {
   // yang keluar.
   const adaFase2Kemajuan = !!fase2Kemajuan && fase2Kemajuan.total > 0;
   const adaRincian =
-    !!hasilFase1 || !!ringkasanPenandaan || adaFase2Kemajuan || !!fase2Pesan;
+    !!hasilFase1 ||
+    !!ringkasanPenandaan ||
+    adaFase2Kemajuan ||
+    !!fase2Pesan ||
+    putaranAgen.length > 0;
   const ringkasTahap = [
     hasilFase1 ? `Fase 1: ${hasilFase1.jumlah} temuan` : null,
     jumlahFase2 !== null
-      ? `Fase 2: ${jumlahFase2} temuan`
+      ? pakaiAgen
+        ? `${jumlahFase2} temuan`
+        : `Fase 2: ${jumlahFase2} temuan`
       : adaFase2Kemajuan && fase2Kemajuan
         ? fase2Berjalan
           ? `Fase 2: ${uraiKemajuan(fase2Kemajuan)}`
@@ -645,8 +833,10 @@ export default function TaskpanePage() {
   //
   // Naskahnya dibaca SEKALI dan dipakai kedua fase.
 
-  const bacaNaskahSekali = async (): Promise<NaskahTerbaca> => {
-    if (inWord) return bacaNaskah(scope);
+  const bacaNaskahSekali = async (
+    opsi: { format?: boolean } = {}
+  ): Promise<NaskahTerbaca> => {
+    if (inWord) return bacaNaskah(scope, opsi);
     return {
       paragraf: webInputText.split("\n").map((line, idx) => ({ index: idx, teks: line })),
       tabel_raksasa: [],
@@ -1058,6 +1248,293 @@ export default function TaskpanePage() {
     setJumlahFase2(kemajuan.temuan.length);
   };
 
+  /**
+   * Fase 4 — SATU pekerjaan untuk seluruh pemeriksaan: bahan → agen →
+   * gerbang. Semua tanda dipasang SESUDAH gerbang, di akhir; itu yang membuat
+   * Batal bersih — sebelum gerbang selesai, naskah belum disentuh sama sekali.
+   *
+   * `ulang` terisi untuk Periksa ulang: temuan lama berikut keputusannya ikut
+   * dikirim, nomor temuan baru melanjutkan nomor terakhir, dan offset temuan
+   * baru dikembalikan ke teks sebenarnya di Word sebelum ditandai.
+   */
+  const jalankanAgen = async (
+    naskah: NaskahTerbaca,
+    jenis: JenisDokumen,
+    ulang: { peta: PetaPeriksaUlang; temuanLama: Temuan[] } | null
+  ): Promise<void> => {
+    setPutaranAgen([]);
+    setTahapAgen("");
+    setMembatalkan(false);
+    const lama = ulang?.temuanLama ?? [];
+    const nomorTerakhir = lama.reduce((maks, t) => Math.max(maks, t.nomor), 0);
+    const body: AnalisisAgenRequest = {
+      paragraf: naskah.paragraf,
+      halaman: naskah.halaman ?? [],
+      tabel_raksasa: naskah.tabel_raksasa,
+      dokumen: namaDokumen,
+      jenis_dokumen: jenis,
+      aturan_aktif: kodeAgenAktif,
+      mulai_nomor: nomorTerakhir + 1,
+      temuan_lama: lama,
+      // Jawaban pekerjaan terakhir dipakai ulang HANYA untuk pesan yang sama
+      // persis — yang terputus di tengah jalan tidak dibayar dua kali.
+      lanjutkan: nomorPekerjaan ?? undefined,
+    };
+    const mulai = await fetch(`${API_BASE}/analisis/agen`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!mulai.ok) throw new Error(`Server merespons status ${mulai.status}`);
+    const { pekerjaan }: MulaiResponse = await mulai.json();
+    setNomorPekerjaan(pekerjaan);
+    setPekerjaanAgen(pekerjaan);
+
+    // Bertanya BERBATAS — yang dianggap macet: kemajuan yang DIAM selama
+    // BATAS_DIAM_MS, sama dengan alur lama.
+    let kemajuan: KemajuanAgenResponse | null = null;
+    let mandek = false;
+    try {
+      const mulaiTunggu = Date.now();
+      let terakhirBergerak = Date.now();
+      let jejakTerakhir = "";
+      for (;;) {
+        const kini = Date.now();
+        if (kini - terakhirBergerak > BATAS_DIAM_MS || kini - mulaiTunggu > BATAS_TOTAL_MS) {
+          mandek = true;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, JEDA_TANYA_MS));
+        const res = await fetch(`${API_BASE}/analisis/agen/${pekerjaan}`);
+        if (!res.ok) throw new Error(`Gagal membaca kemajuan (${res.status})`);
+        kemajuan = (await res.json()) as KemajuanAgenResponse;
+        const jejak = [
+          kemajuan.tahap,
+          kemajuan.panggilan,
+          ...kemajuan.putaran.map((p) => `${p.keadaan}:${p.langkah}:${p.calon}`),
+        ].join("|");
+        if (jejak !== jejakTerakhir) {
+          jejakTerakhir = jejak;
+          terakhirBergerak = Date.now();
+        }
+        setTahapAgen(kemajuan.tahap);
+        setPutaranAgen(kemajuan.putaran);
+        if (kemajuan.status === "selesai" || kemajuan.status === "gagal") break;
+      }
+    } finally {
+      setPekerjaanAgen(null);
+      setMembatalkan(false);
+    }
+
+    if (mandek) {
+      setPesanGalat({
+        teks:
+          `Analisis macet — kemajuannya tidak bergerak ${Math.round(BATAS_DIAM_MS / 60000)} menit.` +
+          ` Pekerjaan #${pekerjaan} mungkin masih berjalan di backend. Jawaban yang sudah` +
+          " dibayar tersimpan, jadi analisis ulang tidak mengulang dari nol.",
+      });
+      return;
+    }
+    if (!kemajuan) {
+      setPesanGalat({ teks: "Analisis gagal: tidak ada jawaban dari backend." });
+      return;
+    }
+    if (kemajuan.status === "gagal") {
+      setPesanGalat({ teks: `Analisis gagal: ${kemajuan.pesan}` });
+      return;
+    }
+    const akhir = kemajuan;
+    if (akhir.peringatan.length > 0) setPeringatan((prev) => [...prev, ...akhir.peringatan]);
+    const biaya =
+      akhir.panggilan > 0
+        ? ` ${akhir.panggilan} request model, ${akhir.token_masuk.toLocaleString("id-ID")}` +
+          ` token masuk dan ${akhir.token_keluar.toLocaleString("id-ID")} keluar.`
+        : "";
+    if (akhir.tahap === "dibatalkan") {
+      setFase2Pesan(`Analisis dibatalkan penelaah — naskah tidak disentuh.${biaya}`);
+      tampilkanToast("Analisis dibatalkan. Naskah tidak disentuh.");
+      return;
+    }
+    if (akhir.temuan.length === 0) {
+      // Diam yang sah (naskah perubahan, KMK, label gagal) disampaikan apa
+      // adanya, supaya penelaah tahu bagian mana yang tetap diperiksa sendiri.
+      if (akhir.pesan) setPeringatan((prev) => [...prev, akhir.pesan]);
+      setFase2Pesan(`Analisis selesai, tidak ada temuan.${biaya}`);
+      setJumlahFase2(0);
+      return;
+    }
+
+    // Periksa ulang: offset dikembalikan ke teks sebenarnya di Word. Yang
+    // rentangnya tidak bisa dipastikan tidak ditandai (CLAUDE.md butir 6).
+    const tidakPasti = new Set<string>();
+    let baru: Temuan[] = akhir.temuan.map((t) => {
+      if (!ulang) return t;
+      const k = keKoordinatNaskah(t, ulang.peta);
+      if (k) return k;
+      tidakPasti.add(t.id);
+      return {
+        ...t,
+        catatan:
+          `${t.catatan} (Letaknya di naskah yang sudah bertanda tidak bisa dipastikan —` +
+          " tidak ditandai.)",
+      };
+    });
+
+    const tidakDitandai = new Set<string>(tidakPasti);
+    const terpasang: { id: string; sesudah: number }[] = [];
+    if (inWord) {
+      const dapatDitandai = baru.filter((t) => !tidakPasti.has(t.id));
+      const hasil = await tandaiSemuaTemuan(dapatDitandai);
+      hasil.idTidakDitandai.forEach((id) => tidakDitandai.add(id));
+      // Sisipan PALING AKHIR, sesudah seluruh tanda lain terpasang —
+      // paragraf baru menggeser nomor paragraf sesudahnya.
+      const s = await pasangSisipan(
+        dapatDitandai.filter((t) => t.sisipan && !tidakDitandai.has(t.id))
+      );
+      const pengganti = new Map(s.gagal.map((t) => [t.id, t]));
+      baru = baru.map((t) => pengganti.get(t.id) ?? t);
+      terpasang.push(...s.terpasang);
+
+      const { ringkasan, peringatan: perlu } = ringkasPenandaan({
+        ...hasil,
+        komentarKosong: hasil.komentarKosong + s.komentarKosong,
+      });
+      const bagianSisipan = [
+        s.terpasang.length > 0 ? `${s.terpasang.length} satuan baru disisipkan hijau` : "",
+        s.gagal.length > 0
+          ? `${s.gagal.length} sisipan gagal dipasang — komentarnya di tempat temuan, isinya di Saran`
+          : "",
+      ].filter(Boolean);
+      setRingkasanPenandaan(
+        [ringkasan, bagianSisipan.length > 0 ? bagianSisipan.join("; ") + "." : ""]
+          .filter(Boolean)
+          .join(" ") || null
+      );
+      if (perlu.length > 0) setPeringatan((prev) => [...prev, ...perlu]);
+    }
+
+    setTemuanList((prev) => {
+      let semua = ulang ? [...prev, ...baru] : baru;
+      // Tiap sisipan menggeser paragraf sesudahnya, URUT seperti dipasang
+      // (dari bawah ke atas) — urutan itu yang membuat hitungannya benar.
+      for (const { id, sesudah } of terpasang) {
+        semua = geserParagraf(semua, sesudah, 1).map((t) =>
+          t.id === id && t.sisipan ? { ...t, sisipan: { ...t.sisipan, paragraf: sesudah + 1 } } : t
+        );
+      }
+      return [...semua].sort((a, b) => a.nomor - b.nomor);
+    });
+    setIdTidakDitandai((prev) => (ulang ? new Set([...prev, ...tidakDitandai]) : tidakDitandai));
+    setFase2Pesan(
+      `${ulang ? "Periksa ulang" : "Analisis"} selesai: ${akhir.temuan.length} temuan` +
+        `${ulang ? " baru" : ""}.${biaya}`
+    );
+    setJumlahFase2(akhir.temuan.length);
+  };
+
+  /** Analisis agen dari awal — naskah belum bertanda. */
+  const handleAnalisisAgen = async (jenis: JenisDokumen) => {
+    if (inWord === true && (await periksaNaskah()) > 0) {
+      tampilkanToast(
+        "Naskah ini masih memuat tanda dari analisis sebelumnya. Bersihkan dulu," +
+          " atau pakai Periksa ulang sesudah semua temuan diputuskan."
+      );
+      return;
+    }
+    setAnalyzing(true);
+    kosongkanTahapan();
+    try {
+      const naskah = await bacaNaskahSekali({ format: true });
+      if (naskah.paragraf.length === 0) {
+        setPesanGalat({ teks: "Tidak ada teks atau paragraf yang dapat dibaca." });
+        return;
+      }
+      if (naskah.tabel_raksasa.length > 0) {
+        tampilkanToast(
+          `${naskah.tabel_raksasa.length} tabel lebih dari 1.000 baris hanya dibaca` +
+            " kerangkanya. Temuan sesudah tabel itu tampil di panel tanpa ditandai di naskah."
+        );
+      }
+      setParagrafCount(naskah.paragraf.length);
+      setFase2Berjalan(true);
+      try {
+        await jalankanAgen(naskah, jenis, null);
+      } finally {
+        setFase2Berjalan(false);
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setPesanGalat({ teks: `Gagal menjalankan analisis: ${errorMsg}` });
+    } finally {
+      setAnalyzing(false);
+      await periksaNaskah();
+    }
+  };
+
+  /**
+   * Periksa ulang (Fase 4) — aktif bila SEMUA temuan sudah diputuskan. Naskah
+   * dibaca sesudah keputusan (usulan yang diterima dianggap berlaku), temuan
+   * lama berikut keputusannya dibaca agen, dan gerbang membuang calon yang
+   * bertindihan dengan temuan lama. Tanda lama tidak disentuh.
+   */
+  const belumDiputuskan = temuanBerlokasi.filter((t) => t.status === "belum_ditinjau").length;
+  const semuaDiputuskan = temuanBerlokasi.length > 0 && belumDiputuskan === 0;
+
+  const handlePeriksaUlang = async () => {
+    if (!jenisDokumen) {
+      setGoyangJenis(true);
+      setPesanGalat({ teks: "Pilih dulu PMK atau KMK sebelum menganalisis.", kunci: "jenis" });
+      window.setTimeout(() => setGoyangJenis(false), 600);
+      return;
+    }
+    if (!semuaDiputuskan || tidakAdaYangDicentang) return;
+    setAnalyzing(true);
+    kosongkanTahapan();
+    try {
+      const lama = temuanList;
+      const { naskah, peta } = inWord
+        ? await bacaNaskahSesudahKeputusan(lama)
+        : { naskah: await bacaNaskahSekali({ format: true }), peta: new Map() as PetaPeriksaUlang };
+      setParagrafCount(naskah.paragraf.length);
+      setFase2Berjalan(true);
+      try {
+        await jalankanAgen(naskah, jenisDokumen, { peta, temuanLama: lama });
+      } finally {
+        setFase2Berjalan(false);
+      }
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setPesanGalat({ teks: `Gagal menjalankan Periksa ulang: ${errorMsg}` });
+    } finally {
+      setAnalyzing(false);
+      await periksaNaskah();
+    }
+  };
+
+  /**
+   * Tombol Batal. Backend berhenti mengirim request baru; request yang sedang
+   * berjalan selesai dulu. Naskah tidak tersentuh — belum ada tanda yang
+   * dipasang sebelum gerbang selesai.
+   */
+  const handleBatal = async () => {
+    if (pekerjaanAgen === null || membatalkan) return;
+    setMembatalkan(true);
+    try {
+      const res = await fetch(`${API_BASE}/analisis/agen/${pekerjaanAgen}/batal`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(`Server merespons status ${res.status}`);
+      tampilkanToast(
+        "Membatalkan — request yang sedang berjalan diselesaikan dulu, tidak ada request baru."
+      );
+    } catch (err: unknown) {
+      setMembatalkan(false);
+      setPesanGalat({
+        teks: `Gagal membatalkan: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    }
+  };
+
   const handleAnalisis = async () => {
     // Jenis dokumen wajib dipilih dulu. Tanpa itu backend tidak tahu bunyi
     // baku mana yang dituntut pada butir Menimbang terakhir — "Peraturan
@@ -1069,6 +1546,20 @@ export default function TaskpanePage() {
         kunci: "jenis",
       });
       window.setTimeout(() => setGoyangJenis(false), 600);
+      return;
+    }
+
+    if (pakaiAgen) {
+      if (tidakAdaYangDicentang) {
+        setPesanGalat({
+          teks:
+            "Tidak ada analisis yang dinyalakan untuk jenis naskah ini — tidak ada yang" +
+            " bisa diperiksa. Nyalakan setidaknya satu di Pengaturan.",
+        });
+        setShowPengaturan(true);
+        return;
+      }
+      await handleAnalisisAgen(jenisDokumen);
       return;
     }
 
@@ -1219,6 +1710,50 @@ export default function TaskpanePage() {
     }
   };
 
+  /**
+   * Ekspor alat pengembang alur agen (Fase 4): bahan, jejak agen, gerbang.
+   * Tahap 1 membawa naskah saat ini — dipakai backend bila belum ada analisis
+   * untuk dokumen ini; selainnya backend memakai yang disimpan analisis
+   * terakhir.
+   */
+  const eksporAgen = async (tahap: number) => {
+    const catat = (pesan: string) => setPesanEkspor((prev) => ({ ...prev, [tahap]: pesan }));
+    setMengeksporTahap(tahap);
+    setPesanEkspor((prev) => {
+      const baru = { ...prev };
+      delete baru[tahap];
+      return baru;
+    });
+    try {
+      let body: object = { dokumen: namaDokumen, pekerjaan: nomorPekerjaan };
+      if (tahap === 1) {
+        const naskah = await bacaNaskahSekali({ format: true });
+        body = {
+          ...body,
+          paragraf: naskah.paragraf,
+          halaman: naskah.halaman ?? [],
+          tabel_raksasa: naskah.tabel_raksasa,
+        };
+      }
+      const res = await fetch(`${API_BASE}/analisis/agen/ekspor${tahap}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Server merespons status ${res.status}`);
+      const teks = await res.text();
+      catat(
+        teks.startsWith("=====")
+          ? unduhTeks(teks, namaBerkas(`agen-tahap${tahap}`))
+          : teks.trim()
+      );
+    } catch (err: unknown) {
+      catat(`Gagal mengekspor: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setMengeksporTahap(null);
+    }
+  };
+
   // Navigasi ke lokasi di dokumen
   const handleLompatKeLokasi = async (temuan: Temuan) => {
     setSelectedTemuanId(temuan.id);
@@ -1251,7 +1786,13 @@ export default function TaskpanePage() {
       tampilkanToast(`Status temuan T${temuan.nomor} diubah menjadi 'Ditolak'.`);
       return;
     }
-    const berhasil = await tolakTemuan(temuan);
+    const { berhasil, sisipanDicabut } = await tolakTemuan(temuan);
+    // Paragraf sisipan yang dicabut menggeser paragraf sesudahnya satu
+    // langkah ke atas — nomor paragraf temuan lain ikut digeser.
+    const letakSisipan = temuan.sisipan?.paragraf;
+    if (sisipanDicabut && letakSisipan != null) {
+      setTemuanList((prev) => geserParagraf(prev, letakSisipan, -1));
+    }
     // Toast, BUKAN kotak peringatan yang menetap. Ditetapkan penelaah 27 Sep
     // 2026: kotak "tandanya tidak ditemukan" yang bertumpuk menenggelamkan
     // kartu. Penyebab utamanya — analisis di atas tanda lama — sudah ditutup
@@ -1307,7 +1848,9 @@ export default function TaskpanePage() {
                 Drafter Analiser
               </h1>
               <p className="text-[10px] text-slate-500 leading-none">
-                Kemenkeu &bull; Kaidah Format Baku (Fase 1)
+                {pakaiAgen
+                  ? "Kemenkeu • Agen AI dengan skills (Fase 4)"
+                  : "Kemenkeu • Kaidah Format Baku (Fase 1)"}
               </p>
             </div>
           </div>
@@ -1368,7 +1911,103 @@ export default function TaskpanePage() {
             Mengingat, Menetapkan, baru batang tubuh — karena itulah urutan
             nomor butir KMK 527. Penelaah menelaah naskah dari atas ke bawah
             juga, jadi daftar ini bisa diikuti sambil membaca. */}
-        {showPengaturan && (
+        {showPengaturan && pakaiAgen && (
+          <div className="mt-2.5 p-2 bg-slate-100 rounded border border-slate-200 space-y-2">
+            {/* ALUR AGEN (Fase 4) — daftarnya dibaca dari backend
+                (analisis.md dan analisisformat.md), bukan dari berkas
+                keterangan di frontend: formulir itulah yang dikirim ke agen,
+                jadi yang tertulis di sini persis yang diperiksa. */}
+            {(
+              [
+                ["isi", "Pemeriksaan isi naskah"],
+                ["format", "Pemeriksaan format"],
+              ] as const
+            ).map(([kelompok, judul]) => {
+              const daftar = daftarAgen.filter((a) => a.kelompok === kelompok);
+              if (daftar.length === 0) return null;
+              return (
+                <div key={kelompok} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-700 text-[11px]">{judul}</span>
+                    <div className="flex items-center gap-2 text-[10px]">
+                      <button
+                        onClick={() =>
+                          setAturanAgenAktif((prev) => {
+                            const next = new Set(prev);
+                            daftar.forEach((a) => next.add(a.id));
+                            return next;
+                          })
+                        }
+                        className="text-blue-700 hover:underline"
+                      >
+                        Pilih semua
+                      </button>
+                      <button
+                        onClick={() =>
+                          setAturanAgenAktif((prev) => {
+                            const next = new Set(prev);
+                            daftar.forEach((a) => next.delete(a.id));
+                            return next;
+                          })
+                        }
+                        className="text-slate-500 hover:underline"
+                      >
+                        Kosongkan
+                      </button>
+                    </div>
+                  </div>
+                  {daftar.map((a) =>
+                    kartuAturan(keteranganDariPanel(a), aturanAgenAktif.has(a.id), (nyala) =>
+                      setAturanAgenAktif((prev) => {
+                        const next = new Set(prev);
+                        if (nyala) next.add(a.id);
+                        else next.delete(a.id);
+                        return next;
+                      })
+                    )
+                  )}
+                </div>
+              );
+            })}
+
+            <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
+              {kodeAgenAktif.length} dari {daftarAgen.filter((a) => a.tersedia).length} analisis
+              dinyalakan. Seluruhnya dikerjakan agen AI — berjalan beberapa menit dan
+              berbiaya; tiap temuan lewat penilai kedua dan gerbang kode sebelum
+              menyentuh naskah.
+            </p>
+
+            {/* ALAT PENGEMBANG alur agen — menggantikan ekspor tahap 1–5. */}
+            <div className="pt-2 mt-1 border-t-2 border-slate-300 space-y-1.5">
+              <span className="font-semibold text-slate-700 text-[11px]">Alat pengembang</span>
+              {EKSPOR_AGEN.map(({ tahap, keterangan }) => (
+                <div key={tahap} className="space-y-1 pt-1">
+                  <p className="text-[10px] text-slate-500 leading-snug">
+                    <strong>Tahap {tahap}</strong> — {keterangan}
+                  </p>
+                  <button
+                    onClick={() => eksporAgen(tahap)}
+                    disabled={mengeksporTahap !== null}
+                    className={`w-full py-1.5 px-2 rounded text-[11px] font-medium border transition ${
+                      mengeksporTahap !== null
+                        ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                        : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    {mengeksporTahap === tahap ? "Menyiapkan…" : `Ekspor Tahap ${tahap} (.txt)`}
+                  </button>
+                  {pesanEkspor[tahap] && (
+                    <p className="text-[10px] text-slate-600 bg-white border border-slate-200 rounded px-1.5 py-1">
+                      {pesanEkspor[tahap]}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {showPengaturan && !pakaiAgen && (
           <div className="mt-2.5 p-2 bg-slate-100 rounded border border-slate-200 space-y-2">
             {/* KATEGORI 1 — Format Struktural.
 
@@ -1761,11 +2400,13 @@ export default function TaskpanePage() {
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
                 <span>
-                  {!fase2Berjalan
-                    ? "Memeriksa format baku…"
-                    : fase2Kemajuan && fase2Kemajuan.total > 0
-                      ? `Tahap ${uraiKemajuan(fase2Kemajuan).replace(/^tahap /, "")}…`
-                      : "Membaca struktur naskah…"}
+                  {pakaiAgen
+                    ? uraiTahapAgen(tahapAgen, putaranAgen, fase2Berjalan)
+                    : !fase2Berjalan
+                      ? "Memeriksa format baku…"
+                      : fase2Kemajuan && fase2Kemajuan.total > 0
+                        ? `Tahap ${uraiKemajuan(fase2Kemajuan).replace(/^tahap /, "")}…`
+                        : "Membaca struktur naskah…"}
                 </span>
               </>
             ) : (
@@ -1792,6 +2433,11 @@ export default function TaskpanePage() {
                   Buka Pengaturan
                 </button>
               </span>
+            ) : pakaiAgen ? (
+              <>
+                Akan dijalankan: {kodeAgenAktif.length} analisis oleh agen AI
+                <span className="text-slate-400"> &middot; berjalan beberapa menit</span>
+              </>
             ) : (
               <>
                 Akan dijalankan:{" "}
@@ -1809,6 +2455,52 @@ export default function TaskpanePage() {
               </>
             )}
           </div>
+
+          {/* KEMAJUAN PER PUTARAN dan tombol BATAL (Fase 4) — terlihat selama
+              analisis berjalan, supaya penelaah tahu apa yang sedang
+              dikerjakan dan apa yang dibatalkan bila ia menekan Batal. Batal
+              bersih: belum ada tanda yang dipasang sebelum gerbang selesai. */}
+          {pakaiAgen && analyzing && (putaranAgen.length > 0 || pekerjaanAgen !== null) && (
+            <div className="space-y-1">
+              {putaranAgen.length > 0 && (
+                <ol className="text-[10px] text-slate-600 space-y-0.5 border-l-2 border-slate-200 pl-2">
+                  {putaranAgen.map((p) => (
+                    <li key={p.kode} className="flex items-baseline justify-between gap-2">
+                      <span className="truncate">{p.judul}</span>
+                      <span
+                        className={`shrink-0 ${
+                          p.keadaan === "selesai"
+                            ? "text-emerald-700"
+                            : p.keadaan === "macet" || p.keadaan === "gagal"
+                              ? "text-rose-700"
+                              : "text-slate-500"
+                        }`}
+                      >
+                        {KEADAAN_PUTARAN[p.keadaan] ?? p.keadaan}
+                        {p.langkah > 0 ? ` · ${p.langkah} langkah` : ""}
+                        {p.calon > 0 ? ` · ${p.calon} calon` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {pekerjaanAgen !== null && (
+                <button
+                  type="button"
+                  onClick={handleBatal}
+                  disabled={membatalkan}
+                  className={`w-full text-[10px] py-1 px-2 rounded border font-medium transition ${
+                    membatalkan
+                      ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
+                      : "border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100"
+                  }`}
+                  title="Berhenti mengirim request baru. Naskah tidak disentuh."
+                >
+                  {membatalkan ? "Membatalkan…" : "Batal"}
+                </button>
+              )}
+            </div>
+          )}
 
           {/* RINCIAN PROSES — tertutup secara bawaan (ditetapkan penelaah
               27 Sep 2026). Tahap yang sedang berjalan sudah terbaca di tombol
@@ -1851,7 +2543,7 @@ export default function TaskpanePage() {
                   {ringkasanPenandaan && (
                     <li>
                       <span className="font-medium text-slate-700">
-                        Penandaan di naskah (Fase 1):
+                        {pakaiAgen ? "Penandaan di naskah:" : "Penandaan di naskah (Fase 1):"}
                       </span>{" "}
                       {ringkasanPenandaan}
                     </li>
@@ -1877,6 +2569,20 @@ export default function TaskpanePage() {
                           }}
                         />
                       </div>
+                    </li>
+                  )}
+                  {pakaiAgen && !analyzing && putaranAgen.length > 0 && (
+                    <li className="space-y-0.5">
+                      <span className="font-medium text-slate-700">Putaran agen:</span>
+                      <ul className="ml-1 space-y-0.5">
+                        {putaranAgen.map((p) => (
+                          <li key={p.kode}>
+                            {p.judul} — {KEADAAN_PUTARAN[p.keadaan] ?? p.keadaan}
+                            {p.langkah > 0 ? `, ${p.langkah} langkah` : ""}
+                            {p.calon > 0 ? `, ${p.calon} calon` : ""}
+                          </li>
+                        ))}
+                      </ul>
                     </li>
                   )}
                   {fase2Pesan && <li className="wrap-break-word">{fase2Pesan}</li>}
@@ -1937,6 +2643,32 @@ export default function TaskpanePage() {
               masih bertanda, juga ketika daftarnya kosong (panel baru dibuka
               di atas naskah bertanda) — dulu justru saat itu tombol ini
               hilang, dan tanda lama tidak bisa dicabut dari panel. */}
+          {/* PERIKSA ULANG (Fase 4) — aktif bila semua temuan sudah
+              diputuskan. Naskah dibaca sesudah keputusan; agen membaca temuan
+              lama berikut keputusannya dan mencari yang terlewat. Tanda lama
+              tidak disentuh. */}
+          {pakaiAgen && temuanBerlokasi.length > 0 && !analyzing && (
+            <button
+              type="button"
+              onClick={handlePeriksaUlang}
+              disabled={!semuaDiputuskan || tidakAdaYangDicentang}
+              title={
+                semuaDiputuskan
+                  ? "Analisis lagi naskah sesudah keputusan — mencari yang terlewat, tanpa mengulang temuan lama"
+                  : "Aktif bila semua temuan sudah diputuskan (Terima / Tolak)"
+              }
+              className={`w-full text-[10px] py-1 px-2 rounded border font-medium transition ${
+                !semuaDiputuskan || tidakAdaYangDicentang
+                  ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
+                  : "border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100"
+              }`}
+            >
+              {semuaDiputuskan
+                ? "Periksa ulang"
+                : `Periksa ulang — ${belumDiputuskan} temuan belum diputuskan`}
+            </button>
+          )}
+
           {tampilBersihkan && !analyzing && (
             <button
               type="button"
@@ -2031,8 +2763,13 @@ export default function TaskpanePage() {
             // dengan "belum diverifikasi" membuang keterangan yang sudah
             // diperiksa, dan membuat penelaah mengabaikan keduanya sekaligus.
             const rujukanTurunan = temuan.rujukan.status === "turunan";
-            const isPlaceholderRujukan =
-              temuan.rujukan.status !== "visual" && !rujukanTurunan;
+            // Fase 4: dasar prioritas penelaah dan rujukan yang tidak terbukti
+            // ("tanpa") tidak punya baris rujukan — tidak ada yang perlu
+            // diverifikasi, jadi tidak berlencana. Rujukan yang dicarikan agen
+            // ("agen") tetap "belum diverifikasi" sampai disalin ke Dasar.
+            const isPlaceholderRujukan = !["visual", "turunan", "prioritas", "tanpa"].includes(
+              temuan.rujukan.status ?? "placeholder"
+            );
             // Penjelasan temuan TIDAK diulang di sini — tempatnya di komentar
             // Word, di titik kesalahannya (bagian 6.6). Panel hanya navigasi.
             const cuplikan = temuan.lokasi.teks_asli.trim();
@@ -2074,26 +2811,36 @@ export default function TaskpanePage() {
                           : "bg-amber-50 text-amber-800 border-amber-200"
                     }`}
                     title={
-                      temuan.jenis_tanda === "penggantian"
-                        ? "Teks lama merah dicoret, usulan penggantinya hijau di sebelahnya"
-                        : temuan.jenis_tanda === "penghapusan"
-                          ? "Teks lama merah dicoret TANPA pengganti — perbaikannya membuang. Yang menghapus tetap penelaah."
-                          : temuan.tanpa_sorot
-                            ? "Kesalahannya adalah KETIADAAN sesuatu, bukan kata tertentu — komentar menempel di baris judul dokumen sebagai anchor netral, TIDAK diberi warna sorot"
-                            : "Diberi blok kuning sebagai peringatan — perbaikannya ditentukan penelaah"
+                      temuan.sisipan
+                        ? `Perbaikannya satuan baru yang disisipkan hijau di ${temuan.sisipan.sasaran}` +
+                          ` (sumber: ${temuan.sisipan.sumber}); di tempat temuan teksnya cuma disorot, tanpa komentar`
+                        : temuan.jenis_tanda === "penggantian"
+                          ? "Teks lama merah dicoret, usulan penggantinya hijau di sebelahnya"
+                          : temuan.jenis_tanda === "penghapusan"
+                            ? "Teks lama merah dicoret TANPA pengganti — perbaikannya membuang. Yang menghapus tetap penelaah."
+                            : temuan.tanpa_sorot
+                              ? "Komentar menempel di kata terdekat yang terlihat, TIDAK diberi warna sorot — yang dipersoalkan tidak bisa disorot (ketiadaan, teks tersembunyi, atau butir kosong)"
+                              : "Diberi blok kuning sebagai peringatan — perbaikannya ditentukan penelaah"
                     }
                   >
-                    {temuan.jenis_tanda === "penggantian"
+                    {temuan.sisipan || temuan.jenis_tanda === "penggantian"
                       ? "usulan"
                       : temuan.jenis_tanda === "penghapusan"
                         ? "dibuang"
                         : "catatan"}
                   </span>
+                  {/* Kode analisisnya — rancangan Fase 4 bagian 3.3: penelaah
+                      membaca rinciannya di Pengaturan dengan kode yang sama. */}
+                  {pakaiAgen && (
+                    <span className="text-[8px] font-mono bg-slate-100 text-slate-600 px-1 rounded">
+                      {temuan.aturan_id}
+                    </span>
+                  )}
                   {/* Fase ditunjukkan, bukan dipakai menomori ulang. Penelaah
                       berhak tahu temuan mana yang kesalahannya bisa dibuktikan
                       baris demi baris (Fase 1) dan mana yang hasil penalaran
                       model (Fase 2/3) — cara memeriksanya memang berbeda. */}
-                  {temuan.fase > 1 && (
+                  {!pakaiAgen && temuan.fase > 1 && (
                     <span
                       className={`text-[8px] px-1 rounded font-bold ${
                         temuan.fase === 3
@@ -2176,6 +2923,17 @@ export default function TaskpanePage() {
                 {tanpaTanda && alasanTerbuka.has(temuan.id) && (
                   <div className="text-[10px] text-slate-700 bg-slate-50 border border-slate-200 rounded px-1.5 py-1 leading-snug">
                     {temuan.catatan}
+                    {/* Usulan satuan baru ikut terbaca di sini: temuan yang
+                        tidak ditandai juga tidak disisipkan, jadi kartu ini
+                        satu-satunya tempat isinya. */}
+                    {temuan.sisipan && (
+                      <span className="block mt-1 text-slate-600">
+                        Usulan {temuan.sisipan.bentuk} baru di {temuan.sisipan.sasaran}:{" "}
+                        &ldquo;
+                        {[temuan.sisipan.penanda, temuan.sisipan.teks].filter(Boolean).join(" ")}
+                        &rdquo; — sumber: {temuan.sisipan.sumber}
+                      </span>
+                    )}
                   </div>
                 )}
 
@@ -2218,6 +2976,24 @@ export default function TaskpanePage() {
                       title={`Arahkan kursor dokumen ke ${temuan.sasaran}`}
                     >
                       Lompat ke Perbaikan
+                    </button>
+                  )}
+
+                  {/* Fase 4: perbaikannya disisipkan di satuan lain — "Lompat ke
+                      Teks" membawa ke sisipan (tempat komentarnya), tombol ini
+                      ke kata yang disorot di tempat temuan. */}
+                  {temuan.sisipan && !tanpaTanda && (
+                    <button
+                      onClick={async () => {
+                        setSelectedTemuanId(temuan.id);
+                        if (inWord && !(await lihatSorotan(temuan))) {
+                          tampilkanToast(`Sorotan T${temuan.nomor} tidak ketemu lagi di naskah.`);
+                        }
+                      }}
+                      className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-[10px] transition"
+                      title="Arahkan kursor ke kata yang disorot di tempat temuan"
+                    >
+                      Lihat sorotan
                     </button>
                   )}
 

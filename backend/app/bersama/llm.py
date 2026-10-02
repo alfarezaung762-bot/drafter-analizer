@@ -156,6 +156,7 @@ class Ongkos:
         self.panggilan = 0
         self.token_masuk = 0
         self.token_keluar = 0
+        self.token_cache = 0
         self.gagal = 0
         # Tahap 3 dan 4 boleh memanggil model berbarengan; penjumlahan dari
         # beberapa utas tanpa kunci bisa kehilangan hitungan.
@@ -166,6 +167,14 @@ class Ongkos:
             self.panggilan += 1
             self.token_masuk += j.token_masuk
             self.token_keluar += j.token_keluar
+
+    def catat_langkah(self, j: "LangkahModel") -> None:
+        """Fase 4: satu langkah putaran agen, termasuk token yang dibaca dari cache."""
+        with self._kunci:
+            self.panggilan += 1
+            self.token_masuk += j.token_masuk
+            self.token_keluar += j.token_keluar
+            self.token_cache += j.token_cache
 
     def catat_gagal(self) -> None:
         with self._kunci:
@@ -325,6 +334,196 @@ class KlienAzure:
                 percakapan.append(("hasil alat (dibaca AI)", hasil))
                 pesan_api.append({"role": "tool", "tool_call_id": m.id, "content": hasil})
         return Jawaban("", masuk, keluar, percakapan)  # tidak tercapai
+
+
+    # -- Fase 4: satu langkah putaran agen ---------------------------------
+
+    def minta_langkah(self, pesan: list[dict], alat: list[dict]) -> "LangkahModel":
+        """SATU request beralat. Putarannya diatur pemanggil (tahap2_agen).
+
+        Tidak ada putaran alat di sini — berbeda dari `tanya_alat`: agen Fase 4
+        menyimpan jejak tiap langkah, menagih status, dan menghentikan putaran
+        macet, dan semua itu hanya bisa kalau tiap request kembali ke
+        pemanggil. Kesalahan 429 dilempar apa adanya; pemanggil yang menunggu.
+        """
+        self._pastikan_siap()
+        permintaan: dict[str, Any] = {"model": self._deployment, "messages": pesan}
+        if alat:
+            permintaan["tools"] = alat
+            permintaan["tool_choice"] = "auto"
+        return langkah_dari_respons(self._buat(**permintaan))
+
+
+# ---------------------------------------------------------------------------
+# Fase 4 — bentuk satu langkah putaran agen, dan 429
+# ---------------------------------------------------------------------------
+
+
+class PanggilanAlat:
+    """Satu alat yang diminta model dalam satu langkah."""
+
+    def __init__(self, id: str, nama: str, argumen_mentah: str) -> None:
+        self.id = id
+        self.nama = nama
+        self.argumen_mentah = argumen_mentah or "{}"
+        try:
+            isi = json.loads(self.argumen_mentah)
+        except json.JSONDecodeError:
+            isi = None
+        self.argumen: dict = isi if isinstance(isi, dict) else {}
+        self.argumen_rusak = not isinstance(isi, dict)
+
+    def ke_api(self) -> dict:
+        return {
+            "id": self.id,
+            "type": "function",
+            "function": {"name": self.nama, "arguments": self.argumen_mentah},
+        }
+
+
+class LangkahModel:
+    """Jawaban satu request putaran agen: teks dan/atau alat yang diminta."""
+
+    def __init__(
+        self,
+        teks: str = "",
+        panggilan: Optional[list[PanggilanAlat]] = None,
+        token_masuk: int = 0,
+        token_keluar: int = 0,
+        token_cache: int = 0,
+    ) -> None:
+        self.teks = teks
+        self.panggilan = panggilan or []
+        self.token_masuk = token_masuk
+        self.token_keluar = token_keluar
+        self.token_cache = token_cache
+
+    def pesan_asisten(self) -> dict:
+        """Bentuk pesan 'assistant' untuk riwayat percakapan berikutnya."""
+        isi: dict[str, Any] = {"role": "assistant", "content": self.teks or None}
+        if self.panggilan:
+            isi["tool_calls"] = [p.ke_api() for p in self.panggilan]
+        return isi
+
+    def ke_json(self) -> str:
+        """Untuk disimpan — backend yang mati melanjutkan tanpa bayar ulang."""
+        return json.dumps(
+            {
+                "teks": self.teks,
+                "panggilan": [
+                    {"id": p.id, "nama": p.nama, "argumen": p.argumen_mentah} for p in self.panggilan
+                ],
+                "masuk": self.token_masuk,
+                "keluar": self.token_keluar,
+                "cache": self.token_cache,
+            },
+            ensure_ascii=False,
+        )
+
+    @classmethod
+    def dari_json(cls, teks: str) -> "LangkahModel":
+        d = json.loads(teks)
+        return cls(
+            teks=d.get("teks", ""),
+            panggilan=[PanggilanAlat(p["id"], p["nama"], p.get("argumen", "{}")) for p in d.get("panggilan", [])],
+            token_masuk=0,
+            token_keluar=0,
+            token_cache=0,
+        )
+
+
+def langkah_dari_respons(resp: Any) -> LangkahModel:
+    pesan_model = resp.choices[0].message if getattr(resp, "choices", None) else None
+    pakai = getattr(resp, "usage", None)
+    rincian = getattr(pakai, "prompt_tokens_details", None)
+    return LangkahModel(
+        teks=(getattr(pesan_model, "content", None) or "") if pesan_model else "",
+        panggilan=[
+            PanggilanAlat(m.id, m.function.name, m.function.arguments)
+            for m in (getattr(pesan_model, "tool_calls", None) or [])
+        ],
+        token_masuk=getattr(pakai, "prompt_tokens", 0) or 0,
+        token_keluar=getattr(pakai, "completion_tokens", 0) or 0,
+        token_cache=getattr(rincian, "cached_tokens", 0) or 0,
+    )
+
+
+def adalah_429(e: BaseException) -> bool:
+    """Kuota Azure penuh — ditunggu, bukan gagal (rancangan Fase 4 bagian 5.3)."""
+    return getattr(e, "status_code", None) == 429 or type(e).__name__ == "RateLimitError"
+
+
+def tunggu_429(e: BaseException, bawaan: float = 30.0) -> float:
+    """Detik menunggu menurut Retry-After, atau bawaan bila tidak ada."""
+    resp = getattr(e, "response", None)
+    kepala = getattr(resp, "headers", None) or {}
+    for kunci in ("retry-after-ms", "retry-after"):
+        nilai = kepala.get(kunci) if hasattr(kepala, "get") else None
+        if nilai:
+            try:
+                detik = float(nilai) / (1000.0 if kunci.endswith("ms") else 1.0)
+                return max(1.0, min(detik, 300.0))
+            except ValueError:
+                pass
+    return bawaan
+
+
+class Galat429(Exception):
+    """429 buatan, untuk klien palsu."""
+
+    status_code = 429
+
+    def __init__(self, detik: float = 0.01) -> None:
+        super().__init__("429 Too Many Requests (palsu)")
+        self.response = type("R", (), {"headers": {"retry-after": str(detik)}})()
+
+
+class KlienAgenPalsu:
+    """Memerankan agen dari daftar langkah yang disiapkan, urut — tanpa biaya.
+
+    Tiap butir antrean salah satu dari:
+      - str                          → jawaban teks tanpa alat
+      - list[(nama, argumen dict)]   → alat yang diminta di langkah itu
+      - "429"                        → melempar Galat429 sekali
+    Tiap request dicatat di `diminta` (salinan riwayat pesan), supaya tes bisa
+    memeriksa apa yang dikirim.
+    """
+
+    def __init__(self, langkah: list, penilai: Optional[list[str]] = None) -> None:
+        self._antrean = list(langkah)
+        self._penilai = list(penilai or [])
+        self.diminta: list[list[dict]] = []
+        self.diminta_penilai: list[tuple[str, str]] = []
+        self._kunci = threading.Lock()
+        self._n = 0
+
+    @property
+    def siap(self) -> bool:
+        return True
+
+    def minta_langkah(self, pesan: list[dict], alat: list[dict]) -> LangkahModel:
+        with self._kunci:
+            self.diminta.append([dict(p) for p in pesan])
+            butir = self._antrean.pop(0) if self._antrean else []
+            self._n += 1
+            n = self._n
+        if butir == "429":
+            raise Galat429()
+        masuk = sum(len(str(p.get("content") or "")) for p in pesan) // 4
+        if isinstance(butir, str):
+            return LangkahModel(teks=butir, token_masuk=masuk, token_keluar=len(butir) // 4)
+        panggilan = [
+            PanggilanAlat(f"c{n}_{i}", nama, json.dumps(arg, ensure_ascii=False))
+            for i, (nama, arg) in enumerate(butir)
+        ]
+        return LangkahModel(panggilan=panggilan, token_masuk=masuk, token_keluar=20)
+
+    def tanya(self, peran: str, pesan: str) -> Jawaban:
+        """Dipakai penilai kedua dan label: jawaban dari antrean penilai."""
+        with self._kunci:
+            self.diminta_penilai.append((peran, pesan))
+            teks = self._penilai.pop(0) if self._penilai else "{}"
+        return Jawaban(teks=teks, token_masuk=len(pesan) // 4, token_keluar=len(teks) // 4)
 
 
 # ---------------------------------------------------------------------------
